@@ -5,7 +5,7 @@
 Claude Hive is a local web app. A Node backend runs on your Mac and drives every Claude session through the Claude Agent SDK, and a React page in your browser shows the board. The backend's parts split along one line: **plain code decides where things go, and Claude sessions do the work and the judging.**
 
 - The **board engine** moves cards between lanes by fixed rules. No model routes work.
-- Every Claude session, whether a lane's role, a manager or a spec keeper copy, is started by the **session runner**. It runs on the Agent SDK as an ordinary Claude Code session.
+- Every Claude session, whether a lane's role or a manager, is started by the **session runner**. It runs on the Agent SDK as an ordinary Claude Code session.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -20,8 +20,8 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 │                                                                                                         │
 │ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
 │ │ Board engine         │  │ Question router      │  │ Spec keeper          │  │ Review gate          │  │
-│ │ lanes, limits,       │  │ chat lanes → page,   │  │ snapshot at sign-off │  │ blind review,        │  │
-│ │ moves, loop guard    │  │ else manager ladder  │  │ judging copies       │  │ spec hash            │  │
+│ │ lanes, limits,       │  │ chat lanes → page,   │  │ spec writer session, │  │ blind review,        │  │
+│ │ moves, loop guard    │  │ else manager ladder  │  │ one turn per batch   │  │ spec hash            │  │
 │ └───────────┬──────────┘  └───┬──────────────────┘  └──────────────────────┘  └──────────────────────┘  │
 │             │                 │                                                                         │
 │             ├─────────────────┘                     every session goes through                          │
@@ -29,7 +29,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 │ ┌───────────┴──────────┐  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
 │ │ Session runner       │  │ Git service          │  │ Preview service      │  │ History              │  │
 │ │ start · resume ·     │  │ worktrees,           │  │ ports, running apps, │  │ events, lane diffs,  │  │
-│ │ copy · stop          │  │ checkpoints, ship    │  │ screenshots          │  │ archive · SQLite     │  │
+│ │ stop · canUseTool    │  │ checkpoints, ship    │  │ screenshots          │  │ archive · SQLite     │  │
 │ └───────────┬──────────┘  └───────────┬──────────┘  └──────────────────────┘  └──────────────────────┘  │
 │             │                         │                                                                 │
 │             │                         │             SQLite and archive: ~/.claude-hive/                 │
@@ -45,9 +45,9 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 | Part | What it does |
 | --- | --- |
 | **Board engine** | Lanes, work-in-progress limits, card moves, round limits and the loop guard. It reads each role's fixed-format report and decides the next lane. |
-| **Session runner** | Starts, resumes, copies and stops sessions. Applies each role's instructions, model and tools. Catches questions and permission requests through `canUseTool`. |
+| **Session runner** | Starts, resumes and stops sessions. Applies each role's instructions, model and tools. Catches questions and permission requests through `canUseTool`. |
 | **Question router** | Questions in the chat lanes go straight to the page. Questions in hands-off lanes go to the manager ladder. |
-| **Spec keeper** | Freezes the spec writer's session at sign-off and runs each judgment in a fresh copy of it. |
+| **Spec keeper** | Judges each batch of spec issues as a new turn in the spec writer's session, which carries on after sign-off. |
 | **Review gate** | Runs the blind spec review and tracks the spec's hash, so sign-off is only possible on reviewed text. |
 | **Git service** | Worktrees, setup, checkpoints, bringing in main, the fake-data marker check, and Ship. |
 | **Preview service** | Gives each card's app its own port, starts and stops it, and takes screenshots for the mockup reference and the tester. |
@@ -106,7 +106,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | --- | --- | --- | --- | --- |
 | `product-owner` | Refine | Opus | Read-only, plus writing the card's brief | Conversation |
 | `designer` | Mockup | Opus | Full, inside the card's worktree | Conversation |
-| `spec-writer` | Spec | Opus | Read-only, plus editing the spec file | Conversation, then frozen as a snapshot |
+| `spec-writer` | Spec | Opus | Read-only, plus editing the spec file | Conversation, carried on after sign-off as the spec keeper |
 | `planner` | Plan | Opus | Read-only, plus writing the card's plan | Work |
 | `developer` | Build | As the spec's Implementation strategy says | Full, inside the card's worktree | Work |
 | `reviewer` | Check | Strongest | Read-only | Work, new for each round |
@@ -115,7 +115,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `spec-reviewer` | Spec | Fable | Read-only, sees only the spec file and `review.md` | One-off, blind |
 
 - **Tools are what enforce a role,** through the SDK's `allowedTools` / `disallowedTools`. A reviewer can't edit because it has no edit tools, not because it was asked not to.
-- **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`).
+- **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions.
 - **The spec format** is read from `~/.claude/skills/spec-format/`. `format.md` goes to the spec writer and the planner. The "For the reviewer" part of `review.md` goes to the spec reviewer.
 
 ## Sessions
@@ -128,7 +128,7 @@ query({
   options: {
     cwd: card.worktreePath,
     sessionId,                       // first turn: chosen by the hive, so it can always be resumed
-    resume,                          // later turns, and every copy (made first with forkSession())
+    resume,                          // every later turn
     systemPrompt: { type: "preset", preset: "claude_code", append: role.instructions },
     model: role.model,
     allowedTools: role.tools,
@@ -141,9 +141,8 @@ query({
 
 | Kind | Used for | How |
 | --- | --- | --- |
-| **Conversation** | Refine, Mockup, Spec: chats with you | One session per card per lane, resumed on every message, and again when feedback sends the card back |
-| **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer. Reviewer and tester start fresh each round. |
-| **Copy** | Spec keeper judgments, "Redo the other way" | `forkSession()` copies the transcript up to a chosen message, and the copy is resumed like any session. The source is never changed. The copy point is the last entry of the last turn kept: for a turn that ended in a report, that's the final tool result, not the report call, or the copy believes its report failed. `resume` with `resumeSessionAt` is not used, because it can't reach messages from before a compaction. |
+| **Conversation** | Refine, Mockup, Spec: chats with you; the spec keeper after sign-off | One session per card per lane, resumed on every message, and again when feedback sends the card back. The designer builds mockup versions one after another in its session, resumed in each version's worktree. The spec writer's session carries on after sign-off, and each batch of spec issues is a new turn in it. |
+| **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer, and **Redo the other way** resumes the session that made the decision. Reviewer and tester start fresh each round. |
 | **One-off** | Manager, spec reviewer | A new session, discarded after one answer |
 
 **Role reports.** Each hands-off role ends its turn with a report checked against a JSON schema (`outputFormat`). The board engine routes on its fields, never on prose:
@@ -152,7 +151,7 @@ query({
 - **developer:** what was built, departures from the plan, issues, and decisions made without you;
 - **reviewer:** findings, each marked `bug`, `spec-gap` or `extra`;
 - **tester:** each How-to-verify bullet marked `pass`, `fail` or `cant-verify`, with evidence;
-- **spec keeper copy:** for each issue, a verdict (`spec-wrong` or `code-wrong`), a level (`minor`, `changes-signoff` or `severe`) and a reason;
+- **spec keeper:** for each issue, a verdict (`spec-wrong` or `code-wrong`), a level (`minor`, `changes-signoff` or `severe`) and a reason;
 - **manager:** the ladder step, the answer or recommendation, and its source.
 
 - **A report must be there to count.** The board engine routes only on `structured_output`. A turn that ends without one stops the card, even when its result says `success`: a session that can't satisfy the schema gives up in prose and still ends "successfully". `stop_reason` is no guide either, since a good report ends on `tool_use`.
@@ -164,13 +163,14 @@ query({
 | --- | --- | --- |
 | Ideas | You drag the card | Refine, and the worktree is created |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
-| Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer is frozen as the spec keeper |
+| Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
 | Plan | The plan is written | Build |
 | Build | It's built, with issues judged | Check |
 | Build, Check | A `code-wrong` verdict | Plan, for an amendment plan |
 | Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round |
 | Check | Everything passes | Try it |
 | Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. |
+| Try it | **Redo the other way** | The lane of the session that made the decision. That session is resumed and told to switch to the other choice, and the card goes through Check again. |
 | Try it | You accept | Ship |
 | Ship | A rebase conflict | Build |
 | Ship | Pushed | Done |
@@ -236,9 +236,10 @@ query({
 
 **Spec keeper.**
 
-- At sign-off, the spec writer's session id and the last message's id are stored as the snapshot.
-- Judgments are batched: at the end of Build, after Check, or at once for a blocking issue. Each batch runs in a copy of the snapshot, given the issues, the earlier verdicts and the current diff.
-- **`spec-wrong`:** the copy edits the spec in the worktree, and the change is logged.
+- After sign-off, the spec writer's session carries on as the spec keeper. Nothing is frozen and nothing is copied.
+- Its judging instructions and report format come with each batch's message. The session's system prompt stays the spec writer's, because it is recorded at the first turn.
+- Judgments are batched: at the end of Build, after Check, or at once for a blocking issue. Each batch is a new turn in that session, given the issues and the current diff. The session remembers its earlier verdicts.
+- **`spec-wrong`:** the session edits the spec in the worktree, and the change is logged.
 - **`code-wrong`:** the card goes to Plan for an amendment.
 - **The loop guard** counts verdicts per issue. A flip back and forth sends the issue to you.
 
@@ -247,7 +248,7 @@ query({
 | When | What the git service does |
 | --- | --- |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the project's setup: copy the listed local files, run the install command |
-| Mockup versions | One worktree per version, branched from the card's. The ones you don't pick are removed. |
+| Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
 | Each lane exit | A checkpoint commit on `hive/<card>`. The lane's diff is saved to the card's history. |
 | Build starts | Bring in the latest main. The card shows how many commits it's behind. |
 | Check | Search the branch for the `HIVE-MOCK` marker. Any hit fails the check. |
@@ -268,12 +269,12 @@ Ship never edits files in your own checkout. If uncommitted work of yours is in 
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, isGit, runCommand, setupCommand, localFiles, laneLimits, permissionMode |
-| **Card** | project, title, lane, state (working / needs-you / stopped), branch, worktreePath, port, specPath, reviewedSpecHash, specKeeperSnapshot |
+| **Card** | project, title, lane, state (working / needs-you / stopped), branch, worktreePath, port, specPath, reviewedSpecHash |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
-| **Session** | card, lane, role, kind, sessionId, sourceSessionId (for copies), startedAt |
-| **Version** | card, label, worktreePath, sessionId, screenshot, picked |
+| **Session** | card, lane, role, kind, sessionId, startedAt |
+| **Version** | card, label, worktreePath, screenshot, picked |
 | **Issue** | card, foundIn, description, verdict, level, reason, flips |
-| **Decision** | card, lane, what, alternative, sessionId, messageId (where a redo starts), source |
+| **Decision** | card, lane, what, alternative, sessionId (resumed for a redo), source |
 | **PendingItem** | card, kind (question / approve / severe / loop), payload, recommendation, answer |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
 | **Event** | card, at, type, data. Every row of a card's history. |

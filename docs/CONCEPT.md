@@ -10,7 +10,7 @@ Claude Hive is a kanban board for Claude Code work, in one web page on your mach
 
 ## Core Idea
 
-Claude's work is cheap and runs in parallel, and a session can even be split into copies that each carry on from the same point. Your attention is the scarce thing. So the hive puts your attention where it matters most, shaping the idea and trying the result, and runs everything in between without you.
+Claude's work is cheap and runs in parallel. Your attention is the scarce thing. So the hive puts your attention where it matters most, shaping the idea and trying the result, and runs everything in between without you.
 
 - **The board is the coordinator.** Each lane has a role and plain rules for when a card moves on. No Claude session sits in the middle passing messages between roles.
 - **Work-in-progress limits pace the hive to you.** If Try it is full, nothing new gets built. Meanwhile the lanes before the build (Refine, Mockup, Spec) keep cards ready for when you have time.
@@ -66,7 +66,7 @@ Between your sign-off and Try it, the hive works without you. Only these reach y
 4. **Loops:** the same issue flipping back and forth, or Check sending a card back to Build more times than the round limit.
 5. **Approvals:** pushing to main, and anything that's hard to undo, leaves your machine or touches security.
 
-Everything else is decided by the hive and written into the card's history as "decided for you". Each such decision has a **Redo the other way** button: the hive goes back to the session at the point of the decision and carries on from there with the other choice, in a copy.
+Everything else is decided by the hive and written into the card's history as "decided for you". Each such decision has a **Redo the other way** button. It works like any other fix: the hive resumes the session that made the decision and tells it to switch to the other choice, and the card goes through Check again.
 
 ## Key Concepts
 
@@ -98,8 +98,7 @@ Each lane's instructions, model and tools. Roles are enforced through the tools 
 ### Sessions
 
 - **A new session for each card in each lane,** started with the role's instructions and the card.
-- **Conversations continue the same session.** A card sent back to Refine resumes the product owner session that refined it. A card sent back to Build resumes the developer that built it.
-- **Judgments start from a copy.** A one-off evaluation that needs a role's context, but shouldn't add to it, runs in a throwaway copy of that session.
+- **Conversations continue the same session.** A card sent back to Refine resumes the product owner session that refined it. A card sent back to Build resumes the developer that built it. **Redo the other way** resumes the session that made the decision.
 - **Nothing runs between turns.** A kept session costs nothing.
 
 ### Rulebook
@@ -129,7 +128,7 @@ The builder, reviewer and tester find mismatches between spec and code:
 
 Each becomes an issue on the card. **The build doesn't stop for them.** The builder notes the issue, makes its best guess and keeps going. Issues are judged in a batch at the end of Build and again after Check. Only a blocking issue is judged immediately.
 
-**The spec keeper judges.** At sign-off, the spec writer's session is frozen as a snapshot. It holds your Refine chat, your Mockup comments, the code research and the spec's reasoning. Each batch of issues is judged in a fresh copy of that snapshot, which re-reads the current code and is given the earlier verdicts so its calls stay consistent. The snapshot itself never changes.
+**The spec keeper judges.** It is the spec writer's own session, which carries on after sign-off. It holds your Refine chat, your Mockup comments, the code research and the spec's reasoning. Each batch of issues is a new turn in it: it re-reads the current code, and it remembers its earlier verdicts, so its calls stay consistent.
 
 Each issue gets a verdict:
 
@@ -169,7 +168,7 @@ It works down a ladder:
 - **Setup starts at once,** in the background while you chat: local files and dependencies are copied and installed.
 - **Refine reads the code from this clean copy,** never from your own checkout.
 - **The number of worktrees is bounded** by the lanes' work-in-progress limits.
-- **Mockup versions get worktrees of their own.** When you pick one, the others are deleted.
+- **Mockup versions get worktrees of their own.** The designer builds them one after another. When you pick one, the others are deleted.
 - **Each card's app runs on its own port.**
 - **Lanes commit checkpoints freely** on the card's branch. The card shows how far it is behind main, and Build starts by bringing in the latest main.
 - **Parking a card** (back to Ideas) removes the worktree but keeps the branch. Moving the card forward again rebuilds the worktree.
@@ -264,9 +263,10 @@ Tested on 2026-11-26 with Claude Code 2.1.332 and Agent SDK 0.3.332:
 
 - **Questions reach the host program mid-run.** It answers, and the session carries on.
 - **Resume keeps the conversation,** and your skills are available inside SDK sessions.
-- **A session can be split.** Two copies made from one point ran in parallel. Both kept the earlier conversation, and the original was unchanged.
-- **A session can be copied from an earlier message,** which "Redo the other way" and the spec keeper need. The copy knew only what came before that message, and the original's file stayed byte for byte the same. Copies are made with the SDK's `forkSession()`, because `resumeSessionAt` can't reach a message from before a compaction. A copy can start mid-turn: a tool call that had no result yet comes back to it as an error.
+- **A session can be split, or copied from an earlier message,** though the hive no longer does either. Copies made from one point ran in parallel, each knew only what came before that point, and the original's file stayed byte for byte the same. `forkSession()` can copy from a message before a compaction; `resumeSessionAt` can't. A copy can start mid-turn: a tool call that had no result yet comes back to it as an error.
 - **Fixed-format reports arrive valid** (`outputFormat`) after a run of tool calls. But a session that can't fill in a field makes up a value that passes the schema, and one that can't satisfy the schema ends "successfully" with no report. So every report has a way to say it's blocked, and the hive checks that the report is there.
+- **A session can move between worktrees.** Resumed with another working folder, it kept its conversation and worked in the new folder. Its transcript stays where the session started. The designer builds mockup versions this way.
+- **A chat session can take on the spec keeper's job.** On a later turn it returned a valid fixed-format report, then went back to chatting. Its role instructions stay those of its first turn, so the spec keeper's instructions come with each batch's message.
 - **A new worktree needs no trust prompt.** It counts as trusted when a folder above it is. In a folder nobody has trusted, a session runs without the project's CLAUDE.md and doesn't say so, while the repo's hooks still run.
 - **Plain `claude -p` is not enough.** Without a host program, sessions can't ask questions, and anything not allowed up front is refused.
 
@@ -274,6 +274,5 @@ Seen in the SDK's type definitions, not yet tested:
 
 - **Your plan's usage** for the 5-hour and 7-day windows.
 - **Subagent messages tagged with the agent that started them** (`--forward-subagent-text`).
-- **A role's instructions are fixed at a session's first turn** (`systemPrompt.snapshot`, on by default). A changed role file reaches only new sessions.
 
 The spec format is read from `~/.claude/skills/spec-format/` (`format.md` and `review.md`).
