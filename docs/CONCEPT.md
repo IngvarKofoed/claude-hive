@@ -265,13 +265,15 @@ Tested on 2026-11-26 with Claude Code 2.1.332 and Agent SDK 0.3.332:
 - **Questions reach the host program mid-run.** It answers, and the session carries on.
 - **Resume keeps the conversation,** and your skills are available inside SDK sessions.
 - **A session can be split.** Two copies made from one point ran in parallel. Both kept the earlier conversation, and the original was unchanged.
+- **A session can be copied from an earlier message,** which "Redo the other way" and the spec keeper need. The copy knew only what came before that message, and the original's file stayed byte for byte the same. Copies are made with the SDK's `forkSession()`, because `resumeSessionAt` can't reach a message from before a compaction. A copy can start mid-turn: a tool call that had no result yet comes back to it as an error.
+- **Fixed-format reports arrive valid** (`outputFormat`) after a run of tool calls. But a session that can't fill in a field makes up a value that passes the schema, and one that can't satisfy the schema ends "successfully" with no report. So every report has a way to say it's blocked, and the hive checks that the report is there.
+- **A new worktree needs no trust prompt.** It counts as trusted when a folder above it is. In a folder nobody has trusted, a session runs without the project's CLAUDE.md and doesn't say so, while the repo's hooks still run.
 - **Plain `claude -p` is not enough.** Without a host program, sessions can't ask questions, and anything not allowed up front is refused.
 
 Seen in the SDK's type definitions, not yet tested:
 
-- **Resuming at a specific message** (`resumeSessionAt`), which "Redo the other way" needs.
-- **Fixed-format replies** checked against a JSON schema (`outputFormat`), for the role reports the board routes on.
 - **Your plan's usage** for the 5-hour and 7-day windows.
 - **Subagent messages tagged with the agent that started them** (`--forward-subagent-text`).
+- **A role's instructions are fixed at a session's first turn** (`systemPrompt.snapshot`, on by default). A changed role file reaches only new sessions.
 
 The spec format is read from `~/.claude/skills/spec-format/` (`format.md` and `review.md`).

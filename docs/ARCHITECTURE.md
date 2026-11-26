@@ -128,9 +128,7 @@ query({
   options: {
     cwd: card.worktreePath,
     sessionId,                       // first turn: chosen by the hive, so it can always be resumed
-    resume,                          // later turns, and the source of a copy
-    forkSession,                     // true for a copy
-    resumeSessionAt,                 // a copy taken from an earlier point ("Redo the other way")
+    resume,                          // later turns, and every copy (made first with forkSession())
     systemPrompt: { type: "preset", preset: "claude_code", append: role.instructions },
     model: role.model,
     allowedTools: role.tools,
@@ -145,7 +143,7 @@ query({
 | --- | --- | --- |
 | **Conversation** | Refine, Mockup, Spec: chats with you | One session per card per lane, resumed on every message, and again when feedback sends the card back |
 | **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer. Reviewer and tester start fresh each round. |
-| **Copy** | Spec keeper judgments, "Redo the other way" | `resume` and `forkSession`, plus `resumeSessionAt` to start from an earlier message. The source is never changed. |
+| **Copy** | Spec keeper judgments, "Redo the other way" | `forkSession()` copies the transcript up to a chosen message, and the copy is resumed like any session. The source is never changed. The copy point is the last entry of the last turn kept: for a turn that ended in a report, that's the final tool result, not the report call, or the copy believes its report failed. `resume` with `resumeSessionAt` is not used, because it can't reach messages from before a compaction. |
 | **One-off** | Manager, spec reviewer | A new session, discarded after one answer |
 
 **Role reports.** Each hands-off role ends its turn with a report checked against a JSON schema (`outputFormat`). The board engine routes on its fields, never on prose:
@@ -156,6 +154,9 @@ query({
 - **tester:** each How-to-verify bullet marked `pass`, `fail` or `cant-verify`, with evidence;
 - **spec keeper copy:** for each issue, a verdict (`spec-wrong` or `code-wrong`), a level (`minor`, `changes-signoff` or `severe`) and a reason;
 - **manager:** the ladder step, the answer or recommendation, and its source.
+
+- **A report must be there to count.** The board engine routes only on `structured_output`. A turn that ends without one stops the card, even when its result says `success`: a session that can't satisfy the schema gives up in prose and still ends "successfully". `stop_reason` is no guide either, since a good report ends on `tool_use`.
+- **Every report can say it's blocked:** a `status` of `done` or `blocked`, with a reason. Without it, a session that can't fill in a field makes up a value that passes the schema.
 
 ## Card Moves
 
@@ -341,10 +342,12 @@ The page can start sessions that run commands on your machine, so it must never 
 
 ## Risks to Check First
 
-1. **Copies from an earlier point.** `resumeSessionAt` with `forkSession` is what "Redo the other way" and the spec keeper rely on. Not tested yet.
-2. **Fixed-format reports** (`outputFormat`) at the end of long sessions that use many tools. Not tested yet.
-3. **Subscription limits** with several sessions running at once. The SDK reports plan usage, but how the hive should pace itself near the limits is still open.
-4. **Several copies of one app running side by side:** ports, local databases, and file watchers that also see `.claude/worktrees`.
-5. **Folder trust:** whether SDK sessions accept a new worktree folder without an interactive trust prompt.
-6. **Comparing screens with the mockup:** whether screenshots plus the tester's judgment are reliable enough, or a pixel diff is needed.
-7. **Session archive:** Claude Code deletes old session files after a while, so the archive at Done must run before that happens.
+1. **Subscription limits** with several sessions running at once. The SDK reports plan usage, but how the hive should pace itself near the limits is still open.
+2. **Several copies of one app running side by side:** ports, local databases, and file watchers that also see `.claude/worktrees`.
+3. **Comparing screens with the mockup:** whether screenshots plus the tester's judgment are reliable enough, or a pixel diff is needed.
+4. **Session archive:** Claude Code deletes old session files after a while, so the archive at Done must run before that happens.
+5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md, and nothing says so. Adding a project should check that its folder, or one above it, is trusted.
+6. **Permission rules in the repo's `.claude/settings.json` don't apply** in SDK sessions; `settings.local.json` and `allowedTools` do. A new worktree has no `settings.local.json`, because it isn't committed. Either setup copies it as a local file, or the hive passes the project's rules as `allowedTools`.
+7. **Your own settings reach every session** through `settingSources: ["user", …]`: your default permission mode (`auto` skips `canUseTool` entirely) and all your MCP servers, which add tools beside the ones a role is given. The session runner must set `permissionMode` itself and keep out MCP tools a role shouldn't have.
+
+Copies from an earlier point, fixed-format reports and folder trust were checked on 2026-11-26; the results are in the Feasibility Notes of `CONCEPT.md`.
