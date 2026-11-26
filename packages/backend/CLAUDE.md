@@ -6,8 +6,8 @@ Contents: `src/server.ts`, `routes/`, `board/`, `sessions/`, `questions/`, `spec
 
 ## Required tools
 
-- **`LSP`** — the TypeScript language server (`typescript-lsp` plugin). Use it for definitions, references and hover instead of grepping for symbols. It is a deferred tool: load it with `ToolSearch` `select:LSP` before the first call.
-- **`claude-api`** skill — invoke it before writing or changing any code that calls the Agent SDK: `query()` options, `canUseTool`, `resume`, `outputFormat`, plan usage. The SDK changes quickly, so check its current options rather than working from memory.
+- **`LSP`** — the TypeScript language server (`typescript-lsp` plugin). Use it for definitions, references and hover instead of grepping for symbols.
+- **Agent SDK reference** — before writing or changing code that calls the Claude Agent SDK (`query()` options, `canUseTool`, `resume`, `outputFormat`, plan usage), check the option or callback in the SDK's own type definitions in the installed package, or ask the built-in `claude-code-guide` agent, which covers the Agent SDK. Its options change between releases, so don't write them from memory.
 
 ## Testing
 

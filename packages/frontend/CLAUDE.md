@@ -6,8 +6,8 @@ Contents: `src/styles/` (`tokens.css`), `pages/`, `components/ui/`, `components/
 
 ## Required tools
 
-- **`LSP`** — the TypeScript language server (`typescript-lsp` plugin). Use it for definitions, references and hover instead of grepping for symbols. It is a deferred tool: load it with `ToolSearch` `select:LSP` before the first call.
-- **Playwright MCP** (`mcp__playwright__*`, headless) — drive the page in a real browser to verify every UI change (see the verification workflow below). The tools are deferred: load the ones you need with `ToolSearch`, e.g. `select:mcp__playwright__browser_navigate,mcp__playwright__browser_snapshot,mcp__playwright__browser_click,mcp__playwright__browser_console_messages`.
+- **`LSP`** — the TypeScript language server (`typescript-lsp` plugin). Use it for definitions, references and hover instead of grepping for symbols.
+- **Playwright MCP** (`mcp__playwright__*`, headless) — drive the page in a real browser to verify every UI change (see the verification workflow below).
 - **`frontend-design`** skill — invoke it when building a new screen or component, within the look the mockup already sets.
 
 ## Styling
