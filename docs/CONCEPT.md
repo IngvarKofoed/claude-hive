@@ -65,7 +65,7 @@ Between your sign-off and Try it, the hive works without you. Only these reach y
 2. **Spec issues that change what you signed off.** They come with the spec keeper's recommendation. The card goes on to Try it as built, and the question waits for you there.
 3. **Severe issues.** The card stops.
 4. **Loops:** the same issue flipping back and forth, or Check sending a card back to Build more times than the round limit.
-5. **Approvals:** pushing to main, and anything that's hard to undo, leaves your machine or touches security.
+5. **Approvals:** pushing to main.
 
 Everything else is decided by the hive and written into the card's history as "decided for you". Try it lists these decisions. If you want one the other way, you say so in your feedback, like any other change.
 
@@ -90,9 +90,9 @@ One feature, from idea to Done. It carries everything:
 
 ### Role
 
-Each lane's instructions, model and tools. Roles are enforced through the tools each session gets, not only through instructions:
+Each lane's instructions and model. Every session has the same full access, in Claude Code's auto mode. The instructions tell each session its role and whether it may change code, and for now nothing else enforces that:
 
-- **Reviewer and tester** can't edit files.
+- **Reviewer and tester** don't change files.
 - **The spec writer** edits only the spec.
 - **Refine** doesn't change the repo at all. The brief lives on the card.
 
@@ -269,6 +269,8 @@ Tested on 2026-11-26 with Claude Code 2.1.332 and Agent SDK 0.3.332:
 - **A session can be split, or copied from an earlier message,** though the hive no longer does either. Copies made from one point ran in parallel, each knew only what came before that point, and the original's file stayed byte for byte the same. `forkSession()` can copy from a message before a compaction; `resumeSessionAt` can't. A copy can start mid-turn: a tool call that had no result yet comes back to it as an error.
 - **Fixed-format reports arrive valid** (`outputFormat`) after a run of tool calls. But a session that can't fill in a field makes up a value that passes the schema, and one that can't satisfy the schema ends "successfully" with no report. So every report has a way to say it's blocked, and the hive checks that the report is there.
 - **A session can move between worktrees.** Resumed with another working folder, it kept its conversation and worked in the new folder. Its transcript stays where the session started. The designer builds mockup versions this way.
+- **Questions reach the host in auto mode too.** `AskUserQuestion` went to the host, and the session used the answer.
+- **Auto mode doesn't stop risky actions it reads as your request.** Deleting a folder outside the project, a force push to main and posting `.env` to an address all ran without reaching the host. Taken from a file in the repo instead, the model held back by itself and asked for confirmation in its reply.
 - **A chat session can take on the spec keeper's job.** On a later turn it returned a valid fixed-format report, then went back to chatting. Its role instructions stay those of its first turn, so the spec keeper's instructions come with each batch's message.
 - **A new worktree needs no trust prompt.** It counts as trusted when a folder above it is. In a folder nobody has trusted, a session runs without the project's CLAUDE.md and doesn't say so, while the repo's hooks still run.
 - **Plain `claude -p` is not enough.** Without a host program, sessions can't ask questions, and anything not allowed up front is refused.

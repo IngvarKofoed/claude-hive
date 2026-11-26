@@ -45,7 +45,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 | Part | What it does |
 | --- | --- |
 | **Board engine** | Lanes, work-in-progress limits, card moves, round limits and the loop guard. It reads each role's fixed-format report and decides the next lane. |
-| **Session runner** | Starts, resumes and stops sessions. Applies each role's instructions, model and tools. Catches questions and permission requests through `canUseTool`. |
+| **Session runner** | Starts, resumes and stops sessions. Applies each role's instructions and model, and runs every session with full access in auto mode. Catches questions through `canUseTool`. |
 | **Question router** | Questions in the chat lanes go straight to the page. Questions in hands-off lanes go to the manager ladder. |
 | **Spec keeper** | Judges each batch of spec issues as a new turn in the spec writer's session, which carries on after sign-off. |
 | **Review gate** | Runs the blind spec review and tracks the spec's hash, so sign-off is only possible on reviewed text. |
@@ -102,21 +102,21 @@ Worktrees follow Claude Code's own convention: `<repo>/.claude/worktrees/<card>`
 
 A role is a Markdown file in `roles/`: settings at the top, instructions below. It's the same shape as Claude Code's own agent files.
 
-| Role | Lane | Model | Tools | Session kind |
+| Role | Lane | Model | May change (told in its instructions) | Session kind |
 | --- | --- | --- | --- | --- |
-| `product-owner` | Refine | Opus | Read-only, plus writing the card's brief | Conversation |
-| `designer` | Mockup | Opus | Full, inside the card's worktree | Conversation |
-| `spec-writer` | Spec | Opus | Read-only, plus editing the spec file | Conversation, carried on after sign-off as the spec keeper |
-| `planner` | Plan | Opus | Read-only, plus writing the card's plan | Work |
-| `developer` | Build | As the spec's Implementation strategy says | Full, inside the card's worktree | Work |
-| `reviewer` | Check | Strongest | Read-only | Work, new for each round |
-| `tester` | Check | Sonnet | Read-only, plus running the app and taking screenshots | Work, new for each round |
-| `manager` | any hands-off lane | Sonnet | Read-only, plus the hive's lookup tools | One-off, one for each question |
-| `spec-reviewer` | Spec | Fable | Read-only, sees only the spec file and `review.md` | One-off, blind |
+| `product-owner` | Refine | Opus | Nothing in the repo; writes the card's brief | Conversation |
+| `designer` | Mockup | Opus | Code, in the card's worktree | Conversation |
+| `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
+| `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
+| `developer` | Build | As the spec's Implementation strategy says | Code, in the card's worktree | Work |
+| `reviewer` | Check | Strongest | Nothing | Work, new for each round |
+| `tester` | Check | Sonnet | Nothing; runs the app and takes screenshots | Work, new for each round |
+| `manager` | any hands-off lane | Sonnet | Nothing; uses the hive's lookup tools | One-off, one for each question |
+| `spec-reviewer` | Spec | Fable | Nothing; reads only the spec file and `review.md` | One-off, blind |
 
 - **One developer per card.** When the spec's Implementation strategy calls for several agents, the developer session runs them as its own subagents. So a card has one developer report, one session to resume, and one session committing in its worktree.
-- **Tools are what enforce a role,** through the SDK's `allowedTools` / `disallowedTools`. A reviewer can't edit because it has no edit tools, not because it was asked not to.
-- **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions.
+- **Every session has the same full access,** in Claude Code's auto mode, which the runner sets itself. A role's limits are only in its instructions: they say what the session is and whether it may change code. A reviewer doesn't edit because it's told not to, and nothing else stops it. A per-role permissions policy is parked.
+- **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions. Every role is told to ask questions with `AskUserQuestion`, never in its reply: a question in prose ends a hands-off turn with nobody to answer it.
 - **The spec format** is read from `~/.claude/skills/spec-format/`. `format.md` goes to the spec writer and the planner. The "For the reviewer" part of `review.md` goes to the spec reviewer.
 
 ## Sessions
@@ -132,10 +132,10 @@ query({
     resume,                          // every later turn
     systemPrompt: { type: "preset", preset: "claude_code", append: role.instructions },
     model: role.model,
-    allowedTools: role.tools,
+    permissionMode: "auto",          // every session: full access; the role's instructions set its limits
     settingSources: ["user", "project", "local"],
     outputFormat: role.report,       // hands-off roles: a fixed-format report the board engine routes on
-    canUseTool,                      // questions and permission requests
+    canUseTool,                      // questions, and anything auto mode passes on
   },
 });
 ```
@@ -181,11 +181,11 @@ query({
 
 ## Questions and Permissions
 
-`canUseTool` catches two things: **questions** (`AskUserQuestion`) and **permission requests**, i.e. tools the project's permission settings don't allow up front.
+`canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
-- **In a chat lane,** both go straight to the page as part of the conversation.
+- **In a chat lane,** a question goes straight to the page as part of the conversation.
 - **In a hands-off lane,** a question goes to the manager ladder.
-- **Permission requests that can't be undone, leave the machine or touch security** become Approve items.
+- **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
     Build session          Session runner          Manager session                Page
@@ -241,7 +241,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 
 **Review gate.**
 
-1. When you're about to sign off, it stores the spec's hash and starts the blind spec reviewer, which sees only the spec path and `review.md`.
+1. When you're about to sign off, it stores the spec's hash and starts the blind spec reviewer, which is given only the spec path and `review.md`.
 2. Findings marked "decision" go into the Spec chat. Fixes are applied by the spec writer session.
 3. The hash after those fixes is recorded as the reviewed text.
 4. **Sign off** is enabled only while the spec on disk matches that hash. A changed spec greys it out until a new review has read it.
@@ -282,7 +282,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, runCommand, setupCommand, testCommand, localFiles, laneLimits, permissionMode |
+| **Project** | name, path, runCommand, setupCommand, testCommand, localFiles, laneLimits |
 | **Card** | project, title, lane, state (working / needs-you / stopped), branch, worktreePath, port, specPath, reviewedSpecHash |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt |
@@ -362,8 +362,7 @@ The page can start sessions that run commands on your machine, so it must never 
 3. **Comparing screens with the mockup:** whether screenshots plus the tester's judgment are reliable enough, or a pixel diff is needed.
 4. **Session archive:** Claude Code deletes old session files after a while, so the archive at Done must run before that happens.
 5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md, and nothing says so. Adding a project should check that its folder, or one above it, is trusted.
-6. **Permission rules in the repo's `.claude/settings.json` don't apply** in SDK sessions; `settings.local.json` and `allowedTools` do. A new worktree has no `settings.local.json`, because it isn't committed. Either setup copies it as a local file, or the hive passes the project's rules as `allowedTools`.
-7. **Your own settings reach every session** through `settingSources: ["user", …]`: your default permission mode (`auto` skips `canUseTool` entirely) and all your MCP servers, which add tools beside the ones a role is given. The session runner must set `permissionMode` itself and keep out MCP tools a role shouldn't have.
-8. **A question that waits for you for hours.** The turn that asked holds a `canUseTool` call open until you answer. Whether that holds for hours is untested. If it doesn't, the answer goes to the session as a new turn, as after a restart.
+6. **Your own settings reach every session** through `settingSources: ["user", …]`, including all your MCP servers and plugins, which full access lets every role use. The runner sets `permissionMode: "auto"` itself, so changing your own default doesn't change the hive.
+7. **A question that waits for you for hours.** The turn that asked holds a `canUseTool` call open until you answer. Whether that holds for hours is untested. If it doesn't, the answer goes to the session as a new turn, as after a restart. The SDK's types also show that a question can resolve on its own after a stretch of idle time (`afkTimeoutMs`), which is untested too.
 
 Copies from an earlier point, fixed-format reports and folder trust were checked on 2026-11-26; the results are in the Feasibility Notes of `CONCEPT.md`.

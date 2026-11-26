@@ -7,10 +7,9 @@ is not a record of anything; `docs/changelog/` is. A line you add here is read a
 - **The packages don't run `scripts/gen-version.mjs` yet** — when the backend and frontend
   `package.json` files are created, their `predev` and `prebuild` must call it, or the app has no
   version. Surfaced by `2026-11-26-git-describe-version`.
-- **Permissions in the hands-off lanes have no policy** — nothing says what happens to permission requests that
-  aren't Approve items, who judges "can't be undone", or how "full, inside the worktree", "read-only plus running
-  the app" and "writing the brief" are enforced when tool lists can't express them. The session runner needs it.
-  Surfaced by a design review of the docs.
+- **Roles are enforced only by their instructions** — every session runs with full access in auto mode, so a
+  reviewer told not to edit, or a blind spec reviewer told what to read, can still do otherwise. A per-role
+  permissions policy is parked. Surfaced by `2026-11-26-full-access-auto-mode`.
 - **Work-in-progress limits can deadlock** — a card waiting for a full Check and a card sent back to a full Build
   each hold the slot the other needs, and a card waiting for room has no state. Surfaced by a design review of the docs.
 - **Stopped cards have no way out** — Card Moves has no move out of ■ stopped (redesign, rethink, narrow, drop,
