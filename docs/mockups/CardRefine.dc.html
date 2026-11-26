@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Seed price history · Refine</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#1849A9}a:hover{color:#0E3378}
+</style>
+</helmet>
+<div style="min-height: 940px; background: #F6F6F3; color: #1B1B18; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 10px 24px; min-height: 64px; box-sizing: border-box; background: #FFFFFF; border-bottom: 1px solid #E4E3DE">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"></path><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"></path></svg>
+<span style="font-weight: 700; font-size: 17px; letter-spacing: -0.01em">Claude Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1B1B18; background: #EFEFEA; text-decoration: none">Board</a>
+<a href="ForYou.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">For you <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #C2410C; color: #FFFFFF; font-size: 12px; font-weight: 700">7</span></a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Lanes</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Rulebooks</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Projects</a>
+</nav>
+</header>
+
+<main style="padding: 16px 24px 28px; display: flex; flex-direction: column; gap: 16px; max-width: 1392px; width: 100%; box-sizing: border-box; margin: 0 auto">
+
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 13px; color: #5F5E57"><a href="Main.dc.html" style="font-weight: 600">Board</a> › magic-grow › Seed price history</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em">Seed price history</h1>
+<span style="padding: 3px 10px; border-radius: 999px; background: #FDEBDD; color: #8F3A06; font-size: 12px; font-weight: 700">● your turn</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5F5E57">hive/seed-price-history · .claude/worktrees/seed-price-history</span>
+</div>
+<ol aria-label="Lanes" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px">
+<li style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #EFEFEA; font-size: 12px; color: #45443E">✓ Ideas</li>
+<li aria-current="step" style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #FDEBDD; color: #8F3A06; font-size: 12px; font-weight: 700">● Refine · round 3</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Mockup</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Spec</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Plan</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Build</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Check</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Try it</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Ship</li>
+<li style="padding: 6px 10px; border-radius: 999px; border: 1px solid #E4E3DE; font-size: 12px; color: #6B6A63">Done</li>
+</ol>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch">
+
+<section aria-label="Chat with the product owner" style="flex: 1 1 560px; min-width: 0; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #EFEFEA">
+<span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #1B1B18; color: #FFFFFF; font-size: 11px; font-weight: 700">PO</span>
+<div style="display: flex; flex-direction: column">
+<span style="font-size: 14px; font-weight: 700">Product owner</span>
+<span style="font-size: 12px; color: #5F5E57">Opus · has read the repo and the magic-grow rulebook</span>
+</div>
+</div>
+
+<div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="max-width: 82%; padding: 12px 14px; border-radius: 12px; background: #F6F6F3; border: 1px solid #EFEFEA; font-size: 14px; line-height: 1.55">I've read the market and shop code and the rulebook. A first brief is on the right. Two questions: should the history show every price change, or one point per day? And is it for players, or for you while you tune prices?</div>
+<div style="align-self: flex-end; max-width: 82%; padding: 12px 14px; border-radius: 12px; background: #1B1B18; color: #FFFFFF; font-size: 14px; line-height: 1.55">One point per day is enough. It's for players. They keep asking whether to sell now or wait.</div>
+<div style="max-width: 82%; padding: 12px 14px; border-radius: 12px; background: #F6F6F3; border: 1px solid #EFEFEA; font-size: 14px; line-height: 1.55">Players only, then, so I've taken the designer out of "who it's for", and the history is now one point per day. Both changes are highlighted. One more: how far back should it go? I'd suggest 30 days, the same window as the market stats.</div>
+<div style="font-size: 12px; color: #5F5E57">Round 3 · waiting for you since 18 min</div>
+</div>
+
+<form style="border-top: 1px solid #EFEFEA; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px">
+<label for="msg" style="font-size: 12px; font-weight: 600; color: #45443E">Your reply</label>
+<textarea id="msg" rows="3" placeholder="Write to the product owner…" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #D6D5CF; font-family: Inter, system-ui, sans-serif; font-size: 14px; resize: vertical">30 days is fine.</textarea>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Send</button>
+<span style="font-size: 12px; color: #5F5E57">Only you move the card on.</span>
+<button type="button" style="margin-left: auto; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Good · on to Mockup</button>
+</div>
+</form>
+</section>
+
+<section aria-labelledby="brief" style="flex: 1 1 460px; min-width: 0; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<h2 id="brief" style="margin: 0; font-size: 18px; font-weight: 700">Brief</h2>
+<span style="padding: 2px 8px; border-radius: 999px; background: #E2F3F0; color: #0B5F58; font-size: 11px; font-weight: 700">2 changes in round 3</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">Select any text to comment on it</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Problem</h3>
+<p style="margin: 0; font-size: 14px; line-height: 1.55">Players can't tell whether a seed's price is high or low right now, so they sell at random and feel cheated when the price jumps the next day.</p>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Who it's for</h3>
+<p style="margin: 0; padding: 6px 8px; border-radius: 6px; background: #E2F3F0; font-size: 14px; line-height: 1.55">Players deciding when to sell their seeds. <span style="font-size: 12px; color: #0B5F58; font-weight: 600">changed: was "players and the game designer"</span></p>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">What done looks like</h3>
+<ul style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55">
+<li style="padding: 2px 6px; border-radius: 6px; background: #E2F3F0">Each seed in the shop shows its price history, one point per day. <span style="font-size: 12px; color: #0B5F58; font-weight: 600">changed</span></li>
+<li>Today's price is marked against the lowest and highest price in the period shown.</li>
+<li style="color: #8F3A06">Open: how far back the history goes. Suggested: 30 days.</li>
+</ul>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Out of scope</h3>
+<ul style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55">
+<li>Price predictions or advice on when to sell</li>
+<li>History for anything other than seeds</li>
+</ul>
+</div>
+
+<div style="margin-top: auto; padding: 12px; border-radius: 8px; background: #F6F6F3; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; font-weight: 700; color: #45443E">Rules applied from the magic-grow rulebook</span>
+<span style="font-size: 13px; line-height: 1.5">“Prices are shown in coins, never as percentages.”</span>
+</div>
+</section>
+
+</div>
+
+<nav aria-label="Card history" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px">
+<span style="color: #5F5E57; margin-right: 4px">History:</span>
+<a href="#" style="padding: 6px 10px; border-radius: 6px; background: #EFEFEA; color: #1B1B18; font-weight: 600; text-decoration: none">Refine</a>
+<a href="#" style="padding: 6px 10px; border-radius: 6px; color: #45443E; text-decoration: none">Ideas</a>
+<span style="padding: 6px 10px; color: #6B6A63">Mockup, Spec and the rest appear as the card gets there</span>
+</nav>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":940}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

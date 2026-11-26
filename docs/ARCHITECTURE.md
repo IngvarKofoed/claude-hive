@@ -77,8 +77,11 @@ claude-hive/
 │   │       └── db/            # SQLite schema and queries
 │   └── frontend/
 │       └── src/
+│           ├── styles/        # tokens.css: every color, font, size, spacing and radius, and nothing else
 │           ├── pages/         # Board, For you, Card, Lane, Rulebooks, Projects
-│           ├── components/    # Card tile, chat, spec view with comments, mockup frame, version compare, ...
+│           ├── components/
+│           │   ├── ui/        # Button, badge, panel, chip, chat bubble: the shared building blocks
+│           │   └── ...        # Card tile, spec view with comments, mockup frame, version compare
 │           └── api/           # REST client and SSE subscription
 ├── package.json               # npm workspaces
 └── tsconfig.base.json
@@ -295,14 +298,37 @@ GET    /api/lanes/:lane/history           A lane across all cards
 GET    /api/rules  · POST · PATCH         Rulebooks and suggested rules
 GET    /api/projects · POST · PATCH       Projects and their settings
 GET    /api/usage                         Plan usage: 5-hour and 7-day windows
+GET    /api/health                        Status and the app's version
 GET    /api/events                        SSE stream
 ```
+
+## Frontend
+
+The look comes from the mockup in `docs/mockups/`. The CSS is built so that the whole app can be restyled later without touching any component:
+
+- **Design tokens are the only place a raw value lives.** Colors, fonts, font sizes, spacing, radii and shadows are CSS custom properties in one file, `packages/frontend/src/styles/tokens.css`. The starting values are listed in `docs/mockups/README.md`.
+- **Tokens are named by role, not by look:** `--color-needs-you-bg`, not `--orange-100`. Restyling changes the values and never the names.
+- **Components are styled with CSS Modules:** one `.module.css` next to each component, using only `var(--…)` tokens. No hex codes, pixel font sizes or font names appear outside `tokens.css`.
+- **No inline styles,** and no style objects in TSX. A state that changes the look (picked, needs you, stopped) is a class or a `data-` attribute that the CSS selects on.
+- **Shared building blocks live in `components/ui/`:** button, badge, panel, chip, chat bubble. Pages are built from them.
+- **A second theme,** such as dark mode, would be a second set of token values under `[data-theme="dark"]`. Nothing else would change.
+
+## Versioning
+
+The version is `git describe --tags --long --always --dirty`, e.g. `v0.1.0-12-g3f9c2ab`: the last release tag, the number of commits since it, and the commit.
+
+- **It's resolved once, at build time.** `scripts/gen-version.mjs` runs git inside the checkout and writes `packages/shared/src/version.ts` (`export const APP_VERSION = "…"`), which git ignores. An `APP_VERSION` environment variable overrides git.
+- **Each package runs the script before it starts or builds:** `"predev"` and `"prebuild"` in its `package.json` call `node ../../scripts/gen-version.mjs`.
+- **The running app never calls git.** Backend and frontend import `APP_VERSION` from the shared package. The backend reports it at `GET /api/health`, and the page shows it in the header. `0.0.0-unknown` means the build step never ran.
+- **A release is an annotated tag** (`git tag -a v0.2.0 -m …`), with no code change. The first one is `v0.1.0`.
+- **`package.json` `version` stays plain semver** (`0.1.0`), bumped to match a release tag. The git-describe string is never written back into it.
+- **If CI is ever added,** its checkout must fetch the full history and tags (`fetch-depth: 0` on GitHub Actions). A shallow clone silently loses the version.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React, TypeScript, Vite |
+| Frontend | React, TypeScript, Vite, CSS Modules on design tokens (CSS custom properties) |
 | Backend | Node.js, Express, TypeScript |
 | Claude | `@anthropic-ai/claude-agent-sdk` (tested with 0.3.332), on your Claude subscription login |
 | Live updates | Server-Sent Events |

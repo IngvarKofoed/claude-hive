@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hive board</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#1849A9}a:hover{color:#0E3378}
+</style>
+</helmet>
+<div style="min-height: 980px; background: #F6F6F3; color: #1B1B18; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 10px 24px; min-height: 64px; box-sizing: border-box; background: #FFFFFF; border-bottom: 1px solid #E4E3DE">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"></path><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"></path></svg>
+<span style="font-weight: 700; font-size: 17px; letter-spacing: -0.01em">Claude Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px">
+<a href="Main.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1B1B18; background: #EFEFEA; text-decoration: none">Board</a>
+<a href="ForYou.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">For you <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #C2410C; color: #FFFFFF; font-size: 12px; font-weight: 700">7</span></a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Lanes</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Rulebooks</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Projects</a>
+</nav>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+<div style="display: flex; align-items: center; gap: 14px; font-size: 12px; color: #5F5E57">
+<span style="font-weight: 600; color: #45443E">Plan usage</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">5-hour <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 42%; height: 6px; background: #1B1B18"></span></span> 42%</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">Weekly <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 18%; height: 6px; background: #1B1B18"></span></span> 18%</span>
+</div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">New idea</button>
+</div>
+</header>
+
+<main style="padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+<div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">Board</h1>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">4 projects · 12 cards in progress · 7 waiting for you</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; font-weight: 600">
+<span style="padding: 4px 10px; border-radius: 999px; background: #FDEBDD; color: #8F3A06">● needs you</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #E6EEFC; color: #1849A9">▶ working</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #E2F3F0; color: #0B5F58">◆ versions to compare</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #FBE4E1; color: #9B1C12">■ stopped</span>
+</div>
+</div>
+
+<div style="overflow-x: auto; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px">
+<div style="min-width: 1380px; display: flex; flex-direction: column">
+
+<div style="display: grid; grid-template-columns: 150px repeat(9, minmax(128px, 1fr)) 84px; column-gap: 8px; padding: 12px 12px 0; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase">
+<div></div>
+<div style="padding: 5px 8px; color: #8F3A06">you</div>
+<div style="grid-column: span 3; padding: 5px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06">with you · chat until Good</div>
+<div style="grid-column: span 3; padding: 5px 8px; border-radius: 6px; background: #EFEFEA; color: #45443E">hands off</div>
+<div style="padding: 5px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06">you</div>
+<div style="padding: 5px 8px; border-radius: 6px; background: #EFEFEA; color: #45443E">hands off</div>
+<div></div>
+</div>
+
+<div style="display: grid; grid-template-columns: 150px repeat(9, minmax(128px, 1fr)) 84px; column-gap: 8px; padding: 8px 12px 10px; border-bottom: 1px solid #E4E3DE">
+<div style="font-size: 12px; color: #5F5E57; align-self: end">Project</div>
+<sc-for list="{{ lanes }}" as="lane" hint-placeholder-count="10">
+<div style="padding: 4px 8px; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 13px; font-weight: 700">{{ lane.name }}</span>
+<span style="font-size: 11px; color: #5F5E57">{{ lane.who }}</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6B6A63">{{ lane.limit }}</span>
+</div>
+</sc-for>
+</div>
+
+<sc-for list="{{ projects }}" as="project" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: 150px repeat(9, minmax(128px, 1fr)) 84px; column-gap: 8px; padding: 0 12px; border-bottom: 1px solid #E4E3DE">
+<div style="padding: 14px 4px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 14px; font-weight: 700">{{ project.name }}</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5F5E57">{{ project.path }}</span>
+<span style="font-size: 11px; color: #5F5E57">{{ project.summary }}</span>
+</div>
+<sc-for list="{{ project.cells }}" as="cell" hint-placeholder-count="9">
+<div style="padding: 10px 6px; display: flex; flex-direction: column; gap: 8px; background: {{ cell.bg }}; min-height: 96px">
+<sc-for list="{{ cell.cards }}" as="card" hint-placeholder-count="1">
+<sc-if value="{{ card.linked }}" hint-placeholder-val="{{ false }}">
+<a href="{{ card.href }}" style="display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; background: #FFFFFF; border: 1px solid #D6D5CF; box-shadow: 0 1px 2px rgba(27,27,24,0.06); color: #1B1B18; text-decoration: none">
+<span style="font-size: 13px; font-weight: 600; line-height: 1.3">{{ card.title }}</span>
+<sc-if value="{{ card.hasBadge }}" hint-placeholder-val="{{ true }}">
+<span style="align-self: flex-start; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: {{ card.bg }}; color: {{ card.fg }}">{{ card.badge }}</span>
+</sc-if>
+<span style="font-size: 11px; color: #5F5E57">{{ card.meta }}</span>
+</a>
+</sc-if>
+<sc-if value="{{ card.plain }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; background: #FFFFFF; border: 1px solid #E4E3DE">
+<span style="font-size: 13px; font-weight: 600; line-height: 1.3">{{ card.title }}</span>
+<sc-if value="{{ card.hasBadge }}" hint-placeholder-val="{{ true }}">
+<span style="align-self: flex-start; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: {{ card.bg }}; color: {{ card.fg }}">{{ card.badge }}</span>
+</sc-if>
+<span style="font-size: 11px; color: #5F5E57">{{ card.meta }}</span>
+</div>
+</sc-if>
+</sc-for>
+</div>
+</sc-for>
+<div style="padding: 14px 4px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start">
+<sc-if value="{{ project.doneLinked }}" hint-placeholder-val="{{ false }}">
+<a href="CardDone.dc.html" style="font-size: 18px; font-weight: 700; color: #1F6B3A; text-decoration: none">{{ project.done }}</a>
+</sc-if>
+<sc-if value="{{ project.donePlain }}" hint-placeholder-val="{{ true }}">
+<span style="font-size: 18px; font-weight: 700; color: #1F6B3A">{{ project.done }}</span>
+</sc-if>
+<span style="font-size: 11px; color: #5F5E57">done</span>
+</div>
+</div>
+</sc-for>
+
+</div>
+</div>
+
+<p style="margin: 0; font-size: 12px; color: #5F5E57">Type an idea into a project's Ideas cell, or use New idea. Drag a card from Ideas to Refine to start it: its worktree is created at <span style="font-family: 'JetBrains Mono', monospace">.claude/worktrees/&lt;card&gt;</span>.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tone = {
+      you: { bg: '#FDEBDD', fg: '#8F3A06' },
+      work: { bg: '#E6EEFC', fg: '#1849A9' },
+      versions: { bg: '#E2F3F0', fg: '#0B5F58' },
+      stopped: { bg: '#FBE4E1', fg: '#9B1C12' }
+    };
+    const card = (title, kind, badge, meta, href) => {
+      const t = kind ? tone[kind] : { bg: '', fg: '' };
+      return { title: title, meta: meta || '', hasBadge: !!kind, badge: badge || '', bg: t.bg, fg: t.fg, linked: !!href, plain: !href, href: href || '' };
+    };
+    const handsOff = [false, false, false, false, true, true, true, false, true];
+    const cells = (cols) => cols.map((cards, i) => ({ cards: cards, bg: handsOff[i] ? '#F7F7F4' : '#FFFFFF' }));
+    const lanes = [
+      { name: 'Ideas', who: 'you', limit: 'no limit' },
+      { name: 'Refine', who: 'you ⇄ product owner', limit: 'limit 3' },
+      { name: 'Mockup', who: 'you ⇄ designer', limit: 'limit 2' },
+      { name: 'Spec', who: 'spec writer, then you', limit: 'limit 2' },
+      { name: 'Plan', who: 'planner', limit: 'limit 2' },
+      { name: 'Build', who: 'developer', limit: 'limit 3' },
+      { name: 'Check', who: 'reviewer + tester', limit: 'limit 3' },
+      { name: 'Try it', who: 'you', limit: 'limit 2' },
+      { name: 'Ship', who: 'the hive', limit: 'limit 1' },
+      { name: 'Done', who: '', limit: '' }
+    ];
+    const projects = [
+      {
+        name: 'flux', path: '~/work/flux', summary: '5 in progress',
+        cells: cells([
+          [card('Export shift report to CSV', null, '', 'added today'), card('Dark print preview', null, '', 'added 3 d ago')],
+          [],
+          [card('Printer font size', 'versions', '◆ 2 versions', 'pick one · 3 comments', 'CardMockup.dc.html')],
+          [],
+          [card('Label margins', 'work', '▶ planning', 'Opus · 6 min')],
+          [],
+          [card('Batch export', 'you', '● question', 'manager forwarded it', 'ForYou.dc.html')],
+          [card('Shift reports', 'you', '● ready to test', 'running on :5213', 'CardTryIt.dc.html')],
+          []
+        ]),
+        done: '14', doneLinked: true, donePlain: false
+      },
+      {
+        name: 'magic-grow', path: '~/private/magic-grow', summary: '2 in progress',
+        cells: cells([
+          [card('Super seed trading', null, '', 'added yesterday')],
+          [card('Seed price history', 'you', '● your turn', 'round 3 · PO waiting', 'CardRefine.dc.html')],
+          [], [], [],
+          [card('Weather events', 'work', '▶ building', '2 agents · 18 min')],
+          [], [], []
+        ]),
+        done: '9', doneLinked: false, donePlain: true
+      },
+      {
+        name: 'watson', path: '~/work/watson', summary: '2 in progress',
+        cells: cells([
+          [card('Retry failed imports', null, '', 'added 5 d ago')],
+          [], [],
+          [card('Nightly import speed', 'you', '● 1 decision', 'review is back', 'ForYou.dc.html')],
+          [],
+          [card('Endpoint docs', 'stopped', '■ stopped', 'severe issue', 'ForYou.dc.html')],
+          [], [], []
+        ]),
+        done: '6', doneLinked: false, donePlain: true
+      },
+      {
+        name: 'mermaid-office', path: '~/work/mermaid-office', summary: '3 in progress',
+        cells: cells([
+          [card('Sequence diagram themes', null, '', 'added 2 d ago'), card('Paste from Visio', null, '', 'added 1 w ago')],
+          [],
+          [card('Shape library panel', 'work', '▶ designer', 'building version 1')],
+          [], [], [],
+          [card('Undo for connectors', 'work', '▶ testing', 'round 1 of 3')],
+          [],
+          [card('Copy as PNG', 'you', '● approve push', 'rebased on main', 'ForYou.dc.html')]
+        ]),
+        done: '22', doneLinked: false, donePlain: true
+      }
+    ];
+    return { lanes: lanes, projects: projects };
+  }
+}
+</script>
+</body>
+</html>

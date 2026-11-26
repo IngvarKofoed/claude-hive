@@ -1,0 +1,20 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-11-26T14:58:38Z" },
+  "title": "Claude Hive mockup",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 980, "title": "Board", "expand": "fill", "is_interactive": true },
+    "ForYou.dc.html": { "x": 1520, "y": 0, "w": 1440, "h": 980, "title": "For you", "expand": "fill", "is_interactive": true },
+    "CardRefine.dc.html": { "x": 0, "y": 1100, "w": 1440, "h": 940, "title": "Card · Refine", "expand": "fill", "is_interactive": true },
+    "CardMockup.dc.html": { "x": 1520, "y": 1100, "w": 1440, "h": 940, "title": "Card · Mockup", "expand": "fill", "is_interactive": true },
+    "CardTryIt.dc.html": { "x": 0, "y": 2160, "w": 1440, "h": 980, "title": "Card · Try it", "expand": "fill", "is_interactive": true },
+    "CardDone.dc.html": { "x": 1520, "y": 2160, "w": 1440, "h": 980, "title": "Card · Done", "expand": "fill", "is_interactive": true }
+  },
+  "order": ["Main.dc.html", "ForYou.dc.html", "CardRefine.dc.html", "CardMockup.dc.html", "CardTryIt.dc.html", "CardDone.dc.html"],
+  "notes": {
+    "title": { "x": 0, "y": -300, "text": "Claude Hive", "kind": "title1", "maxW": 2960 }
+  },
+  "designSystems": []
+}

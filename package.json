@@ -1,0 +1,11 @@
+{
+  "name": "claude-hive",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "gen-version": "node scripts/gen-version.mjs"
+  }
+}

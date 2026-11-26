@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>For you</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#1849A9}a:hover{color:#0E3378}
+</style>
+</helmet>
+<div style="min-height: 980px; background: #F6F6F3; color: #1B1B18; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 10px 24px; min-height: 64px; box-sizing: border-box; background: #FFFFFF; border-bottom: 1px solid #E4E3DE">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"></path><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"></path></svg>
+<span style="font-weight: 700; font-size: 17px; letter-spacing: -0.01em">Claude Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Board</a>
+<a href="ForYou.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1B1B18; background: #EFEFEA; text-decoration: none">For you <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #C2410C; color: #FFFFFF; font-size: 12px; font-weight: 700">7</span></a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Lanes</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Rulebooks</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Projects</a>
+</nav>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+<div style="display: flex; align-items: center; gap: 14px; font-size: 12px; color: #5F5E57">
+<span style="font-weight: 600; color: #45443E">Plan usage</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">5-hour <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 42%; height: 6px; background: #1B1B18"></span></span> 42%</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">Weekly <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 18%; height: 6px; background: #1B1B18"></span></span> 18%</span>
+</div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">New idea</button>
+</div>
+</header>
+
+<main style="padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; max-width: 1392px; width: 100%; box-sizing: border-box; margin: 0 auto">
+
+<section aria-labelledby="stops" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<div>
+<h1 id="stops" style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">For you</h1>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">7 things are holding up a card, oldest first. Everything else is running on its own.</p>
+</div>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Ship · approve</span>
+<span style="font-size: 14px; font-weight: 700">mermaid-office · Copy as PNG</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">2 h ago</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.5">Land <strong>Copy as PNG</strong> on main and push? One commit, rebased on today's main, and the checks passed again after the rebase.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Approve and push</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Not now</button>
+</div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Try it</span>
+<span style="font-size: 14px; font-weight: 700">flux · Shift reports</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">2 h ago</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.5">Ready to test. The app is running on <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px">localhost:5213</span>, with a test guide and 2 decisions made for you.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<a href="CardTryIt.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; box-sizing: border-box; border-radius: 8px; background: #1B1B18; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">Try it</a>
+</div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #F0C7C1; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FBE4E1; color: #9B1C12; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">■ Build · severe issue</span>
+<span style="font-size: 14px; font-weight: 700">watson · Endpoint docs</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">1 h ago · card stopped</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.5">The docs generator can't read the new route format, so the approach in the spec won't work in this codebase. Building further would be waste.</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #45443E"><strong>Spec keeper recommends:</strong> redesign. Describe the routes in the YAML format the generator already reads, instead of the new decorators.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Redesign → back to Spec</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Rethink → back to Refine</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Narrow the scope</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #9B1C12; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Drop</button>
+</div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Check · question</span>
+<span style="font-size: 14px; font-weight: 700">flux · Batch export</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">1 h ago · the card keeps going</span>
+</div>
+<p style="margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4">Should exported files be named by date or by batch name?</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #45443E"><strong>Manager:</strong> not settled by the rulebook, the spec or your earlier answers, and you'd see it in every export. I'd go by date: it matches the existing report exports.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">By date · <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500">2026-11-26-batch-17.csv</span></button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">By batch · <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500">batch-17-2026-11-26.csv</span></button>
+</div>
+<p style="margin: 0; font-size: 12px; color: #5F5E57">Your answer goes back to the tester and becomes a suggested rule for flux.</p>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Spec · review decision</span>
+<span style="font-size: 14px; font-weight: 700">watson · Nightly import speed</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">40 min ago</span>
+</div>
+<p style="margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4">During rollout, should the old import keep running next to the new one for a week?</p>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #45443E"><strong>Review · reversibility:</strong> switching over at once can't be walked back if the new import misses rows. Running both costs a second nightly job for a week.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Run both for a week</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">Switch over at once</button>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; font-size: 14px; font-weight: 600">Open the spec</a>
+</div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #E2F3F0; color: #0B5F58; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">◆ Mockup</span>
+<span style="font-size: 14px; font-weight: 700">flux · Printer font size</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">25 min ago</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.5">Two versions are built and running. Pick one, then say Good.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<a href="CardMockup.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; box-sizing: border-box; border-radius: 8px; background: #1B1B18; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">Compare versions</a>
+</div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="padding: 2px 8px; border-radius: 6px; background: #FDEBDD; color: #8F3A06; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Refine · your turn</span>
+<span style="font-size: 14px; font-weight: 700">magic-grow · Seed price history</span>
+<span style="margin-left: auto; font-size: 12px; color: #5F5E57">18 min ago</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.5; color: #45443E">“How far back should the history go? I'd suggest 30 days, the same window as the market stats.”</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<a href="CardRefine.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; box-sizing: border-box; border-radius: 8px; background: #1B1B18; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">Open the chat</a>
+</div>
+</article>
+</section>
+
+<aside aria-labelledby="skim" style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<div>
+<h2 id="skim" style="margin: 0; font-size: 16px; font-weight: 700">Stops nothing</h2>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">To skim when you have time.</p>
+</div>
+
+<div style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #45443E">Decided for you</h3>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: #5F5E57">flux · Report filters · Build</span>
+<span style="font-size: 14px; line-height: 1.4">Kept the old filter links working, so saved bookmarks still open</span>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer">Redo the other way</button>
+</div>
+<div style="height: 1px; background: #EFEFEA"></div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: #5F5E57">magic-grow · Weather events · Build · manager</span>
+<span style="font-size: 14px; line-height: 1.4">Storms only appear on maps that already have rain (the spec was silent)</span>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer">Redo the other way</button>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #45443E">Suggested rules</h3>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #5F5E57">magic-grow · from your answer on Seed price history</span>
+<span style="font-size: 14px; line-height: 1.4">“Market windows are 30 days.”</span>
+<div style="display: flex; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer">Add rule</button>
+<button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer">Drop</button>
+</div>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #45443E">Found along the way</h3>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #5F5E57">watson · noticed while building Endpoint docs</span>
+<span style="font-size: 14px; line-height: 1.4">The import log rotates daily but old logs are never deleted.</span>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer">Make it an idea</button>
+</div>
+</div>
+
+<div style="background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #45443E">Answered by the manager</h3>
+<span style="font-size: 14px; line-height: 1.4">3 questions today, all from the spec or the rulebook.</span>
+<a href="#" style="font-size: 13px; font-weight: 600">See them</a>
+</div>
+</aside>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

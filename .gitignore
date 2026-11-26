@@ -1,0 +1,2 @@
+# Generated at build time by scripts/gen-version.mjs
+packages/shared/src/version.ts
