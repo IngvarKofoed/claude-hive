@@ -115,18 +115,25 @@ export class SdkRunner implements SessionRunner {
     const done = (async (): Promise<TurnOutcome> => {
       // A first turn that failed before creating the session can still start; one that got as far as
       // writing the transcript must resume it (spec: Failures).
-      const resume = request.resume || (await sessionHasMessages(request.sessionId, request.cwd));
+      const kept = request.persist !== false;
+      const resume = kept && (request.resume || (await sessionHasMessages(request.sessionId, request.cwd)));
+      const append = request.extraInstructions
+        ? `${request.role.instructions}\n\n${request.extraInstructions}`
+        : request.role.instructions;
       const q = query({
         prompt: input,
         options: {
           cwd: request.cwd,
           model: request.role.model,
-          systemPrompt: { type: "preset", preset: "claude_code", append: request.role.instructions },
+          systemPrompt: { type: "preset", preset: "claude_code", append },
           permissionMode: "auto",
           settingSources: [...SETTING_SOURCES],
           includePartialMessages: true,
-          mcpServers: { hive: hiveServer(request.hiveTools) },
-          allowedTools: ["mcp__hive__write_brief"],
+          ...(request.hiveTools
+            ? { mcpServers: { hive: hiveServer(request.hiveTools) }, allowedTools: ["mcp__hive__write_brief"] }
+            : {}),
+          ...(request.outputFormat ? { outputFormat: { type: "json_schema", schema: request.outputFormat } } : {}),
+          ...(kept ? {} : { persistSession: false }),
           canUseTool: (toolName, toolInput, { signal }) =>
             handlers.canUseTool(toolName, toolInput, signal),
           ...(resume ? { resume: request.sessionId } : { sessionId: request.sessionId }),
@@ -159,11 +166,13 @@ export class SdkRunner implements SessionRunner {
               }
             }
           } else if (m.type === "result") {
-            if (m.subtype === "success") {
+            if (interruptRequested) {
+              outcome = { kind: "ok", interrupted: true };
+            } else if (m.subtype === "success") {
               markCreated();
-              outcome = { kind: "ok" };
-            } else if (interruptRequested) {
-              outcome = { kind: "ok" };
+              // Only structured_output counts as a report: a session that can't fill the schema still ends in
+              // "success" with none (docs/ARCHITECTURE.md, Role reports).
+              outcome = { kind: "ok", report: m.structured_output };
             } else {
               outcome = { kind: "error", message: m.errors?.join("; ") || m.subtype };
             }
@@ -173,7 +182,7 @@ export class SdkRunner implements SessionRunner {
         }
       } catch (error) {
         outcome = interruptRequested
-          ? { kind: "ok" }
+          ? { kind: "ok", interrupted: true }
           : { kind: "error", message: error instanceof Error ? error.message : String(error) };
       } finally {
         input.end();

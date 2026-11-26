@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Brief, CardState, ChatItem, Lane, PendingItem, ProjectSummary } from "@hive/shared";
+import type { Brief, CardState, ChatItem, ErrorAction, Lane, PendingItem, Plan, ProjectSummary } from "@hive/shared";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_card ON events(card_id, at);
 `;
 
+/** Columns added after the first slice; added to an existing database on open. */
+const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
+  { table: "cards", column: "spec_path", type: "TEXT" },
+  { table: "cards", column: "reviewed_spec_hash", type: "TEXT" },
+  { table: "cards", column: "review_applying", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "plan", type: "TEXT" },
+];
+
 export interface ProjectRow {
   id: string;
   name: string;
@@ -73,6 +81,13 @@ export interface CardRow {
   worktreePath: string | null;
   brief: Brief | null;
   moveError: string | null;
+  /** Relative to the worktree; set when the card enters Spec. */
+  specPath: string | null;
+  /** The hash of the text the last finished review produced; Sign off needs the file to match it. */
+  reviewedSpecHash: string | null;
+  /** A review's findings were sent to the spec writer and haven't been applied in full yet. */
+  reviewApplying: boolean;
+  plan: Plan | null;
 }
 
 export interface SessionRow {
@@ -105,6 +120,12 @@ export class HiveDb {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);
+    for (const { table, column, type } of ADDED_COLUMNS) {
+      const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+        (c) => c.name === column,
+      );
+      if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
   }
 
   close(): void {
@@ -151,17 +172,20 @@ export class HiveDb {
   insertCard(c: CardRow): void {
     this.db
       .prepare(
-        `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
+           spec_path, reviewed_spec_hash, review_applying, plan, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
-        c.brief ? JSON.stringify(c.brief) : null, c.moveError, now());
+        c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
+        c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, now());
   }
 
   updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId">>): void {
     const cols: Record<string, string> = {
       title: "title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
-      worktreePath: "worktree_path", brief: "brief", moveError: "move_error",
+      worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
+      reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -169,7 +193,9 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      values.push(key === "brief" ? (value ? JSON.stringify(value) : null) : value);
+      if (key === "brief" || key === "plan") values.push(value ? JSON.stringify(value) : null);
+      else if (key === "reviewApplying") values.push(value ? 1 : 0);
+      else values.push(value);
     }
     if (sets.length === 0) return;
     this.db.prepare(`UPDATE cards SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
@@ -183,11 +209,13 @@ export class HiveDb {
       .run(s.id, s.cardId, s.lane, s.role, s.kind, now());
   }
 
-  /** The card's session in a lane (one per card per lane). */
-  getSessionFor(cardId: string, lane: Lane): SessionRow | undefined {
+  /** The card's session in a lane with a role (one per card per lane and role), the newest if there are several. */
+  getSessionFor(cardId: string, lane: Lane, role: string): SessionRow | undefined {
     const r = this.db
-      .prepare("SELECT * FROM sessions WHERE card_id = ? AND lane = ? ORDER BY started_at DESC LIMIT 1")
-      .get(cardId, lane);
+      .prepare(
+        "SELECT * FROM sessions WHERE card_id = ? AND lane = ? AND role = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(cardId, lane, role);
     return r ? toSession(r) : undefined;
   }
 
@@ -243,22 +271,27 @@ export class HiveDb {
       .run(id, cardId, at, type, JSON.stringify(data));
   }
 
-  /** The chat as stored: your messages, the product owner's text blocks and error lines, oldest first. */
-  chatFor(cardId: string): ChatItem[] {
+  /**
+   * One lane's chat as stored: messages, the hive's notes and error lines, oldest first. Rows the first slice wrote
+   * carry no lane and count as Refine's.
+   */
+  chatFor(cardId: string, lane: Lane): ChatItem[] {
     const rows = this.db
       .prepare("SELECT * FROM events WHERE card_id = ? AND type IN ('chat', 'error') ORDER BY at, rowid")
       .all(cardId) as any[];
-    return rows.map((r) => {
-      const d = JSON.parse(r.data);
-      return r.type === "chat"
-        ? { kind: "message", id: r.id, at: r.at, from: d.from, text: d.text }
-        : { kind: "error", id: r.id, at: r.at, message: d.message, retryable: !!d.retryable };
-    });
+    return rows
+      .map((r) => ({ r, d: JSON.parse(r.data) }))
+      .filter(({ d }) => (d.lane ?? "refine") === lane)
+      .map(({ r, d }): ChatItem =>
+        r.type === "chat"
+          ? { kind: "message", id: r.id, at: r.at, from: d.from, text: d.text }
+          : { kind: "error", id: r.id, at: r.at, message: d.message, actions: errorActions(d) },
+      );
   }
 
-  /** The newest error line on the card, if it's the last thing in the chat. */
-  lastChatItem(cardId: string): ChatItem | undefined {
-    return this.chatFor(cardId).at(-1);
+  /** The last item in a lane's chat. */
+  lastChatItem(cardId: string, lane: Lane): ChatItem | undefined {
+    return this.chatFor(cardId, lane).at(-1);
   }
 }
 
@@ -270,8 +303,15 @@ function toCard(r: any): CardRow {
   return {
     id: r.id, projectId: r.project_id, title: r.title, ideaText: r.idea_text, lane: r.lane, state: r.state,
     branch: r.branch, worktreePath: r.worktree_path, brief: r.brief ? JSON.parse(r.brief) : null,
-    moveError: r.move_error,
+    moveError: r.move_error, specPath: r.spec_path ?? null, reviewedSpecHash: r.reviewed_spec_hash ?? null,
+    reviewApplying: !!r.review_applying, plan: r.plan ? JSON.parse(r.plan) : null,
   };
+}
+
+/** Error rows the first slice wrote have `retryable`; later ones list their actions. */
+function errorActions(d: { actions?: ErrorAction[]; retryable?: boolean }): ErrorAction[] {
+  if (Array.isArray(d.actions)) return d.actions;
+  return d.retryable ? ["retry"] : [];
 }
 
 function toSession(r: any): SessionRow {

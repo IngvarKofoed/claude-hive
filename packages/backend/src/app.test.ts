@@ -25,6 +25,7 @@ describe("the API's local-only guard", () => {
     const hive = new Hive({
       db, hub, git, runner: new FakeRunner(), probe: new FakeProbe(),
       role: (name) => ({ name, model: "opus", kind: "conversation", instructions: "" }),
+      specFormatDir: "/nonexistent",
     });
     server = await new Promise<Server>((resolve) => {
       const s = createApp(hive, hub, { ports: [0] }).listen(0, "127.0.0.1", () => resolve(s));

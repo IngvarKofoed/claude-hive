@@ -50,3 +50,13 @@
   display: flex;
   gap: var(--space-3);
 }
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+}
+
+.input:disabled {
+  background: var(--color-surface-muted);
+  cursor: not-allowed;
+}

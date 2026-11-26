@@ -8,6 +8,8 @@
   },
   "scripts": {
     "pretypecheck": "node ../../scripts/gen-version.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "node ../../scripts/gen-version.mjs",
+    "test": "vitest run"
   }
 }

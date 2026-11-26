@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   GitError,
   cardSlug,
+  commitFile,
   createCardWorktree,
   ensureWorktreesExcluded,
   hasBranch,
@@ -113,5 +114,28 @@ describe("cardSlug", () => {
     const t = cardSlug("word ".repeat(30), "123456");
     expect(t.length).toBeLessThanOrEqual(47);
     expect(t).not.toMatch(/--/);
+  });
+});
+
+describe("commitFile", () => {
+  it("commits a new file on the worktree's branch, then only real changes", async () => {
+    const root = makeRepo();
+    git(root, "config", "user.name", "T");
+    git(root, "config", "user.email", "t@example.com");
+    const { worktreePath, branch } = await createCardWorktree(root, "spec-card");
+    mkdirSync(join(worktreePath, "docs", "specs"), { recursive: true });
+    writeFileSync(join(worktreePath, "docs", "specs", "s.md"), "# Spec\n");
+    expect(await commitFile(worktreePath, "docs/specs/s.md", "Spec: s")).toBe(true);
+    expect(git(root, "log", "--format=%s", branch, "-1").trim()).toBe("Spec: s");
+    expect(git(worktreePath, "status", "--porcelain")).toBe("");
+    expect(await commitFile(worktreePath, "docs/specs/s.md", "Spec: s")).toBe(false);
+    writeFileSync(join(worktreePath, "docs", "specs", "s.md"), "# Spec, revised\n");
+    expect(await commitFile(worktreePath, "docs/specs/s.md", "Spec: s again")).toBe(true);
+  });
+
+  it("throws GitError for a path git can't add", async () => {
+    const root = makeRepo();
+    const { worktreePath } = await createCardWorktree(root, "nope-card");
+    await expect(commitFile(worktreePath, "missing.md", "x")).rejects.toThrow(GitError);
   });
 });

@@ -18,7 +18,7 @@ describe("Hive", () => {
   let events: HiveEvent[];
   let repos: TempRepo[];
 
-  const newHive = () => new Hive({ db, hub, git, runner, probe, role, log: () => {} });
+  const newHive = () => new Hive({ db, hub, git, runner, probe, role, log: () => {}, specFormatDir: "/nonexistent" });
 
   beforeEach(() => {
     db = new HiveDb(":memory:");
@@ -143,7 +143,7 @@ describe("Hive", () => {
 
     it("saves the brief from write_brief and renames the card", async () => {
       const { card, turn } = await inRefine();
-      const reply = await turn.request.hiveTools.writeBrief({
+      const reply = await turn.request.hiveTools!.writeBrief({
         title: "Printer font size", problem: "Text is too small.", whoItsFor: "Users with poor sight",
         whatDoneLooksLike: ["Each printer has a size"], outOfScope: [], openPoints: ["Max size?"],
       });
@@ -169,7 +169,7 @@ describe("Hive", () => {
       const { card, turn } = await inRefine();
       await turn.end({ kind: "error", message: "Not logged in" });
       const last = hive.card(card.id).chat.at(-1);
-      expect(last).toMatchObject({ kind: "error", message: "Not logged in", retryable: true });
+      expect(last).toMatchObject({ kind: "error", message: "Not logged in", actions: ["retry"] });
       hive.retry(card.id);
       expect(runner.last.request.message).toBe(turn.request.message);
       expect(runner.last.request.resume).toBe(false); // the failed first turn never created the session
@@ -274,7 +274,7 @@ describe("Hive", () => {
       const after = restarted.card(card.id);
       expect(after.turnRunning).toBe(false);
       expect(after.state).toBe("needs-you");
-      expect(after.chat.at(-1)).toMatchObject({ kind: "error", retryable: false });
+      expect(after.chat.at(-1)).toMatchObject({ kind: "error", actions: [] });
       expect(runner.turns).toHaveLength(1);
     });
 

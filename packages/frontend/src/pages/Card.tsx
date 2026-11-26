@@ -1,45 +1,108 @@
-import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { CardDetail, HiveEvent } from "@hive/shared";
-import { api } from "../api/client";
-import { useHiveEvents, useStreamOpen } from "../api/events";
+import { laneImplemented, type CardDetail } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
-import { applyCardEvent, type CardLive } from "../components/cardState";
 import { Chat } from "../components/Chat";
+import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
 import { LaneSteps } from "../components/LaneSteps";
+import { PlanView } from "../components/PlanView";
+import { ReviewBar } from "../components/ReviewBar";
+import { SpecView } from "../components/SpecView";
+import { useCardLive } from "../components/useCardLive";
 import { Badge } from "../components/ui/Badge";
 import { Chip } from "../components/ui/Chip";
 import { Panel } from "../components/ui/Panel";
+import type { CardLive } from "../components/cardState";
 import styles from "./Card.module.css";
+
+function PlanPanel({ detail }: { detail: CardDetail }) {
+  return (
+    <Panel title="Plan">
+      {detail.plan ? (
+        <PlanView plan={detail.plan} />
+      ) : (
+        <p className={styles.muted}>
+          {detail.lane === "plan" && detail.turnRunning
+            ? "The planner is writing the plan…"
+            : "The plan appears here once the planner has written it."}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
+  const { detail } = live;
+
+  if (!laneImplemented(detail.lane)) {
+    return (
+      <>
+        <Panel tone="warning" role="status">
+          This lane isn&apos;t implemented yet
+        </Panel>
+        <div className={styles.columns}>
+          {detail.spec ? (
+            <Panel title="Spec">
+              <SpecView spec={detail.spec} brief={detail.brief} />
+            </Panel>
+          ) : null}
+          {detail.plan ? <PlanPanel detail={detail} /> : null}
+        </div>
+      </>
+    );
+  }
+
+  if (detail.lane === "spec") {
+    return (
+      <div className={styles.columns}>
+        <Panel title="Spec writer" className={styles.chatPanel}>
+          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+        </Panel>
+        <Panel title="Spec" className={styles.sidePanel}>
+          <div className={styles.stack}>
+            <ReviewBar detail={detail} onMoved={onMoved} />
+            {detail.spec ? (
+              <SpecView spec={detail.spec} brief={detail.brief} />
+            ) : (
+              <p className={styles.muted}>The spec writer is writing the spec…</p>
+            )}
+          </div>
+        </Panel>
+      </div>
+    );
+  }
+
+  if (detail.lane === "plan") {
+    return (
+      <div className={styles.columns}>
+        <Panel title="Planner" className={styles.chatPanel}>
+          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+        </Panel>
+        <div className={styles.sidePanel}>
+          <PlanPanel detail={detail} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.columns}>
+      <Panel title="Product owner" className={styles.chatPanel}>
+        <div className={styles.stack}>
+          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          {detail.lane === "refine" ? <GoodBar detail={detail} onMoved={onMoved} /> : null}
+        </div>
+      </Panel>
+      <Panel title="Brief" className={styles.briefPanel}>
+        <BriefPanel brief={detail.brief} />
+      </Panel>
+    </div>
+  );
+}
 
 export function Card() {
   const { id } = useParams();
-  const [live, setLive] = useState<CardLive | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      const detail: CardDetail = await api.card(id);
-      setLive({ detail, streaming: "", activity: null });
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the card.");
-    }
-  }, [id]);
-
-  useEffect(() => {
-    setLive(null);
-    void load();
-  }, [load]);
-
-  useHiveEvents((event: HiveEvent) => {
-    setLive((prev) => (prev ? applyCardEvent(prev, event) : prev));
-  });
-
-  // Whatever happened while the stream was down (a hive restart, a slow connect) is in the card itself.
-  useStreamOpen(() => void load());
+  const { live, error, reload } = useCardLive(id);
 
   return (
     <>
@@ -73,14 +136,7 @@ export function Card() {
               ) : null}
               <LaneSteps current={live.detail.lane} />
             </div>
-            <div className={styles.columns}>
-              <Panel title="Product owner" className={styles.chatPanel}>
-                <Chat detail={live.detail} streaming={live.streaming} activity={live.activity} />
-              </Panel>
-              <Panel title="Brief" className={styles.briefPanel}>
-                <BriefPanel brief={live.detail.brief} />
-              </Panel>
-            </div>
+            <LaneView live={live} onMoved={() => void reload()} />
           </>
         ) : null}
       </main>

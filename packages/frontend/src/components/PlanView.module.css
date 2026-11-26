@@ -1,0 +1,66 @@
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  overflow-wrap: anywhere;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.heading {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.steps {
+  padding-left: var(--space-8);
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.step,
+.chunk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stepTitle {
+  font-weight: var(--weight-semibold);
+}
+
+.detail {
+  color: var(--color-text-secondary);
+}
+
+.check {
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+}
+
+.chunks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tests {
+  padding-left: var(--space-8);
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

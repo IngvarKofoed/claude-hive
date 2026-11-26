@@ -39,10 +39,23 @@ export interface TurnRequest {
   cwd: string;
   role: Role;
   message: string;
-  hiveTools: HiveTools;
+  /** The hive's own tools (write_brief), for roles that use them. */
+  hiveTools?: HiveTools;
+  /** A JSON schema the turn's fixed-format report must match (`outputFormat`); the report comes back on the outcome. */
+  outputFormat?: Record<string, unknown>;
+  /** False for a one-off session that isn't kept (`persistSession: false`). */
+  persist?: boolean;
+  /** Appended to the role's instructions in the system prompt, e.g. the spec format. Fixed at the first turn. */
+  extraInstructions?: string;
 }
 
-export type TurnOutcome = { kind: "ok" } | { kind: "error"; message: string };
+export type TurnOutcome =
+  /**
+   * The turn ended. `report` is the fixed-format report if the turn had an `outputFormat` and produced one (only
+   * `structured_output` counts, never the result's `success`). `interrupted` is set when the turn was stopped.
+   */
+  | { kind: "ok"; report?: unknown; interrupted?: boolean }
+  | { kind: "error"; message: string };
 
 export interface RunningTurn {
   /**

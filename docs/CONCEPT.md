@@ -37,7 +37,7 @@ Lanes are the columns, and projects are the rows (swimlanes). Each lane has a li
 
 **Refine and Mockup** are back-and-forth chats that go on until you say Good. The agent may say it thinks the card is ready, but only you move it on.
 
-**Spec** is mostly reading. **Sign off** stays greyed out while the review runs, and again if the spec has changed since the review read it.
+**Spec** is mostly reading. You press **Review** when you think the spec is ready. **Sign off** stays greyed out until a review has run, while it runs, and again if the spec has changed since the review read it.
 
 **Try it** is prepared so your testing is quick:
 

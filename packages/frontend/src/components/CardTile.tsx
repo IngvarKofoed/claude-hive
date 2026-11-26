@@ -1,5 +1,5 @@
 import type { DragEvent } from "react";
-import type { CardSummary } from "@hive/shared";
+import { laneImplemented, type CardSummary } from "@hive/shared";
 import { Badge } from "./ui/Badge";
 import styles from "./CardTile.module.css";
 
@@ -12,9 +12,10 @@ interface Props {
 
 export function CardTile({ card, onOpen, onDragStart, onDragEnd }: Props) {
   const draggable = card.lane === "ideas";
-  const openable = card.lane === "refine";
-  const badge =
-    card.state === "working" ? (
+  const openable = card.lane !== "ideas";
+  const badge = !laneImplemented(card.lane) ? (
+    <Badge tone="neutral">Not implemented yet</Badge>
+  ) : card.state === "working" ? (
       <Badge tone="working">▶ working</Badge>
     ) : (
       <Badge tone="needs-you">● needs you</Badge>

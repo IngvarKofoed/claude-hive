@@ -151,7 +151,8 @@ query({
 
 **Role reports.** Each hands-off role ends its turn with a report checked against a JSON schema (`outputFormat`). The board engine routes on its fields, never on prose:
 
-- **planner:** the steps, the chunks with the files each owns, the tests, and how each step is checked;
+- **planner:** the steps, the chunks with the files each owns, the tests, and how each step is checked. The report is the plan: it's stored on the card, with no hive tool and no file in the repo;
+- **spec reviewer:** findings, each a `decision` or a `fix`, with where, what's at stake, and the options;
 - **developer:** what was built, departures from the plan, issues, and decisions made without you;
 - **reviewer:** findings, each marked `bug`, `spec-gap` or `extra`;
 - **tester:** each How-to-verify bullet marked `pass`, `fail` or `cant-verify`, with evidence;
@@ -168,7 +169,9 @@ query({
 | Ideas | You drag the card | Refine, and the worktree is created |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
-| Plan | The plan is written | Build |
+| Plan | The planner's report is `done` | Build. Its plan is stored on the card. |
+| Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
+| Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
 | Build | It's built | Check, with the issues found so far still on the card |
 | Build | A blocking issue judged `code-wrong` | Plan, for an amendment plan |
 | Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round. Spec issues wait on the card for the round that passes. |
@@ -187,7 +190,7 @@ query({
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
-- **In a hands-off lane,** a question goes to the manager ladder.
+- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's questions come straight to you on the card page, like a chat lane's.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -244,10 +247,17 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 
 **Review gate.**
 
-1. When you're about to sign off, it stores the spec's hash and starts the blind spec reviewer, which is given only the spec path and `review.md`.
-2. Findings marked "decision" go into the Spec chat. Fixes are applied by the spec writer session.
-3. The hash after those fixes is recorded as the reviewed text.
+1. **Review** is a button you press when you think the spec is ready.
+   - It stores the spec's hash and starts the blind spec reviewer, a one-off Fable session that isn't kept.
+   - The reviewer is given only the spec path and `review.md`, and returns a fixed-format report of findings.
+   - While it runs, you can't message the spec writer.
+2. **The findings go to the spec writer as one message.** It applies the fixes, and puts each decision to you with `AskUserQuestion`, using the reviewer's options. A decision you already settled is noted, not asked again.
+3. **When that review turn finishes, the file's hash is recorded as the reviewed text,** so the answers you gave during it count as reviewed.
+   - A review turn that is stopped, cut off or fails leaves the review unfinished, and Retry re-sends the findings.
+   - Findings from a spec that changed during the review are dropped.
 4. **Sign off** is enabled only while the spec on disk matches that hash. A changed spec greys it out until a new review has read it.
+   - The hive reads the spec from disk, never from a session: after every turn, on every fetch, and by watching the spec's folder.
+   - Signing off commits only the spec file on the card's branch.
 
 **Spec keeper.**
 
@@ -286,7 +296,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning, runCommand, setupCommand, testCommand, localFiles, laneLimits |
-| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath, reviewedSpecHash |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
@@ -307,7 +317,9 @@ GET    /api/cards/:id                     The card with every lane's history
 POST   /api/cards/:id/messages            Chat in the current lane { text }
 POST   /api/cards/:id/comments            Comment { on: spec | mockup, anchor, text }
 POST   /api/cards/:id/good                Leave Refine or Mockup
+POST   /api/cards/:id/review              Start the blind review of the spec
 POST   /api/cards/:id/signoff             Leave Spec (refused unless the review is fresh)
+POST   /api/cards/:id/back-to-spec        Send a blocked plan back to Spec
 POST   /api/cards/:id/versions/:v/pick    Pick a mockup version
 POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
 POST   /api/cards/:id/stop                Stop the running turn
@@ -334,6 +346,7 @@ The look comes from the mockup in `docs/mockups/`. The CSS is built so that the 
 - **No inline styles,** and no style objects in TSX. A state that changes the look (picked, needs you, stopped) is a class or a `data-` attribute that the CSS selects on.
 - **Shared building blocks live in `components/ui/`:** button, badge, panel, chip, chat bubble. Pages are built from them.
 - **A second theme,** such as dark mode, would be a second set of token values under `[data-theme="dark"]`. Nothing else would change.
+- **Lanes not built yet** are marked `implemented: false` in the shared lane list, and a card in one shows "Not implemented yet" instead of a badge. This is temporary: each lane's slice turns its own flag on.
 
 ## Versioning
 
@@ -350,7 +363,7 @@ The version is `git describe --tags --long --always --dirty`, e.g. `v0.1.0-12-g3
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React, TypeScript, Vite, CSS Modules on design tokens (CSS custom properties) |
+| Frontend | React, TypeScript, Vite, CSS Modules on design tokens (CSS custom properties); `react-markdown` and `remark-gfm` render specs |
 | Backend | Node.js, Express, TypeScript |
 | Claude | `@anthropic-ai/claude-agent-sdk` (tested with 0.3.332), on your Claude subscription login |
 | Live updates | Server-Sent Events |

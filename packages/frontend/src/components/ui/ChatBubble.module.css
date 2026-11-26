@@ -1,9 +1,29 @@
 .row {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
 }
 
 .row[data-from="you"] {
-  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.note {
+  color: var(--color-text-subtle);
+  font-size: var(--text-md);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.noteLabel {
+  font-weight: var(--weight-semibold);
 }
 
 .bubble {

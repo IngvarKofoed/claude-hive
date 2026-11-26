@@ -26,7 +26,7 @@ export class FakeTurn implements RunningTurn {
 
   async interrupt(): Promise<void> {
     this.interrupted = true;
-    this.finish({ kind: "ok" });
+    this.finish({ kind: "ok", interrupted: true });
   }
 
   /** End the turn; resolves once the hive has handled the outcome. */
@@ -80,9 +80,20 @@ export function makeRepo(options: { branch?: string; claudeMd?: boolean } = {}):
   const root = join(base, "repo");
   execFileSync("mkdir", ["-p", root]);
   git(root, "init", "-q", "-b", options.branch ?? "main");
+  // A local identity, so the hive's own commits (sign-off) work without the machine's global git config.
+  git(root, "config", "user.name", "Test");
+  git(root, "config", "user.email", "test@example.com");
   writeFileSync(join(root, "app.txt"), "hello\n");
   if (options.claudeMd) writeFileSync(join(root, "CLAUDE.md"), "# Test project\n");
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "init");
   return { root, git: (...args) => git(root, ...args), cleanup: () => rmSync(base, { recursive: true, force: true }) };
+}
+
+/** A throwaway spec-format folder with a format.md and a review.md. */
+export function makeSpecFormat(): { dir: string; cleanup(): void } {
+  const dir = mkdtempSync(join(tmpdir(), "hive-spec-format-"));
+  writeFileSync(join(dir, "format.md"), "# What a spec contains\nWrite a spec.\n");
+  writeFileSync(join(dir, "review.md"), "# The fresh-eyes review\n## For the reviewer\nReview it.\n");
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }

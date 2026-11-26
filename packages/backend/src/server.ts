@@ -20,8 +20,9 @@ const pageDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../fro
 
 const db = new HiveDb(dbPath);
 const hub = new EventHub();
+const specFormatDir = process.env.HIVE_SPEC_FORMAT_DIR ?? join(homedir(), ".claude", "skills", "spec-format");
 const hive = new Hive({
-  db, hub, git, runner: new SdkRunner(), probe: new SdkTrustProbe(), role: (name) => loadRole(name),
+  db, hub, git, runner: new SdkRunner(), probe: new SdkTrustProbe(), role: (name) => loadRole(name), specFormatDir,
 });
 hive.recoverAfterRestart();
 

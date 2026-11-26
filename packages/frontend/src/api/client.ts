@@ -43,6 +43,11 @@ export const api = {
     request<unknown>("POST", `/cards/${encodeURIComponent(id)}/messages`, body),
   stop: (id: string) => request<unknown>("POST", `/cards/${encodeURIComponent(id)}/stop`),
   retry: (id: string) => request<unknown>("POST", `/cards/${encodeURIComponent(id)}/retry`),
+  // Refine → Spec, Spec → Plan (refused unless the review is fresh), a blocked plan → Spec.
+  good: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/good`),
+  review: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/review`),
+  signoff: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/signoff`),
+  backToSpec: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-spec`),
   answer: (itemId: string, body: AnswerBody) =>
     request<unknown>("POST", `/for-you/${encodeURIComponent(itemId)}`, body),
 };

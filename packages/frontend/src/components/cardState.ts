@@ -32,6 +32,12 @@ export function applyCardEvent(state: CardLive, event: HiveEvent): CardLive {
     case "brief.updated":
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, brief: event.brief } };
+    case "spec.updated":
+      if (event.cardId !== id) return state;
+      return { ...state, detail: { ...state.detail, spec: event.spec } };
+    case "plan.updated":
+      if (event.cardId !== id) return state;
+      return { ...state, detail: { ...state.detail, plan: event.plan } };
     case "pending.updated":
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, pending: event.pending } };

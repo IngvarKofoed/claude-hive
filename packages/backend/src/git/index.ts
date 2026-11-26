@@ -90,6 +90,20 @@ export async function createCardWorktree(
   return { worktreePath, branch };
 }
 
+/**
+ * A checkpoint commit of one file on the worktree's branch: `git add -- <path>`, then `git commit -m <message> --
+ * <path>`. The add is needed because the file may be new. Returns false when the file has no changes to commit.
+ */
+export async function commitFile(worktree: string, path: string, message: string): Promise<boolean> {
+  const add = await git(worktree, ["add", "--", path]);
+  if (!add.ok) throw new GitError(reason(add.stderr));
+  const staged = await git(worktree, ["diff", "--cached", "--quiet", "--", path]);
+  if (staged.ok) return false; // nothing staged for this file
+  const commit = await git(worktree, ["commit", "-q", "-m", message, "--", path]);
+  if (!commit.ok) throw new GitError(reason(commit.stderr));
+  return true;
+}
+
 /** A folder- and branch-safe slug from the title plus the first 6 chars of the id. */
 export function cardSlug(title: string, id: string): string {
   const base = title

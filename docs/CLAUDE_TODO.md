@@ -16,8 +16,3 @@ is not a record of anything; `docs/changelog/` is. A line you add here is read a
   port per version for comparing side by side, since only the card has a port. Surfaced by a design review of the docs.
 - **The `git init` first commit takes everything in the folder** — secrets or build output a `.gitignore` would
   keep out end up committed. Surfaced by `2026-11-26-projects-always-git`.
-- **The card page drops events that arrive before its first fetch returns** — the page only applies events to a
-  card it has already loaded, so a chat message or brief change landing mid-fetch is missing until the next
-  reload or reconnect. Surfaced by `2026-11-26-board-refine-chat-slice`.
-- **Enter in the card's reply box doesn't send** — only the Send button does, unlike every chat the person is used
-  to. Surfaced by `2026-11-26-board-refine-chat-slice`.

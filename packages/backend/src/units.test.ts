@@ -1,10 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { canMove } from "./board/moves";
+import { canMove, laneAfter, laneAfterPlan } from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
 import { describeTool, InputQueue } from "./sessions/sdkRunner";
 
-describe("card moves", () => {
-  it("allows only Ideas → Refine in this slice", () => {
+describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
+  it("Refine → Spec on Good, skipping Mockup", () => {
+    expect(laneAfter("refine", "good")).toBe("spec");
+    expect(laneAfter("spec", "good")).toBeNull();
+  });
+
+  it("Spec → Plan on Sign off", () => {
+    expect(laneAfter("spec", "signoff")).toBe("plan");
+    expect(laneAfter("refine", "signoff")).toBeNull();
+  });
+
+  it("Plan → Build when the planner's report is done, and stays in Plan when it's blocked or missing", () => {
+    expect(laneAfterPlan("done")).toBe("build");
+    expect(laneAfterPlan("blocked")).toBe("plan");
+    expect(laneAfterPlan("missing")).toBe("plan");
+  });
+
+  it("Plan → Spec on Back to Spec", () => {
+    expect(laneAfter("plan", "back-to-spec")).toBe("spec");
+    expect(laneAfter("build", "back-to-spec")).toBeNull();
+  });
+
+  it("allows dragging only Ideas → Refine", () => {
     expect(canMove("ideas", "refine")).toBe(true);
     expect(canMove("ideas", "mockup")).toBe(false);
     expect(canMove("refine", "mockup")).toBe(false);
