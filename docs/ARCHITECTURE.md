@@ -114,6 +114,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `manager` | any hands-off lane | Sonnet | Read-only, plus the hive's lookup tools | One-off, one for each question |
 | `spec-reviewer` | Spec | Fable | Read-only, sees only the spec file and `review.md` | One-off, blind |
 
+- **One developer per card.** When the spec's Implementation strategy calls for several agents, the developer session runs them as its own subagents. So a card has one developer report, one session to resume, and one session committing in its worktree.
 - **Tools are what enforce a role,** through the SDK's `allowedTools` / `disallowedTools`. A reviewer can't edit because it has no edit tools, not because it was asked not to.
 - **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions.
 - **The spec format** is read from `~/.claude/skills/spec-format/`. `format.md` goes to the spec writer and the planner. The "For the reviewer" part of `review.md` goes to the spec reviewer.
@@ -142,7 +143,7 @@ query({
 | Kind | Used for | How |
 | --- | --- | --- |
 | **Conversation** | Refine, Mockup, Spec: chats with you; the spec keeper after sign-off | One session per card per lane, resumed on every message, and again when feedback sends the card back. The designer builds mockup versions one after another in its session, resumed in each version's worktree. The spec writer's session carries on after sign-off, and each batch of spec issues is a new turn in it. |
-| **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer, and **Redo the other way** resumes the session that made the decision. Reviewer and tester start fresh each round. |
+| **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer. Reviewer and tester start fresh each round. |
 | **One-off** | Manager, spec reviewer | A new session, discarded after one answer |
 
 **Role reports.** Each hands-off role ends its turn with a report checked against a JSON schema (`outputFormat`). The board engine routes on its fields, never on prose:
@@ -165,15 +166,16 @@ query({
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
 | Plan | The plan is written | Build |
-| Build | It's built, with issues judged | Check |
-| Build, Check | A `code-wrong` verdict | Plan, for an amendment plan |
-| Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round |
-| Check | Everything passes | Try it |
+| Build | It's built | Check, with the issues found so far still on the card |
+| Build | A blocking issue judged `code-wrong` | Plan, for an amendment plan |
+| Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round. Spec issues wait on the card for the round that passes. |
+| Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. |
+| Check | Everything passes, but the batch has a `code-wrong` verdict | Plan, for one amendment plan covering every `code-wrong` issue |
 | Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. |
-| Try it | **Redo the other way** | The lane of the session that made the decision. That session is resumed and told to switch to the other choice, and the card goes through Check again. |
+| Try it | You answer a `changes-signoff` question with "change the code" | Plan, for an amendment plan |
 | Try it | You accept | Ship |
-| Ship | A rebase conflict | Build |
-| Ship | Pushed | Done |
+| Ship | A conflict with the latest main | Build. After Check passes, it comes straight back to Ship. |
+| Ship | It's on main | Done |
 | any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you |
 | any before Ship | You park it | Ideas. The worktree is removed and the branch kept. |
 
@@ -225,6 +227,16 @@ query({
 - **Options are never retyped.** The runner keeps the session's original question and options, and the manager's reply only adds a recommendation.
 - **When you answer a forwarded question,** a one-off manager session suggests a rule from your answer. The suggestion waits in the rulebook view for you to accept or drop.
 
+## Restarts and Long Waits
+
+The backend can stop at any time: the Mac sleeps, it crashes, or you restart it. Everything needed to carry on is in SQLite, never only in memory.
+
+- **One turn at a time per session.** A turn the hive starts for a session that is already busy waits in a queue for that session. An example is two spec questions for the spec keeper, one from the reviewer and one from the tester. A message you type still joins the running turn.
+- **A cut-off turn is resumed once.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops.
+- **Answers outlive the turn that asked.** A question or Approve item waiting for you is a `PendingItem` row. If the turn that asked is gone when you answer, the answer goes to that session as a new turn, together with the question and options it asked.
+- **Preview apps are tracked in the database,** with their process ids and ports, so after a restart the preview service can still stop the ones it started.
+- **Ship can start over.** Nothing reaches main before the push, so a Ship that was cut off starts again from the squash.
+
 ## Spec Keeper and Review Gate
 
 **Review gate.**
@@ -238,24 +250,26 @@ query({
 
 - After sign-off, the spec writer's session carries on as the spec keeper. Nothing is frozen and nothing is copied.
 - Its judging instructions and report format come with each batch's message. The session's system prompt stays the spec writer's, because it is recorded at the first turn.
-- Judgments are batched: at the end of Build, after Check, or at once for a blocking issue. Each batch is a new turn in that session, given the issues and the current diff. The session remembers its earlier verdicts.
+- Judgments are batched: issues from Build and Check collect on the card and are judged in one batch once Check passes, while the card stays in Check. Only a blocking issue is judged at once. Each batch is a new turn in that session, given the issues and the current diff. The session remembers its earlier verdicts.
 - **`spec-wrong`:** the session edits the spec in the worktree, and the change is logged.
-- **`code-wrong`:** the card goes to Plan for an amendment.
+- **`code-wrong`:** the card goes to Plan, with one amendment covering every `code-wrong` issue in the batch.
+- **`changes-signoff`:** the verdict becomes the recommendation on a question to you: keep it as built, or change the code. The card goes on to Try it as built, and choosing to change the code sends it to Plan.
 - **The loop guard** counts verdicts per issue. A flip back and forth sends the issue to you.
 
 ## Git
 
 | When | What the git service does |
 | --- | --- |
+| Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the project's setup: copy the listed local files, run the install command |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
 | Each lane exit | A checkpoint commit on `hive/<card>`. The lane's diff is saved to the card's history. |
 | Build starts | Bring in the latest main. The card shows how many commits it's behind. |
 | Check | Search the branch for the `HIVE-MOCK` marker. Any hit fails the check. |
-| Ship | One project at a time: rebase onto main → re-run the checks → Approve → squash to one commit (message from the card, `Hive-Card:` trailer) → fast-forward main → push → remove the worktree and branch |
+| Ship | One project at a time: squash onto the latest main in the card's worktree (message from the card, `Hive-Card:` trailer) → run the project's test command and the marker search → Approve → push to main (squash again if main moved) → update your checkout's main only when it's safe → remove the worktree and branch |
 | Park / Drop | Remove the worktree and keep the branch (Drop deletes it after a while) |
 
-Ship never edits files in your own checkout. If uncommitted work of yours is in the way, it waits and tells you.
+Ship never touches uncommitted work in your checkout. It updates your checkout's main only when main isn't checked out there, or it is and the checkout is clean. Otherwise it tells you, and in a project with no remote it waits.
 
 ## Preview Service
 
@@ -268,14 +282,15 @@ Ship never edits files in your own checkout. If uncommitted work of yours is in 
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, isGit, runCommand, setupCommand, localFiles, laneLimits, permissionMode |
+| **Project** | name, path, runCommand, setupCommand, testCommand, localFiles, laneLimits, permissionMode |
 | **Card** | project, title, lane, state (working / needs-you / stopped), branch, worktreePath, port, specPath, reviewedSpecHash |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt |
 | **Version** | card, label, worktreePath, screenshot, picked |
 | **Issue** | card, foundIn, description, verdict, level, reason, flips |
-| **Decision** | card, lane, what, alternative, sessionId (resumed for a redo), source |
-| **PendingItem** | card, kind (question / approve / severe / loop), payload, recommendation, answer |
+| **Decision** | card, lane, what, alternative, sessionId, source |
+| **PendingItem** | card, session (where the answer goes), kind (question / approve / severe / loop), payload, recommendation, answer |
+| **Process** | card, port, pid, command, startedAt. What the preview service started. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
 | **Event** | card, at, type, data. Every row of a card's history. |
 
@@ -293,7 +308,6 @@ POST   /api/cards/:id/signoff             Leave Spec (refused unless the review 
 POST   /api/cards/:id/versions/:v/pick    Pick a mockup version
 POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
 POST   /api/cards/:id/accept              Accept in Try it
-POST   /api/cards/:id/redo/:decisionId    Redo the other way
 GET    /api/for-you                       Everything waiting for you
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards
@@ -350,5 +364,6 @@ The page can start sessions that run commands on your machine, so it must never 
 5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md, and nothing says so. Adding a project should check that its folder, or one above it, is trusted.
 6. **Permission rules in the repo's `.claude/settings.json` don't apply** in SDK sessions; `settings.local.json` and `allowedTools` do. A new worktree has no `settings.local.json`, because it isn't committed. Either setup copies it as a local file, or the hive passes the project's rules as `allowedTools`.
 7. **Your own settings reach every session** through `settingSources: ["user", …]`: your default permission mode (`auto` skips `canUseTool` entirely) and all your MCP servers, which add tools beside the ones a role is given. The session runner must set `permissionMode` itself and keep out MCP tools a role shouldn't have.
+8. **A question that waits for you for hours.** The turn that asked holds a `canUseTool` call open until you answer. Whether that holds for hours is untested. If it doesn't, the answer goes to the session as a new turn, as after a restart.
 
 Copies from an earlier point, fixed-format reports and folder trust were checked on 2026-11-26; the results are in the Feasibility Notes of `CONCEPT.md`.

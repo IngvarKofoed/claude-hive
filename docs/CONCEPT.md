@@ -27,10 +27,10 @@ Lanes are the columns, and projects are the rows (swimlanes). Each lane has a li
 | **Mockup** | you ⇄ designer | A clickable mockup built in the real app, with fake data. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
 | **Plan** | planner | The build plan the spec deliberately leaves out: the steps in order, which chunk each agent owns, the tests, and how each step is checked. | The plan is written. |
-| **Build** | developer(s) | Builds to the plan, staffed as the spec's Implementation strategy says. Replaces the mockup's fake data with the real thing. | It's built. |
+| **Build** | developer | Builds to the plan. One developer per card, which hands chunks to its own subagents when the spec's Implementation strategy calls for several agents. Replaces the mockup's fake data with the real thing. | It's built. |
 | **Check** | reviewer, tester | Read-only. They review the whole branch against main and compare the code with the spec (missing, different, extra). They run the spec's How-to-verify checks and compare the screens with the approved mockup. Check fails if any fake data is left. | Everything passes. |
 | **Try it** | you | You test by hand, with the app already running and a test guide ready. | You accept, or give feedback. |
-| **Ship** | the hive | Lands the card on main as one commit. | It's pushed. |
+| **Ship** | the hive | Lands the card on main as one commit. | It's on main. |
 | **Done** | | The card's full story, kept so you can look back. | |
 
 ## Where You Come In
@@ -44,7 +44,8 @@ Lanes are the columns, and projects are the rows (swimlanes). Each lane has a li
 - the app is running on its own port, with test data;
 - a short test guide, written from the spec's How-to-verify bullets;
 - what the automated checks covered, so you don't retest it, and what they couldn't check, so you do;
-- every decision made without you, each with **Redo the other way**.
+- every decision made without you, so you can ask for any of them the other way in your feedback;
+- any question about a spec change that waits for you, with the spec keeper's recommendation.
 
 Your feedback goes back to the lane it belongs to. The hive picks the lane and shows it, and you can change it with one click:
 
@@ -61,18 +62,18 @@ Feedback that changes the what or the look also changes the spec, so the card pa
 Between your sign-off and Try it, the hive works without you. Only these reach you:
 
 1. **Questions the manager can't settle** (see The Manager). They come with its recommendation.
-2. **Spec issues that change what you signed off.** The build carries on with "keep as built" until you answer.
+2. **Spec issues that change what you signed off.** They come with the spec keeper's recommendation. The card goes on to Try it as built, and the question waits for you there.
 3. **Severe issues.** The card stops.
 4. **Loops:** the same issue flipping back and forth, or Check sending a card back to Build more times than the round limit.
 5. **Approvals:** pushing to main, and anything that's hard to undo, leaves your machine or touches security.
 
-Everything else is decided by the hive and written into the card's history as "decided for you". Each such decision has a **Redo the other way** button. It works like any other fix: the hive resumes the session that made the decision and tells it to switch to the other choice, and the card goes through Check again.
+Everything else is decided by the hive and written into the card's history as "decided for you". Try it lists these decisions. If you want one the other way, you say so in your feedback, like any other change.
 
 ## Key Concepts
 
 ### Project
 
-A repository, or a new folder not yet in git. Each project is a swimlane on the board and has its own rulebook.
+A repository. A folder that isn't one yet becomes one when you add it: the hive runs `git init` and commits what's there. Each project is a swimlane on the board and has its own rulebook.
 
 ### Card
 
@@ -98,7 +99,7 @@ Each lane's instructions, model and tools. Roles are enforced through the tools 
 ### Sessions
 
 - **A new session for each card in each lane,** started with the role's instructions and the card.
-- **Conversations continue the same session.** A card sent back to Refine resumes the product owner session that refined it. A card sent back to Build resumes the developer that built it. **Redo the other way** resumes the session that made the decision.
+- **Conversations continue the same session.** A card sent back to Refine resumes the product owner session that refined it. A card sent back to Build resumes the developer that built it.
 - **Nothing runs between turns.** A kept session costs nothing.
 
 ### Rulebook
@@ -126,7 +127,7 @@ The builder, reviewer and tester find mismatches between spec and code:
 - something is missing, done differently, or added without being asked for;
 - a How-to-verify check fails, or can't be carried out as written.
 
-Each becomes an issue on the card. **The build doesn't stop for them.** The builder notes the issue, makes its best guess and keeps going. Issues are judged in a batch at the end of Build and again after Check. Only a blocking issue is judged immediately.
+Each becomes an issue on the card. **The build doesn't stop for them.** The builder notes the issue, makes its best guess and keeps going. Issues from Build and Check collect on the card and are judged together, in one batch once Check passes. Only a blocking issue is judged immediately.
 
 **The spec keeper judges.** It is the spec writer's own session, which carries on after sign-off. It holds your Refine chat, your Mockup comments, the code research and the spec's reasoning. Each batch of issues is a new turn in it: it re-reads the current code, and it remembers its earlier verdicts, so its calls stay consistent.
 
@@ -140,8 +141,10 @@ Each issue also gets a level:
 | Level | Example | What happens |
 | --- | --- | --- |
 | **Minor** | The spec was silent about the order of a list | The spec keeper decides on its own. |
-| **Changes what you signed off** | It touches the Outcome, a Key decision tagged (new), (diverges) or (breaking), or something you'd see | A question to you. The build carries on with "keep as built" until you answer. |
+| **Changes what you signed off** | It touches the Outcome, a Key decision tagged (new), (diverges) or (breaking), or something you'd see | A question to you, with the spec keeper's verdict as its recommendation: keep it as built, or change the code. The card goes on to Try it as built, and the question waits there. Choosing to change the code sends the card to Plan for an amendment. |
 | **Severe** | The approach doesn't work in this codebase, the feature clashes with another part of the product, a security or data risk turns up, the work is far bigger than the spec assumed, or the idea itself looks flawed | **The card stops** and comes to you. It shows what was found, why it matters, the options (redesign → Spec, rethink → Refine, narrow the scope, drop it) and a recommendation. |
+
+**A batch with mixed results:** spec fixes are made at once, every code fix goes into one amendment, and questions for you wait in Try it.
 
 **Loop guard:** if the same issue flips back and forth (spec, then code, then spec again), it comes to you instead of looping.
 
@@ -153,7 +156,7 @@ It works down a ladder:
 
 1. **Is it already answered** by the rulebook, the spec, or your earlier answers on this card or others? Then it answers and notes the source.
 2. **Is it really about the spec?** Then it goes to the spec keeper.
-3. **Is it minor and invisible to you?** Then the manager decides, and the decision is recorded under "decided for you" with **Redo the other way**.
+3. **Is it minor and invisible to you?** Then the manager decides, and the decision is recorded under "decided for you".
 4. **Otherwise it comes to you, prepared:** which card and lane it's from, what's at stake, the session's original options unchanged, and the manager's recommendation.
 
 - **Options are never retyped.** Code passes the session's question and options through as they are. The manager only adds context and a recommendation.
@@ -173,22 +176,22 @@ It works down a ladder:
 - **Lanes commit checkpoints freely** on the card's branch. The card shows how far it is behind main, and Build starts by bringing in the latest main.
 - **Parking a card** (back to Ideas) removes the worktree but keeps the branch. Moving the card forward again rebuilds the worktree.
 - **Dropping a card** removes the worktree and keeps the branch for a while.
-- **Projects not in git** have no worktrees, so their code lanes take one card at a time.
 
 ## Ship
 
 Clean history: one commit per card, no merge commits, no branches left behind.
 
-1. Rebase the card onto the latest main.
-2. Re-run the checks.
+1. Squash the card into one commit on top of the latest main, in the card's worktree and the repo's commit style. The message has the card's title, a line or two from the spec's "What you get", the spec's path, and a `Hive-Card:` trailer that links back to the card.
+2. Re-run the checks: the project's test command and the search for fake data.
 3. **Approve:** *"Land printer font size on main and push?"* A rule can turn this step off for a project.
-4. Squash everything into one commit, in the repo's commit style. The message has the card's title, a line or two from the spec's "What you get", the spec's path, and a `Hive-Card:` trailer that links back to the card.
-5. Fast-forward main and push.
+4. Push that commit to main. If main has moved since step 1, start again from step 1.
+5. Bring your checkout's main up to date, when that's safe.
 6. Remove the worktree and the branch.
 
-- **One card ships at a time per project,** so every rebase is against the true latest main.
-- **Conflicts go back to Build,** because resolving one means writing code. The card then passes through Check again before shipping.
-- **Ship never touches your own checkout's files.** If uncommitted work of yours is in the way, Ship waits and tells you.
+- **One card ships at a time per project,** so every squash lands on the true latest main.
+- **Squashing first** means a conflict is met once, against the finished change, and not again in every checkpoint commit.
+- **Conflicts go back to Build,** because resolving one means writing code. The card then passes through Check again and comes straight back to Ship, with no second Try it.
+- **Ship never touches your uncommitted work.** Main is pushed without going through your checkout. Your checkout's main is updated only when main isn't checked out there, or it is and you have no uncommitted changes. Otherwise Ship tells you, and in a project with no remote it waits.
 - **Nothing is lost by squashing.** Before it squashes, Ship saves each lane's changes into the card's history.
 
 ## History and Done
@@ -227,7 +230,7 @@ One page, with several views:
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
 
-You start an idea by typing into a project's Ideas cell. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back.
+You start an idea by typing into a project's Ideas cell. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
 
 ## A Card's Journey
 
