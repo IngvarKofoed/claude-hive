@@ -22,7 +22,7 @@ Vitest. Tests sit next to the code they test, as `*.test.ts`. Do not introduce a
 - **Plain code routes; Claude sessions judge.** Card moves are decided in `board/` from the fields of a role's report, never by reading prose or asking a model.
 - **Safety, from `docs/ARCHITECTURE.md`:**
   - the backend binds to `127.0.0.1` only;
-  - it never edits files in a project's own checkout; at Ship it only fast-forwards main and pushes;
+  - it never touches uncommitted work in a project's own checkout; at Ship it pushes main and updates the checkout's main only when that's safe (`docs/ARCHITECTURE.md`, Git);
   - the preview service only ever stops processes it started itself.
 - **The version is `APP_VERSION` from `packages/shared`,** baked in at build time by `scripts/gen-version.mjs`. Never call git at runtime to find it (`docs/ARCHITECTURE.md`, Versioning).
 - **Verify every change** by running the package's tests and a type check (`tsc --noEmit`) before you report it complete.

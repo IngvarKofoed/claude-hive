@@ -1,0 +1,32 @@
+{
+  "name": "@hive/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node ../../scripts/gen-version.mjs",
+    "dev": "tsx watch src/server.ts",
+    "prestart": "node ../../scripts/gen-version.mjs",
+    "start": "tsx src/server.ts",
+    "prebuild": "node ../../scripts/gen-version.mjs",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "pretest": "node ../../scripts/gen-version.mjs",
+    "test": "vitest run",
+    "pretypecheck": "node ../../scripts/gen-version.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.332",
+    "@hive/shared": "*",
+    "better-sqlite3": "^13.2.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.11",
+    "tsx": "^4.23.15",
+    "vitest": "^5.1.2"
+  }
+}

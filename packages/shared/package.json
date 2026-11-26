@@ -1,0 +1,13 @@
+{
+  "name": "@hive/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "pretypecheck": "node ../../scripts/gen-version.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

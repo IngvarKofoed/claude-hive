@@ -135,6 +135,9 @@ query({
     permissionMode: "auto",          // every session: full access; the role's instructions set its limits
     settingSources: ["user", "project", "local"],
     outputFormat: role.report,       // hands-off roles: a fixed-format report the board engine routes on
+    includePartialMessages: true,    // text streams to the page as it's written
+    mcpServers: { hive },            // the hive's own tools, e.g. write_brief, in-process
+    allowedTools: hiveToolNames,     // the hive's own tools never wait on a permission check
     canUseTool,                      // questions, and anything auto mode passes on
   },
 });
@@ -232,7 +235,7 @@ query({
 The backend can stop at any time: the Mac sleeps, it crashes, or you restart it. Everything needed to carry on is in SQLite, never only in memory.
 
 - **One turn at a time per session.** A turn the hive starts for a session that is already busy waits in a queue for that session. An example is two spec questions for the spec keeper, one from the reviewer and one from the tester. A message you type still joins the running turn.
-- **A cut-off turn is resumed once.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops.
+- **A cut-off turn is resumed once in a hands-off lane.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops. A chat lane's cut-off turn is not resumed: the chat says the reply was cut off and waits for your next message, since a retry would only talk over you.
 - **Answers outlive the turn that asked.** A question or Approve item waiting for you is a `PendingItem` row. If the turn that asked is gone when you answer, the answer goes to that session as a new turn, together with the question and options it asked.
 - **Preview apps are tracked in the database,** with their process ids and ports, so after a restart the preview service can still stop the ones it started.
 - **Ship can start over.** Nothing reaches main before the push, so a Ship that was cut off starts again from the squash.
@@ -282,17 +285,17 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, runCommand, setupCommand, testCommand, localFiles, laneLimits |
-| **Card** | project, title, lane, state (working / needs-you / stopped), branch, worktreePath, port, specPath, reviewedSpecHash |
+| **Project** | name, path, trustWarning, runCommand, setupCommand, testCommand, localFiles, laneLimits |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath, reviewedSpecHash |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
-| **Session** | card, lane, role, kind, sessionId, startedAt |
+| **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
 | **Issue** | card, foundIn, description, verdict, level, reason, flips |
 | **Decision** | card, lane, what, alternative, sessionId, source |
-| **PendingItem** | card, session (where the answer goes), kind (question / approve / severe / loop), payload, recommendation, answer |
+| **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
 | **Process** | card, port, pid, command, startedAt. What the preview service started. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
-| **Event** | card, at, type, data. Every row of a card's history. |
+| **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn) and `brief` (every version of the brief) so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while. |
 
 ## API
 
@@ -307,12 +310,15 @@ POST   /api/cards/:id/good                Leave Refine or Mockup
 POST   /api/cards/:id/signoff             Leave Spec (refused unless the review is fresh)
 POST   /api/cards/:id/versions/:v/pick    Pick a mockup version
 POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
+POST   /api/cards/:id/stop                Stop the running turn
+POST   /api/cards/:id/retry               Send a failed turn's message again
 POST   /api/cards/:id/accept              Accept in Try it
 GET    /api/for-you                       Everything waiting for you
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards
 GET    /api/rules  · POST · PATCH         Rulebooks and suggested rules
 GET    /api/projects · POST · PATCH       Projects and their settings
+POST   /api/projects/:id/check            Run the trust probe again
 GET    /api/usage                         Plan usage: 5-hour and 7-day windows
 GET    /api/health                        Status and the app's version
 GET    /api/events                        SSE stream
@@ -361,7 +367,7 @@ The page can start sessions that run commands on your machine, so it must never 
 2. **Several copies of one app running side by side:** ports, local databases, and file watchers that also see `.claude/worktrees`.
 3. **Comparing screens with the mockup:** whether screenshots plus the tester's judgment are reliable enough, or a pixel diff is needed.
 4. **Session archive:** Claude Code deletes old session files after a while, so the archive at Done must run before that happens.
-5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md, and nothing says so. Adding a project should check that its folder, or one above it, is trusted.
+5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md. Adding a project runs a trust probe, a throwaway Haiku session that reports which CLAUDE.md files load, and the project's row warns when the repo has one that doesn't load.
 6. **Your own settings reach every session** through `settingSources: ["user", …]`, including all your MCP servers and plugins, which full access lets every role use. The runner sets `permissionMode: "auto"` itself, so changing your own default doesn't change the hive.
 7. **A question that waits for you for hours.** The turn that asked holds a `canUseTool` call open until you answer. Whether that holds for hours is untested. If it doesn't, the answer goes to the session as a new turn, as after a restart. The SDK's types also show that a question can resolve on its own after a stretch of idle time (`afkTimeoutMs`), which is untested too.
 

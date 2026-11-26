@@ -1,0 +1,26 @@
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-subtle);
+  font-size: var(--text-md);
+}
+
+.step[data-status="past"] {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+
+.step[data-status="current"] {
+  background: var(--color-primary-bg);
+  color: var(--color-primary-text);
+  font-weight: var(--weight-semibold);
+}

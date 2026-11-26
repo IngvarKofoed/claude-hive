@@ -1,2 +1,9 @@
 # Generated at build time by scripts/gen-version.mjs
 packages/shared/src/version.ts
+
+# Installed and built
+node_modules/
+packages/frontend/dist/
+
+# Snapshots and logs the Playwright MCP writes while verifying the page
+.playwright-mcp/

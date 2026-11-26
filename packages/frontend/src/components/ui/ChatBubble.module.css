@@ -1,0 +1,33 @@
+.row {
+  display: flex;
+}
+
+.row[data-from="you"] {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 85%;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble[data-from="you"] {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-bg);
+  color: var(--color-primary-text);
+}
+
+.bubble[data-from="error"] {
+  background: var(--color-stopped-bg);
+  border-color: var(--color-stopped-border);
+  color: var(--color-stopped-text);
+}
+
+.bubble[data-streaming] {
+  border-style: dashed;
+}

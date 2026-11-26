@@ -1,0 +1,18 @@
+.panel {
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+.panel[data-tone="warning"] {
+  background: var(--color-needs-you-bg);
+  border-color: var(--color-needs-you-text);
+  color: var(--color-needs-you-text);
+}
+
+.title {
+  margin-bottom: var(--space-5);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
