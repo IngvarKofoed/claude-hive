@@ -1,6 +1,7 @@
 .header {
   display: flex;
   align-items: baseline;
+  position: relative;
   gap: var(--space-5);
   padding: var(--space-5) var(--space-8);
   background: var(--color-surface);

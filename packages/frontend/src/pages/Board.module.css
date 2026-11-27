@@ -13,9 +13,76 @@
   gap: var(--space-6);
 }
 
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-7);
+}
+
 .title {
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
+}
+
+.summary {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+}
+
+.switch {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/* By project: as many panels side by side as fit, each at least --board-panel-min-width, one on a narrow window. */
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--board-panel-min-width), 100%), 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* By lane's phase bands, in the same columns as the lane headers. */
+.bandRow {
+  display: grid;
+  grid-template-columns: var(--project-col-width) repeat(10, var(--lane-width));
+  padding-top: var(--space-3);
+  background: var(--color-surface);
+}
+
+.bandCell[data-span="2"] {
+  grid-column: span 2;
+}
+
+.bandCell[data-span="3"] {
+  grid-column: span 3;
+}
+
+.band {
+  display: block;
+  margin: 0 var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.band[data-tone="you"] {
+  background: var(--color-needs-you-bg);
+  color: var(--color-needs-you-text);
+}
+
+.band[data-tone="you-plain"] {
+  color: var(--color-needs-you-text);
+}
+
+.band[data-tone="hands-off"] {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
 }
 
 .addProject {

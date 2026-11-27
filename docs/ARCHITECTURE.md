@@ -169,7 +169,7 @@ query({
 
 | From | Event | To |
 | --- | --- | --- |
-| Ideas | You drag the card | Refine, and the worktree is created. The card gets its ports, and the worktree's setup starts in the background. |
+| Ideas | You drag the card, or press Start | Refine, and the worktree is created. The card gets its ports, and the worktree's setup starts in the background. |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
 | Plan | The planner's report is `done` | Build. Its plan is stored on the card, Check's rounds start over, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. Build first waits for a setup that's running, or runs one for a worktree that never had one. |

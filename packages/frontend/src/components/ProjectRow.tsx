@@ -1,9 +1,8 @@
-import { useState, type DragEvent } from "react";
+import type { DragEvent } from "react";
 import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectSummary } from "@hive/shared";
-import { api } from "../api/client";
+import { AddIdea } from "./AddIdea";
 import { CardTile } from "./CardTile";
-import { Button } from "./ui/Button";
-import { Panel } from "./ui/Panel";
+import { ProjectHeading } from "./ProjectHeading";
 import styles from "./ProjectRow.module.css";
 
 interface Props {
@@ -16,11 +15,14 @@ interface Props {
   onDrop: (card: CardSummary, lane: Lane) => void;
   onOpen: (card: CardSummary) => void;
   onAddIdea: (projectId: string, text: string) => Promise<void>;
+  /** Start an idea: the same move to Refine as dropping it there. */
+  onStart: (card: CardSummary) => Promise<void>;
   /** A card was deleted from its tile. */
   onDeleted?: (card: CardSummary) => void;
   onBoard: (board: BoardResponse) => void;
 }
 
+/** One project's row on the Board By lane: its heading, then a cell per lane. */
 export function ProjectRow({
   project,
   cards,
@@ -30,53 +32,16 @@ export function ProjectRow({
   onDrop,
   onOpen,
   onAddIdea,
+  onStart,
   onBoard,
   onDeleted,
 }: Props) {
-  const [idea, setIdea] = useState("");
-  const [ideaError, setIdeaError] = useState<string | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
-
-  async function addIdea() {
-    const text = idea.trim();
-    if (!text) return;
-    setIdeaError(null);
-    try {
-      await onAddIdea(project.id, text);
-      setIdea("");
-    } catch (err) {
-      setIdeaError(err instanceof Error ? err.message : "Could not add the idea.");
-    }
-  }
-
-  async function checkAgain() {
-    setCheckError(null);
-    try {
-      onBoard(await api.checkProject(project.id));
-    } catch (err) {
-      setCheckError(err instanceof Error ? err.message : "Could not check the folder.");
-    }
-  }
-
   const canDropOn = (lane: Lane) => lane === "refine" && dragging !== null && dragging.projectId === project.id;
 
   return (
     <div className={styles.row}>
       <div className={styles.project}>
-        <h2 className={styles.name}>{project.name}</h2>
-        <p className={styles.path}>{project.path}</p>
-        {project.trustWarning ? (
-          <Panel tone="warning" className={styles.warning} role="alert">
-            <p>
-              Claude Code doesn't trust this folder, so its CLAUDE.md isn't loaded. Open Claude Code in the repo
-              once and accept.
-            </p>
-            <Button compact onClick={checkAgain}>
-              Check again
-            </Button>
-            {checkError ? <p>{checkError}</p> : null}
-          </Panel>
-        ) : null}
+        <ProjectHeading project={project} onBoard={onBoard} />
       </div>
       {LANES.map((lane) => {
         const laneCards = cards.filter((card) => card.lane === lane.id);
@@ -105,31 +70,10 @@ export function ProjectRow({
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 onDeleted={onDeleted}
+                onStart={onStart}
               />
             ))}
-            {lane.id === "ideas" ? (
-              <form
-                className={styles.idea}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void addIdea();
-                }}
-              >
-                <input
-                  className={styles.input}
-                  type="text"
-                  aria-label={`Add an idea to ${project.name}`}
-                  placeholder="Add an idea"
-                  value={idea}
-                  onChange={(event) => setIdea(event.target.value)}
-                />
-                {ideaError ? (
-                  <p className={styles.error} role="alert">
-                    {ideaError}
-                  </p>
-                ) : null}
-              </form>
-            ) : null}
+            {lane.id === "ideas" ? <AddIdea project={project} onAddIdea={onAddIdea} /> : null}
           </div>
         );
       })}

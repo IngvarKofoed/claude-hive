@@ -5,6 +5,7 @@ The look of Claude Hive, designed as a clickable canvas: https://claude.ai/artif
 | File | Screen |
 | --- | --- |
 | `Main.dc.html` | Board |
+| `BoardByProject.dc.html` | Board, by project: a panel per project, with the lane on each card |
 | `ForYou.dc.html` | For you |
 | `CardRefine.dc.html` | A card in Refine: chat with the product owner, next to the brief |
 | `CardMockup.dc.html` | A card in Mockup: two versions with pinned comments |

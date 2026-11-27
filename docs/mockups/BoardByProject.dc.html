@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hive board by project</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#1849A9}a:hover{color:#0E3378}
+.del{opacity:0}.tile:hover .del,.del:focus-visible,.del-on{opacity:1}
+</style>
+</helmet>
+<div style="min-height: 980px; background: #F6F6F3; color: #1B1B18; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 10px 24px; min-height: 64px; box-sizing: border-box; background: #FFFFFF; border-bottom: 1px solid #E4E3DE">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"></path><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"></path></svg>
+<span style="font-weight: 700; font-size: 17px; letter-spacing: -0.01em">Claude Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px">
+<a href="BoardByProject.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1B1B18; background: #EFEFEA; text-decoration: none">Board</a>
+<a href="ForYou.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">For you <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #C2410C; color: #FFFFFF; font-size: 12px; font-weight: 700">7</span></a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Lanes</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Rulebooks</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Projects</a>
+</nav>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+<div style="display: flex; align-items: center; gap: 14px; font-size: 12px; color: #5F5E57">
+<span style="font-weight: 600; color: #45443E">Plan usage</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">5-hour <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 42%; height: 6px; background: #1B1B18"></span></span> 42%</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">Weekly <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 18%; height: 6px; background: #1B1B18"></span></span> 18%</span>
+</div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">New idea</button>
+</div>
+</header>
+
+<main style="padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+<div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">Board</h1>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">4 projects · 10 cards in progress · 7 waiting for you</p>
+</div>
+<div role="group" aria-label="Board layout" style="display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #D6D5CF; border-radius: 10px; background: #FFFFFF">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; box-sizing: border-box; border-radius: 7px; font-size: 13px; font-weight: 500; color: #45443E; text-decoration: none">By lane</a>
+<button type="button" aria-pressed="true" style="min-height: 36px; padding: 0 14px; border: 0; border-radius: 7px; background: #EFEFEA; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: default">By project</button>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; font-weight: 600">
+<span style="padding: 4px 10px; border-radius: 999px; background: #FDEBDD; color: #8F3A06">● needs you</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #E6EEFC; color: #1849A9">▶ working</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #E2F3F0; color: #0B5F58">◆ versions to compare</span>
+<span style="padding: 4px 10px; border-radius: 999px; background: #FBE4E1; color: #9B1C12">■ stopped</span>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: {{ gridCols }}; gap: 16px; align-items: start">
+<sc-for list="{{ projects }}" as="p" hint-placeholder-count="4">
+<section aria-label="{{ p.name }}" style="display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; box-sizing: border-box; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px">
+
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 700">{{ p.name }}</h2>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5F5E57; overflow-wrap: anywhere">{{ p.path }}</span>
+</div>
+
+<sc-if value="{{ p.trust }}" hint-placeholder-val="{{ false }}">
+<div role="alert" style="display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 8px; background: #FDEBDD; color: #8F3A06; font-size: 13px; line-height: 1.4">
+<p style="margin: 0">Claude Code doesn't trust this folder, so its CLAUDE.md isn't loaded. Open Claude Code in the repo once and accept.</p>
+<button type="button" style="align-self: flex-start; padding: 6px 12px; border-radius: 8px; border: 1px solid #D6D5CF; background: #FFFFFF; color: #1B1B18; font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 600; cursor: pointer">Check again</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.hasProgress }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ p.progress }}" as="t" hint-placeholder-count="2">
+<article class="tile" style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px; box-sizing: border-box; border-radius: 8px; background: #FFFFFF; border: 1px solid #D6D5CF; box-shadow: 0 1px 2px rgba(27,27,24,0.06)">
+<a href="{{ t.href }}" style="font-size: 13px; font-weight: 600; line-height: 1.3; color: #1849A9; text-decoration: none">{{ t.title }}</a>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; color: #45443E; white-space: nowrap">{{ t.lane }}</span>
+<div aria-hidden="true" style="flex: 1; display: flex; align-items: center; gap: 2px; min-width: 0">
+<sc-for list="{{ t.segs }}" as="s" hint-placeholder-count="10">
+<span style="flex: 1; height: {{ s.h }}px; border-radius: 2px; background: {{ s.bg }}"></span>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: {{ t.bg }}; color: {{ t.fg }}">{{ t.badge }}</span>
+<button type="button" class="{{ delCls }}" style="margin-left: auto; padding: 0; border: 0; background: none; font-family: Inter, system-ui, sans-serif; font-size: 11px; color: #6B6A63; cursor: pointer">Delete</button>
+</div>
+</article>
+</sc-for>
+</div>
+</sc-if>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #45443E">Ideas</span>
+<input type="text" aria-label="Add an idea to {{ p.name }}" placeholder="Add an idea" style="width: 100%; min-height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px dashed #D6D5CF; border-radius: 8px; background: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 13px; color: #1B1B18">
+<sc-if value="{{ p.hasIdeas }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ p.ideas }}" as="i" hint-placeholder-count="1">
+<article class="tile" style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px; box-sizing: border-box; border-radius: 8px; background: #FFFFFF; border: 1px solid #E4E3DE">
+<span style="font-size: 13px; font-weight: 600; line-height: 1.3">{{ i.title }}</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<button type="button" onClick="{{ i.start }}" style="padding: 6px 12px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 600; cursor: pointer">Start</button>
+<button type="button" class="{{ delCls }}" style="margin-left: auto; padding: 0; border: 0; background: none; font-family: Inter, system-ui, sans-serif; font-size: 11px; color: #6B6A63; cursor: pointer">Delete</button>
+</div>
+</article>
+</sc-for>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{ p.hasLanded }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #E4E3DE">
+<button type="button" onClick="{{ p.toggle }}" aria-expanded="{{ p.openStr }}" style="align-self: flex-start; padding: 4px 0; border: 0; background: none; font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 600; color: #1F6B3A; cursor: pointer">{{ p.landedLabel }}</button>
+<sc-if value="{{ p.open }}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ p.landed }}" as="d" hint-placeholder-count="2">
+<a href="CardDone.dc.html" style="padding: 8px 10px; box-sizing: border-box; border-radius: 8px; background: #FFFFFF; border: 1px solid #E4E3DE; font-size: 12px; font-weight: 600; line-height: 1.3; color: #1849A9; text-decoration: none">{{ d.title }}</a>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+</section>
+</sc-for>
+</div>
+
+<p style="margin: 0; font-size: 12px; color: #5F5E57">Press Start on an idea to begin refining it: its worktree is created at <span style="font-family: 'JetBrains Mono', monospace">.claude/worktrees/&lt;card&gt;</span>. By lane still lets you drag it to Refine.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"panelMin":{"editor":"range","default":400,"min":320,"max":560,"step":20,"unit":"px","section":"Layout"},"showDelete":{"editor":"boolean","default":false,"section":"Layout"},"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const open = st.open || {};
+    const started = st.started || {};
+    const panelMin = this.props.panelMin ?? 400;
+    const showDelete = this.props.showDelete ?? false;
+    const LANES = ['Ideas', 'Refine', 'Mockup', 'Spec', 'Plan', 'Build', 'Check', 'Try it', 'Ship', 'Done'];
+    const tone = {
+      you: { badge: '● needs you', bg: '#FDEBDD', fg: '#8F3A06' },
+      work: { badge: '▶ working', bg: '#E6EEFC', fg: '#1849A9' },
+      versions: { badge: '◆ versions to compare', bg: '#E2F3F0', fg: '#0B5F58' },
+      stopped: { badge: '■ stopped', bg: '#FBE4E1', fg: '#9B1C12' }
+    };
+    const segs = (lane) => LANES.map((name, i) => ({
+      h: i === lane ? 8 : 4,
+      bg: i < lane ? '#6B6A63' : (i === lane ? '#1B1B18' : '#E4E3DE')
+    }));
+    const tile = (c) => {
+      const t = tone[c.kind];
+      return { title: c.title, href: c.href || '#', lane: LANES[c.lane], segs: segs(c.lane), badge: t.badge, bg: t.bg, fg: t.fg };
+    };
+    const data = [
+      {
+        id: 'flux', name: 'flux', path: '~/work/flux', trust: false,
+        cards: [
+          { title: 'Per-printer default paper size for the label printers', lane: 1, kind: 'you' },
+          { title: 'Printer font size', lane: 2, kind: 'versions', href: 'CardMockup.dc.html' },
+          { title: 'Label margins', lane: 4, kind: 'work' },
+          { title: 'Show print progress in the status bar while a long batch runs', lane: 5, kind: 'work' },
+          { title: 'Batch export', lane: 6, kind: 'you' },
+          { title: 'Shift reports', lane: 7, kind: 'you', href: 'CardTryIt.dc.html' }
+        ],
+        ideas: [
+          { id: 'flux-1', title: 'Export shift report to CSV' },
+          { id: 'flux-2', title: 'Dark print preview' }
+        ],
+        landed: ['Printer list sorting', 'Offline print queue', 'Label preview zoom', 'Duplicate a printer', 'Print history search', 'Paper jam alerts', 'Default printer per user', 'Barcode font picker', 'Faster startup', 'Settings import', 'Shift handover notes', 'Keyboard shortcuts', 'Status bar clock', 'Error log export']
+      },
+      {
+        id: 'magic-grow', name: 'magic-grow', path: '~/private/magic-grow', trust: false,
+        cards: [
+          { title: 'Seed price history', lane: 1, kind: 'you', href: 'CardRefine.dc.html' },
+          { title: 'Weather events', lane: 5, kind: 'work' }
+        ],
+        ideas: [{ id: 'mg-1', title: 'Super seed trading' }],
+        landed: ['Seed catalogue', 'Plot map', 'Watering reminders', 'Harvest log', 'Frost warnings', 'Shop prices', 'Plot sharing', 'Soil types', 'Daily tips']
+      },
+      {
+        id: 'watson', name: 'watson', path: '~/work/watson', trust: false,
+        cards: [
+          { title: 'Nightly import speed', lane: 3, kind: 'you' },
+          { title: 'Endpoint docs', lane: 5, kind: 'stopped' }
+        ],
+        ideas: [{ id: 'w-1', title: 'Retry failed imports' }],
+        landed: ['CSV import', 'Import progress bar', 'Schema check', 'Import history', 'Duplicate detection', 'Error summary email']
+      },
+      {
+        id: 'mermaid-office', name: 'mermaid-office', path: '~/work/mermaid-office', trust: true,
+        cards: [],
+        ideas: [
+          { id: 'mo-1', title: 'Sequence diagram themes' },
+          { id: 'mo-2', title: 'Paste from Visio' },
+          { id: 'mo-3', title: 'Shape library panel' }
+        ],
+        landed: []
+      }
+    ];
+    const projects = data.map((p) => {
+      const startedHere = p.ideas.filter((i) => started[i.id]).map((i) => ({ title: i.title, lane: 1, kind: 'work' }));
+      const progress = p.cards.concat(startedHere)
+        .map((c, n) => ({ c: c, n: n }))
+        .sort((a, b) => (a.c.lane - b.c.lane) || (a.n - b.n))
+        .map((x) => tile(x.c));
+      const ideas = p.ideas.filter((i) => !started[i.id]).map((i) => ({
+        title: i.title,
+        start: () => this.setState({ started: Object.assign({}, started, { [i.id]: true }) })
+      }));
+      const isOpen = !!open[p.id];
+      const n = p.landed.length;
+      return {
+        name: p.name,
+        path: p.path,
+        trust: p.trust,
+        hasProgress: progress.length > 0,
+        progress: progress,
+        hasIdeas: ideas.length > 0,
+        ideas: ideas,
+        hasLanded: n > 0,
+        open: isOpen,
+        openStr: isOpen ? 'true' : 'false',
+        landedLabel: n + ' landed ' + (isOpen ? '▾' : '▸'),
+        landed: p.landed.map((title) => ({ title: title })),
+        toggle: () => this.setState({ open: Object.assign({}, open, { [p.id]: !isOpen }) })
+      };
+    });
+    return {
+      projects: projects,
+      gridCols: 'repeat(auto-fill, minmax(' + panelMin + 'px, 1fr))',
+      delCls: showDelete ? 'del del-on' : 'del'
+    };
+  }
+}
+</script>
+</body>
+</html>

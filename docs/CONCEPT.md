@@ -18,11 +18,11 @@ Claude's work is cheap and runs in parallel. Your attention is the scarce thing.
 
 ## The Board
 
-Lanes are the columns, and projects are the rows (swimlanes). Each lane has a limit on how many cards it may hold.
+Lanes are the columns, and projects are the rows (swimlanes). The page can also show the board by project, with the lane written on each card (see The Page). Each lane has a limit on how many cards it may hold.
 
 | Lane | Who | What happens | Moves on when |
 | --- | --- | --- | --- |
-| **Ideas** | you | You type an idea. Two sentences is enough. | You drag it to Refine. |
+| **Ideas** | you | You type an idea. Two sentences is enough. | You drag it to Refine, or press Start. |
 | **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**. |
 | **Mockup** | you ⇄ designer | A clickable mockup, made however the designer thinks best. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
@@ -217,19 +217,21 @@ It also shows every judgment, manager action and "decided for you", the time spe
 
 One page, with several views:
 
-- **Board:** lanes by projects. Each card shows a badge:
+- **Board,** in two layouts, one click apart:
+  - **By lane:** lanes by projects. The lane headers show their work-in-progress limits.
+  - **By project:** a panel for each project, as many side by side as the screen fits, with no lane columns. Each card shows which lane it's in, and a project's cards stay in lane order, so a card only moves when it changes lane.
+
+  In both, each card in progress shows a badge:
   - ● needs you
   - ▶ working
   - ◆ versions to compare
   - ■ stopped
-
-  The lane headers show their work-in-progress limits.
 - **For you:** everything waiting for you, across the whole board, oldest first.
 - **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec. You comment by selecting text in the spec or clicking on the mockup. Tabs show every lane's history.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
 
-You start an idea by typing into a project's Ideas cell. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
+You start an idea by typing into a project's Ideas cell, or its panel, or with New idea in the header. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
 
 ## A Card's Journey
 

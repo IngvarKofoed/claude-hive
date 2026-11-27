@@ -3,7 +3,9 @@ import { useNavigate } from "react-router";
 import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectSummary } from "@hive/shared";
 import { api } from "../api/client";
 import { useHiveEvents, useStreamOpen } from "../api/events";
+import { boardSummary } from "../components/cardBadge";
 import { Header } from "../components/Header";
+import { ProjectPanel } from "../components/ProjectPanel";
 import { ProjectRow } from "../components/ProjectRow";
 import { Button } from "../components/ui/Button";
 import styles from "./Board.module.css";
@@ -20,6 +22,45 @@ function looksLike<T extends { id: string }>(value: unknown): value is T {
   return typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string";
 }
 
+type Layout = "lane" | "project";
+
+/** Where this browser remembers the layout: a view preference for the one person at it. */
+export const LAYOUT_KEY = "hive.boardLayout";
+
+// Storage can be missing or refuse (a private window, blocked site data): then the board opens By lane, and the
+// switch still works for the visit.
+function readLayout(): Layout {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "project" ? "project" : "lane";
+  } catch {
+    return "lane";
+  }
+}
+
+function storeLayout(layout: Layout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout);
+  } catch {
+    // Remembered for this visit only.
+  }
+}
+
+type BandTone = "you" | "you-plain" | "hands-off";
+
+/**
+ * The bands over By lane's headers, saying which lanes are yours and which run hands off. They're the board's wording,
+ * not lane data: `withYou` can't tell Ideas' "you" from Refine to Spec's "with you". Together they cover every lane,
+ * in order (checked in Board.test.tsx).
+ */
+export const PHASE_BANDS: { label: string; lanes: Lane[]; tone?: BandTone }[] = [
+  { label: "you", lanes: ["ideas"], tone: "you-plain" },
+  { label: "with you", lanes: ["refine", "mockup", "spec"], tone: "you" },
+  { label: "hands off", lanes: ["plan", "build", "check"], tone: "hands-off" },
+  { label: "you", lanes: ["tryit"], tone: "you" },
+  { label: "hands off", lanes: ["ship"], tone: "hands-off" },
+  { label: "", lanes: ["done"] },
+];
+
 export function Board() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -30,6 +71,7 @@ export function Board() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [path, setPath] = useState("");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [layout, setLayout] = useState<Layout>(readLayout);
 
   const applyBoard = useCallback((board: BoardResponse) => {
     setProjects(board.projects);
@@ -60,6 +102,11 @@ export function Board() {
   // Refetch whatever changed while the stream was down.
   useStreamOpen(() => void load());
 
+  function chooseLayout(next: Layout) {
+    setLayout(next);
+    storeLayout(next);
+  }
+
   async function addProject() {
     const value = path.trim();
     if (!value) return;
@@ -77,7 +124,9 @@ export function Board() {
     if (looksLike<CardSummary>(card)) setCards((prev) => upsert(prev, card));
   }
 
-  async function dropCard(card: CardSummary, lane: Lane) {
+  // A drop on Refine and Start make the same move, so a failure shows the same way: in the error line above the
+  // board, and on the tile when the backend stored a move error.
+  async function moveCard(card: CardSummary, lane: Lane) {
     setDragging(null);
     setMoveError(null);
     try {
@@ -87,6 +136,10 @@ export function Board() {
       setMoveError(err instanceof Error ? err.message : "Could not move the card.");
     }
   }
+
+  const startIdea = (card: CardSummary) => moveCard(card, "refine");
+  const removeCard = (card: CardSummary) => setCards((prev) => prev.filter((c) => c.id !== card.id));
+  const openCard = (card: CardSummary) => navigate(`/cards/${card.id}`);
 
   function startDrag(card: CardSummary, event: DragEvent<HTMLElement>) {
     event.dataTransfer.setData("text/plain", card.id);
@@ -99,7 +152,20 @@ export function Board() {
       <Header />
       <main className={styles.main}>
         <div className={styles.toolbar}>
-          <h1 className={styles.title}>Board</h1>
+          <div className={styles.heading}>
+            <div>
+              <h1 className={styles.title}>Board</h1>
+              {projects.length > 0 ? <p className={styles.summary}>{boardSummary(projects.length, cards)}</p> : null}
+            </div>
+            <div className={styles.switch} role="group" aria-label="Board layout">
+              <Button aria-pressed={layout === "lane"} onClick={() => chooseLayout("lane")}>
+                By lane
+              </Button>
+              <Button aria-pressed={layout === "project"} onClick={() => chooseLayout("project")}>
+                By project
+              </Button>
+            </div>
+          </div>
           <form
             className={styles.addProject}
             onSubmit={(event) => {
@@ -139,35 +205,65 @@ export function Board() {
           </p>
         ) : null}
 
-        <div className={styles.scroll}>
-          <div className={styles.grid}>
-            <div className={styles.headRow}>
-              <div className={styles.headCell}>Projects</div>
-              {LANES.map((lane) => (
-                <div key={lane.id} className={styles.headCell} data-hands-off={!lane.withYou || undefined}>
-                  <span className={styles.laneName}>{lane.name}</span>
-                  {lane.who ? <span className={styles.who}>{lane.who}</span> : null}
-                  {lane.limit !== null ? <span className={styles.limit}>limit {lane.limit}</span> : null}
-                </div>
+        {layout === "lane" ? (
+          <div className={styles.scroll}>
+            <div className={styles.grid}>
+              <div className={styles.bandRow}>
+                <div />
+                {PHASE_BANDS.map((band) => (
+                  <div key={band.lanes[0]} className={styles.bandCell} data-span={band.lanes.length}>
+                    {band.label ? (
+                      <span className={styles.band} data-tone={band.tone}>
+                        {band.label}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <div className={styles.headRow}>
+                <div className={styles.headCell}>Projects</div>
+                {LANES.map((lane) => (
+                  <div key={lane.id} className={styles.headCell} data-hands-off={!lane.withYou || undefined}>
+                    <span className={styles.laneName}>{lane.name}</span>
+                    {lane.who ? <span className={styles.who}>{lane.who}</span> : null}
+                    {lane.limit !== null ? <span className={styles.limit}>limit {lane.limit}</span> : null}
+                  </div>
+                ))}
+              </div>
+              {projects.map((project) => (
+                <ProjectRow
+                  key={project.id}
+                  project={project}
+                  cards={cards.filter((card) => card.projectId === project.id)}
+                  dragging={dragging}
+                  onDragStart={startDrag}
+                  onDragEnd={() => setDragging(null)}
+                  onDrop={moveCard}
+                  onOpen={openCard}
+                  onAddIdea={addIdea}
+                  onStart={startIdea}
+                  onBoard={applyBoard}
+                  onDeleted={removeCard}
+                />
               ))}
             </div>
+          </div>
+        ) : (
+          <div className={styles.panels}>
             {projects.map((project) => (
-              <ProjectRow
+              <ProjectPanel
                 key={project.id}
                 project={project}
                 cards={cards.filter((card) => card.projectId === project.id)}
-                dragging={dragging}
-                onDragStart={startDrag}
-                onDragEnd={() => setDragging(null)}
-                onDrop={dropCard}
-                onOpen={(card) => navigate(`/cards/${card.id}`)}
+                onOpen={openCard}
                 onAddIdea={addIdea}
+                onStart={startIdea}
                 onBoard={applyBoard}
-                onDeleted={(card) => setCards((prev) => prev.filter((c) => c.id !== card.id))}
+                onDeleted={removeCard}
               />
             ))}
           </div>
-        </div>
+        )}
         {loaded && projects.length === 0 && !loadError ? (
           <p className={styles.empty}>No projects yet. Add a git repository by its path to start.</p>
         ) : null}

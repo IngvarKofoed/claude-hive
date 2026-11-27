@@ -39,6 +39,20 @@ button.title {
   gap: var(--space-3);
 }
 
+/* The lane line on a By project card: the lane's name, then the strip. */
+.lane {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.laneName {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
 .error {
   padding: var(--space-3);
   border: var(--border-width) solid var(--color-stopped-border);

@@ -68,6 +68,17 @@
   /* Layout */
   --project-col-width: 220px;
   --lane-width: 210px;
+  --board-panel-min-width: 400px;
+  --popover-width: 420px;
+
+  /* The lane strip on a By project card: lanes passed, the card's own lane, lanes still to come */
+  --color-lane-past: #6b6a63;
+  --color-lane-current: #1b1b18;
+  --color-lane-future: #e4e3de;
+  --lane-strip-height: 4px;
+  --lane-strip-height-current: 8px;
+  --lane-strip-gap: 2px;
+  --lane-strip-radius: 2px;
   --chat-min-height: 320px;
   --page-max-width: 1280px;
   --for-you-width: 760px;

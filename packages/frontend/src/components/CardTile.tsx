@@ -1,7 +1,9 @@
 import { useEffect, useState, type DragEvent } from "react";
-import { laneImplemented, type CardSummary } from "@hive/shared";
+import { LANES, type CardSummary } from "@hive/shared";
 import { api } from "../api/client";
+import { cardBadge } from "./cardBadge";
 import { deleteQuestion } from "./deleteText";
+import { LaneSteps } from "./LaneSteps";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import styles from "./CardTile.module.css";
@@ -9,26 +11,37 @@ import styles from "./CardTile.module.css";
 interface Props {
   card: CardSummary;
   onOpen?: (card: CardSummary) => void;
+  /** Given only where an idea can be dropped on Refine (By lane): without it, no tile is draggable. */
   onDragStart?: (card: CardSummary, event: DragEvent<HTMLElement>) => void;
   onDragEnd?: () => void;
   /** The card was deleted from this tile. */
   onDeleted?: (card: CardSummary) => void;
+  /** Show the lane's name and strip, where no column names the lane (By project). */
+  showLane?: boolean;
+  /** Start an idea: the same move to Refine as the drag. Shown on ideas only. */
+  onStart?: (card: CardSummary) => Promise<void>;
 }
 
-export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted }: Props) {
+export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, showLane = false, onStart }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const draggable = card.lane === "ideas" && !confirming;
+  const [starting, setStarting] = useState(false);
+  const draggable = card.lane === "ideas" && !confirming && onDragStart !== undefined;
   const openable = card.lane !== "ideas";
-  // A landed card needs nothing from you.
-  const badge = card.lane === "done" ? null : !laneImplemented(card.lane) ? (
-    <Badge tone="neutral">Not implemented yet</Badge>
-  ) : card.state === "working" ? (
-      <Badge tone="working">▶ working</Badge>
-    ) : (
-      <Badge tone="needs-you">● needs you</Badge>
-    );
+  const startable = card.lane === "ideas" && onStart !== undefined;
+  const badge = cardBadge(card);
+  const laneName = LANES.find((lane) => lane.id === card.lane)?.name ?? card.lane;
+
+  async function start() {
+    if (!onStart) return;
+    setStarting(true);
+    try {
+      await onStart(card);
+    } finally {
+      setStarting(false);
+    }
+  }
 
   async function remove() {
     setDeleting(true);
@@ -70,6 +83,12 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted }: Pr
       ) : (
         <p className={styles.title}>{card.title}</p>
       )}
+      {showLane ? (
+        <div className={styles.lane}>
+          <span className={styles.laneName}>{laneName}</span>
+          <LaneSteps current={card.lane} compact />
+        </div>
+      ) : null}
       {confirming ? (
         <div className={styles.confirm} role="group" aria-label="Delete this card">
           <p className={styles.question}>{deleteQuestion(card, "tile")}</p>
@@ -89,7 +108,13 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted }: Pr
         </div>
       ) : (
         <div className={styles.meta}>
-          {badge}
+          {/* Start sits at the left and Delete at the far right, so aiming for one doesn't hit the other. */}
+          {startable ? (
+            <Button compact variant="primary" disabled={starting} onClick={() => void start()}>
+              Start
+            </Button>
+          ) : null}
+          {badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null}
           <button type="button" className={styles.delete} onClick={() => setConfirming(true)}>
             Delete
           </button>

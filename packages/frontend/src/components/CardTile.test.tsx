@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CardSummary } from "@hive/shared";
@@ -16,9 +16,14 @@ const base: CardSummary = {
 
 describe("CardTile", () => {
   it("shows ● needs you, and no error", () => {
-    render(<CardTile card={base} />);
+    render(<CardTile card={{ ...base, lane: "refine" }} />);
     expect(screen.getByText("● needs you")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge for an idea: it waits for Start, not for an answer", () => {
+    render(<CardTile card={base} />);
+    expect(screen.queryByText("● needs you")).toBeNull();
   });
 
   it("shows no badge for a landed card", () => {
@@ -38,10 +43,11 @@ describe("CardTile", () => {
   });
 
   it("is draggable only in Ideas, and opens in every other lane", () => {
-    const { container, rerender } = render(<CardTile card={base} />);
+    const onDragStart = vi.fn();
+    const { container, rerender } = render(<CardTile card={base} onDragStart={onDragStart} />);
     expect(container.querySelector("article")).toHaveAttribute("draggable", "true");
     expect(screen.queryByRole("button", { name: "Seed price history" })).not.toBeInTheDocument();
-    rerender(<CardTile card={{ ...base, lane: "refine" }} />);
+    rerender(<CardTile card={{ ...base, lane: "refine" }} onDragStart={onDragStart} />);
     expect(container.querySelector("article")).toHaveAttribute("draggable", "false");
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();
   });
@@ -58,6 +64,51 @@ describe("CardTile", () => {
     expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
     expect(screen.queryByText("▶ working")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();
+  });
+
+  it("isn't draggable where nothing can be dropped (By project gives no onDragStart)", () => {
+    const { container } = render(<CardTile card={base} />);
+    expect(container.querySelector("article")).toHaveAttribute("draggable", "false");
+  });
+
+  describe("Start", () => {
+    it("shows on an idea only, and only when the board gives onStart", () => {
+      const onStart = vi.fn().mockResolvedValue(undefined);
+      const { rerender } = render(<CardTile card={base} />);
+      expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+      rerender(<CardTile card={base} onStart={onStart} />);
+      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+      rerender(<CardTile card={{ ...base, lane: "refine" }} onStart={onStart} />);
+      expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    });
+
+    it("starts the idea, and is disabled while the move runs", async () => {
+      let finish = () => {};
+      const onStart = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      render(<CardTile card={base} onStart={onStart} />);
+      await userEvent.click(screen.getByRole("button", { name: "Start" }));
+      expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+      await act(async () => finish());
+      expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+    });
+
+    it("sits before the badge row's Delete", () => {
+      render(<CardTile card={base} onStart={vi.fn()} />);
+      const buttons = screen.getAllByRole("button").map((b) => b.textContent);
+      expect(buttons.indexOf("Start")).toBeLessThan(buttons.indexOf("Delete"));
+    });
+  });
+
+  it("shows the lane's name, with a strip screen readers skip, only when asked", () => {
+    const { container, rerender } = render(<CardTile card={{ ...base, lane: "build", state: "working" }} />);
+    expect(screen.queryByText("Build")).toBeNull();
+    rerender(<CardTile card={{ ...base, lane: "build", state: "working" }} showLane />);
+    expect(screen.getByText("Build")).toBeInTheDocument();
+    const strip = container.querySelector("ol");
+    expect(strip).toHaveAttribute("aria-hidden", "true");
+    const statuses = [...strip!.querySelectorAll("li")].map((li) => li.getAttribute("data-status"));
+    expect(statuses).toEqual(["past", "past", "past", "past", "past", "current", "future", "future", "future", "future"]);
   });
 
   describe("Delete", () => {
@@ -100,7 +151,7 @@ describe("CardTile", () => {
     });
 
     it("isn't draggable while asking", async () => {
-      const { container } = render(<CardTile card={base} />);
+      const { container } = render(<CardTile card={base} onDragStart={vi.fn()} />);
       await userEvent.click(screen.getByRole("button", { name: "Delete" }));
       expect(container.querySelector("article")).toHaveAttribute("draggable", "false");
     });

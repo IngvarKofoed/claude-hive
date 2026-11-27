@@ -24,3 +24,31 @@
   color: var(--color-primary-text);
   font-weight: var(--weight-semibold);
 }
+
+/* The compact strip: one segment per lane, the card's own lane darker and taller. */
+.strip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--lane-strip-gap);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.segment {
+  flex: 1;
+  height: var(--lane-strip-height);
+  border-radius: var(--lane-strip-radius);
+  background: var(--color-lane-future);
+}
+
+.segment[data-status="past"] {
+  background: var(--color-lane-past);
+}
+
+.segment[data-status="current"] {
+  height: var(--lane-strip-height-current);
+  background: var(--color-lane-current);
+}
