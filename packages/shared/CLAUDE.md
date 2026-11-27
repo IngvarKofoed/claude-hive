@@ -1,8 +1,6 @@
 # Claude Hive — shared
 
-The types the backend and frontend both use: API bodies, SSE events and role reports. See `docs/ARCHITECTURE.md` for the broader context.
-
-Contents: `src/` with the shared types, and `src/version.ts`, generated at build time.
+The types the backend and frontend both use: API bodies, SSE events and role reports, plus the generated `src/version.ts`.
 
 ## Required tools
 
@@ -10,11 +8,10 @@ Contents: `src/` with the shared types, and `src/version.ts`, generated at build
 
 ## Testing
 
-The package holds types, so the check is a type check: run `tsc --noEmit` here and in both packages that use the changed type. Runtime code added here, such as a type guard, gets a Vitest test next to it as `*.test.ts`, like the other packages. Do not introduce a different test framework without updating the architecture doc.
+The package holds types, so the check is a type check: run `npm run typecheck` at the repo root, which checks all three packages. The scripts generate `src/version.ts` first; a bare `tsc` on a fresh checkout fails on the missing file. Runtime code added here, such as a type guard, gets a Vitest test next to it as `*.test.ts`, run with `npm test`.
 
 ## Rules
 
-- **A type change lands in all three packages at once.** A change to an API body, SSE event or role report type here must be followed through in both backend and frontend in the same change.
+- **A type change lands in all three packages at once.** A change to an API body, SSE event or role report type here is followed through in both backend and frontend in the same change.
 - **Only what both sides use.** A type that only the backend or only the frontend needs lives in that package.
-- **Every role report type keeps its `status` (`done` or `blocked`) and reason.** A session that can't fill in a field otherwise makes up a value that passes the schema (`docs/ARCHITECTURE.md`, Role reports).
-- **`src/version.ts` is generated and git-ignored.** `scripts/gen-version.mjs` writes `APP_VERSION` into it at build time, so never edit or commit it (`docs/ARCHITECTURE.md`, Versioning).
+- **Never edit or commit `src/version.ts`.** It's generated and git-ignored.

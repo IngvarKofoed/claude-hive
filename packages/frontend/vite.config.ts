@@ -24,6 +24,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
-    css: false,
+    // Stylesheets stay empty in tests, except `?raw` reads, which src/styles/rules.test.ts checks as text.
+    css: { include: /[?&]raw\b/ },
   },
 });
