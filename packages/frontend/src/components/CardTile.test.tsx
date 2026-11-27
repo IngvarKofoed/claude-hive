@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CardSummary } from "@hive/shared";
@@ -42,11 +42,13 @@ describe("CardTile", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("fatal: 'hive/x' already exists");
   });
 
-  it("is draggable only in Ideas, and opens in every other lane", () => {
+  it("is draggable only in Ideas, and opens in every lane, Ideas too", () => {
     const onDragStart = vi.fn();
-    const { container, rerender } = render(<CardTile card={base} onDragStart={onDragStart} />);
+    const onOpen = vi.fn();
+    const { container, rerender } = render(<CardTile card={base} onDragStart={onDragStart} onOpen={onOpen} />);
     expect(container.querySelector("article")).toHaveAttribute("draggable", "true");
-    expect(screen.queryByRole("button", { name: "Seed price history" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Seed price history" }));
+    expect(onOpen).toHaveBeenCalledWith(base);
     rerender(<CardTile card={{ ...base, lane: "refine" }} onDragStart={onDragStart} />);
     expect(container.querySelector("article")).toHaveAttribute("draggable", "false");
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();

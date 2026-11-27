@@ -89,7 +89,7 @@ describe("Ship lane", () => {
   async function inShip(opts: { test?: string } = {}) {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => hive.card(card.id).setup?.status === "done");
     const po = runner.last;

@@ -1,13 +1,15 @@
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { api } from "../api/client";
-import { laneImplemented, type CardDetail } from "@hive/shared";
+import { LANES, laneImplemented, lanesBefore, type CardDetail, type Lane } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
 import { CheckView } from "../components/CheckView";
 import { DeleteCard } from "../components/DeleteCard";
-import { Chat } from "../components/Chat";
+import { Chat, PastChat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
+import { IdeaPanel } from "../components/IdeaPanel";
+import { IdeaView } from "../components/IdeaView";
 import { LaneSteps } from "../components/LaneSteps";
 import { DonePanel, ShipPanel } from "../components/ShipPanel";
 import { TryItPanel } from "../components/TryItPanel";
@@ -47,6 +49,93 @@ function BuildPanel({ detail }: { detail: CardDetail }) {
   );
 }
 
+const laneName = (lane: Lane) => LANES.find((l) => l.id === lane)?.name ?? lane;
+
+/**
+ * The lanes a card can be looked back at: the ones before its own, except a lane that isn't built, which it skipped
+ * (docs/specs/2026-11-27-card-lane-artifacts.md).
+ */
+export function lookBackLanes(current: Lane): Lane[] {
+  return lanesBefore(current).filter(laneImplemented);
+}
+
+/** Who a finished lane's chat was with, as the left panel's title. */
+const PAST_CHAT_TITLE: Partial<Record<Lane, string>> = {
+  refine: "Product owner",
+  spec: "Spec writer",
+  plan: "Planner",
+  build: "Developer",
+  check: "Reviewer",
+  tryit: "Try it",
+  ship: "Landing",
+};
+
+/** What a finished lane produced, for the right-hand column. */
+function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
+  const none = (text: string) => <p className={styles.muted}>{text}</p>;
+  switch (lane) {
+    case "ideas":
+      return (
+        <Panel title="Idea">
+          <IdeaView title={detail.ideaTitle} text={detail.ideaText} />
+        </Panel>
+      );
+    case "refine":
+      return (
+        <Panel title="Brief">
+          <BriefPanel brief={detail.brief} />
+        </Panel>
+      );
+    case "spec":
+      return (
+        <Panel title="Spec">
+          {detail.spec?.text != null
+            ? <SpecView spec={detail.spec} />
+            : none(
+                // Only a landed card's spec is on main; any other card's should be in its worktree, but isn't.
+                detail.specPath && detail.landed
+                  ? `The spec can't be shown here: it's on main at ${detail.specPath}.`
+                  : "The spec can't be shown here.",
+              )}
+        </Panel>
+      );
+    case "plan":
+      return <Panel title="Plan">{detail.plan ? <PlanView plan={detail.plan} /> : none("No plan is kept.")}</Panel>;
+    case "build":
+      return (
+        <Panel title="Build">
+          {detail.build || detail.issues.length > 0 || detail.decisions.length > 0
+            ? <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+            : none("No build report is kept.")}
+        </Panel>
+      );
+    case "check":
+      return <Panel title="Check">{detail.check ? <CheckView check={detail.check} /> : none("No Check round is kept.")}</Panel>;
+    case "tryit":
+      return <Panel title="Feedback">{none("Try it's own record, your feedback rounds, isn't shown here yet.")}</Panel>;
+    case "ship":
+      return <DonePanel landed={detail.landed} />;
+    default:
+      return null;
+  }
+}
+
+/**
+ * A finished lane, looked back at: its chat on the left and what it produced on the right. It is built only from
+ * display components, never the live lane's bars and panels, so there is nothing here to press
+ * (docs/specs/2026-11-27-card-lane-artifacts.md).
+ */
+export function PastLaneView({ detail, lane }: { detail: CardDetail; lane: Lane }) {
+  return (
+    <div className={styles.columns}>
+      <Panel title={PAST_CHAT_TITLE[lane] ?? laneName(lane)}>
+        <PastChat items={detail.pastChats[lane] ?? []} />
+      </Panel>
+      <PastArtifact detail={detail} lane={lane} />
+    </div>
+  );
+}
+
 export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
@@ -59,7 +148,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
         <div className={styles.columns}>
           {detail.spec ? (
             <Panel title="Spec">
-              <SpecView spec={detail.spec} brief={detail.brief} />
+              <SpecView spec={detail.spec} />
             </Panel>
           ) : null}
           {/* The newest work first: the build report sits above the plan, beside the spec, not under it. */}
@@ -74,6 +163,18 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
           </div>
         </div>
       </>
+    );
+  }
+
+  // The idea is the lane's artifact, so it sits on the right like every lane's. The left stays empty: Refine's chat
+  // starts there.
+  if (detail.lane === "ideas") {
+    return (
+      <div className={styles.columns}>
+        <div className={styles.right}>
+          <IdeaPanel detail={detail} onChanged={onMoved} />
+        </div>
+      </div>
     );
   }
 
@@ -106,7 +207,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
         <div className={styles.stack}>
           {detail.spec ? (
             <Panel title="Spec">
-              <SpecView spec={detail.spec} brief={detail.brief} />
+              <SpecView spec={detail.spec} />
             </Panel>
           ) : null}
           {detail.check ? (
@@ -148,7 +249,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
           <div className={styles.stack}>
             <ReviewBar detail={detail} onMoved={onMoved} />
             {detail.spec ? (
-              <SpecView spec={detail.spec} brief={detail.brief} />
+              <SpecView spec={detail.spec} />
             ) : (
               <p className={styles.muted}>The spec writer is writing the spec…</p>
             )}
@@ -212,7 +313,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
       <Panel title="Product owner" className={styles.chatPanel}>
         <div className={styles.stack}>
           <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
-          {detail.lane === "refine" ? <GoodBar detail={detail} onMoved={onMoved} /> : null}
+          <GoodBar detail={detail} onMoved={onMoved} />
         </div>
       </Panel>
       <Panel title="Brief" className={styles.briefPanel}>
@@ -225,6 +326,11 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
 export function Card() {
   const { id } = useParams();
   const { live, error, reload, gone } = useCardLive(id);
+  const [params] = useSearchParams();
+  const asked = params.get("lane");
+  // Anything that isn't a lane the card has finished (its own lane, a later one, a skipped one, Done, a typo, or a lane
+  // that stopped being past since the link was made) shows the card's current lane.
+  const viewing = live ? (lookBackLanes(live.detail.lane).find((lane) => lane === asked) ?? null) : null;
 
   return (
     <>
@@ -244,8 +350,8 @@ export function Card() {
               </p>
               <div className={styles.titleRow}>
                 <h1 className={styles.title}>{live.detail.title}</h1>
-                {/* A landed card needs nothing from you. */}
-                {live.detail.lane === "done" ? null : live.detail.state === "working" ? (
+                {/* An idea waits for Start, and a landed card needs nothing from you: no badge, as on the board. */}
+                {live.detail.lane === "ideas" || live.detail.lane === "done" ? null : live.detail.state === "working" ? (
                   <Badge tone="working">▶ working</Badge>
                 ) : (
                   <Badge tone="needs-you">● needs you</Badge>
@@ -258,9 +364,19 @@ export function Card() {
                   {live.detail.worktreePath ? <Chip mono>{live.detail.worktreePath}</Chip> : null}
                 </p>
               ) : null}
-              <LaneSteps current={live.detail.lane} />
+              <LaneSteps current={live.detail.lane} viewing={viewing} navigable />
             </div>
-            <LaneView live={live} onMoved={() => void reload()} />
+            {viewing ? (
+              <>
+                <p className={styles.lookingBack} role="status">
+                  Looking back at {laneName(viewing)}. It&apos;s finished, so nothing here can be changed.{" "}
+                  <Link to={{ search: "" }}>Back to {laneName(live.detail.lane)}</Link>
+                </p>
+                <PastLaneView detail={live.detail} lane={viewing} />
+              </>
+            ) : (
+              <LaneView live={live} onMoved={() => void reload()} />
+            )}
           </>
         ) : null}
       </main>

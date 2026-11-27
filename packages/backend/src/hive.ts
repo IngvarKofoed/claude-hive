@@ -9,9 +9,9 @@ import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
   FeedbackBody, FileChange, ForYouItem, ForYouResponse, Landed, LandBody, Lane, PendingItem, Plan, Question,
-  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo,
+  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, UpdateIdeaBody,
 } from "@hive/shared";
-import { CARD_PORTS, LANES } from "@hive/shared";
+import { CARD_PORTS, LANES, lanesBefore } from "@hive/shared";
 import {
   CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterLanding, laneAfterPlan,
 } from "./board/moves";
@@ -145,17 +145,13 @@ const AUTHOR: Record<string, ChatAuthor> = {
   reviewer: "reviewer",
 };
 
-/** The idea's first sentence, cut to 60 characters (spec: Board and moves). */
-export function titleFromIdea(text: string): string {
-  const first = text.trim().split(/(?<=[.!?])\s|\n/)[0]!.trim();
-  return first.length > 60 ? `${first.slice(0, 59).trimEnd()}…` : first;
-}
-
-function refineFirstMessage(projectName: string, idea: string): string {
+function refineFirstMessage(projectName: string, title: string, idea: string): string {
   return [
     `A new idea for the project ${projectName}:`,
     "",
-    idea,
+    `Title: ${title}`,
+    "",
+    `The idea: ${idea}`,
     "",
     "Read the repo, then open with a draft brief through write_brief, and ask what you need to know with AskUserQuestion.",
   ].join("\n");
@@ -379,11 +375,13 @@ export class Hive {
     return {
       ...cardSummary(card),
       projectName: project.name,
+      ideaTitle: card.ideaTitle,
       ideaText: card.ideaText,
       branch: card.branch,
       worktreePath: card.worktreePath,
       brief: card.brief,
       spec: card.specPath ? this.refreshSpec(card.id) : null,
+      specPath: card.specPath,
       plan: card.plan,
       build: card.build,
       check: card.check,
@@ -397,6 +395,7 @@ export class Hive {
       issues: this.db.issuesFor(card.id),
       decisions: this.db.decisionsFor(card.id),
       chat: this.db.chatFor(card.id, card.lane),
+      pastChats: this.pastChats(card.id, card.lane),
       pending: this.db.openPendingFor(card.id)?.item ?? null,
       turnRunning: this.anyTurnRunning(card.id),
     };
@@ -439,6 +438,11 @@ export class Hive {
     return { roles };
   }
 
+  /** The chat of every lane before the current one that has any (docs/specs/2026-11-27-card-lane-artifacts.md). */
+  private pastChats(cardId: string, current: Lane): Partial<Record<Lane, ChatItem[]>> {
+    return this.db.chatsByLane(cardId, lanesBefore(current));
+  }
+
   // ---------- projects ----------
 
   async addProject(path: string): Promise<void> {
@@ -479,16 +483,32 @@ export class Hive {
 
   // ---------- cards and moves ----------
 
-  createCard(projectId: string, text: string): CardSummary {
+  createCard(projectId: string, title: string, text: string): CardSummary {
     if (!this.db.getProject(projectId)) throw new HttpError(404, "No such project.");
+    if (typeof title !== "string" || !title.trim()) throw new HttpError(400, "Give the idea a title first.");
     if (typeof text !== "string" || !text.trim()) throw new HttpError(400, "Type an idea first.");
     const id = randomUUID();
     this.db.insertCard({
-      id, projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
+      id, projectId, title: title.trim(), ideaTitle: title.trim(), ideaText: text.trim(), lane: "ideas",
       state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
       specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
       setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null, shipAfterCheck: false,
     });
+    this.emitCard(id);
+    return cardSummary(this.requireCard(id));
+  }
+
+  /** Edits an idea's title and text, until Start. */
+  updateIdea(id: string, body: UpdateIdeaBody): CardSummary {
+    const card = this.db.getCard(id);
+    if (!card) throw new HttpError(404, "No such card.");
+    const title = typeof body?.title === "string" ? body.title.trim() : "";
+    const text = typeof body?.text === "string" ? body.text.trim() : "";
+    if (!title) throw new HttpError(400, "Give the idea a title first.");
+    if (!text) throw new HttpError(400, "Type an idea first.");
+    if (card.lane !== "ideas") throw new HttpError(409, "The idea can only be edited while the card is in Ideas.");
+    if (this.moving.has(id)) throw new HttpError(409, "This card is moving. Try again in a moment.");
+    this.db.updateCard(id, { ideaTitle: title, ideaText: text, title });
     this.emitCard(id);
     return cardSummary(this.requireCard(id));
   }
@@ -569,7 +589,7 @@ export class Hive {
 
     const sessionId = randomUUID();
     this.db.insertSession({ id: sessionId, cardId: id, lane, role: LANE_ROLE.refine!, kind: role.kind });
-    this.startTurn(id, sessionId, refineFirstMessage(project.name, card.ideaText));
+    this.startTurn(id, sessionId, refineFirstMessage(project.name, card.ideaTitle, card.ideaText));
     // The worktree is set up in the background while you chat (docs/specs/2026-11-27-worktree-setup-and-try-it.md).
     void this.startSetup(id).catch((error: unknown) => this.log(`Setting up card ${id} failed: ${String(error)}`));
     return cardSummary(this.requireCard(id));
@@ -2287,7 +2307,9 @@ export class Hive {
     return [
       `The idea for this card, in the project ${project.name}:`,
       "",
-      card.ideaText,
+      `Title: ${card.ideaTitle}`,
+      "",
+      `The idea: ${card.ideaText}`,
       "",
       "The brief the product owner wrote with the person:",
       "",

@@ -59,7 +59,7 @@ describe("Spec and Plan lanes", () => {
   async function refined() {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable. Some find it too small.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable. Some find it too small.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => hive.card(card.id).setup?.status === "done"); // the worktree's setup, in the background
     const po = runner.last;
@@ -98,6 +98,8 @@ describe("Spec and Plan lanes", () => {
       const writer = runner.last;
       expect(writer.request.role.name).toBe("spec-writer");
       expect(writer.request.extraInstructions).toContain("What a spec contains");
+      expect(writer.request.message).toContain("Title: Font");
+      expect(writer.request.message).toContain("The idea: Make the printer font adjustable. Some find it too small.");
       expect(writer.request.message).toContain("Problem: Labels are too small.");
       expect(writer.request.message).toContain("product owner: Here is a first brief.");
       expect(writer.request.message).toContain("docs/specs/2026-11-26-printer-font-size.md");
@@ -106,7 +108,7 @@ describe("Spec and Plan lanes", () => {
 
     it("is refused while the product owner works, or without the spec format", async () => {
       await hive.addProject(repo.root);
-      const card = hive.createCard(hive.board().projects[0]!.id, "An idea.");
+      const card = hive.createCard(hive.board().projects[0]!.id, "Font", "An idea.");
       await hive.moveCard(card.id, "refine");
       await expect(hive.good(card.id)).rejects.toMatchObject({ status: 409 });
       await runner.last.end();
@@ -360,6 +362,12 @@ describe("the database", () => {
     old.close();
     const db = new HiveDb(path);
     expect(db.getCard("c1")).toMatchObject({ specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null });
+    // The idea title column arrives too, and an old card takes its title from the first sentence of its text.
+    expect(db.getCard("c1")!.ideaTitle).toBe("idea");
+    db.db.exec("UPDATE cards SET idea_title = NULL, idea_text = 'First one. Second one.'");
+    const again = new HiveDb(path);
+    expect(again.db.prepare("SELECT idea_title FROM cards").get()).toEqual({ idea_title: "First one." });
+    again.close();
     expect(db.chatFor("c1", "refine")).toMatchObject([
       { kind: "message", text: "hi" },
       { kind: "error", actions: ["retry"] },

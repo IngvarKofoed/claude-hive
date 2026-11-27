@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { titleFromIdea } from "./titleFromIdea";
 import type {
   Brief, BuildReport, CardState, ChatItem, CheckRound, Decision, Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS decisions (
 
 /** Columns added after the first slice; added to an existing database on open. */
 const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
+  { table: "cards", column: "idea_title", type: "TEXT" },
   { table: "cards", column: "spec_path", type: "TEXT" },
   { table: "cards", column: "reviewed_spec_hash", type: "TEXT" },
   { table: "cards", column: "review_applying", type: "INTEGER NOT NULL DEFAULT 0" },
@@ -117,6 +119,8 @@ export interface CardRow {
   id: string;
   projectId: string;
   title: string;
+  /** The idea's title as you typed it; `title` starts as this and the brief's title replaces it. */
+  ideaTitle: string;
   ideaText: string;
   lane: Lane;
   state: CardState;
@@ -198,6 +202,11 @@ export class HiveDb {
           (SELECT MAX(at) FROM events WHERE events.card_id = cards.id), created_at)`);
       }
     }
+    // Every card has an idea title: older ones take the first sentence of their text.
+    const untitled = this.db.prepare("SELECT id, idea_text FROM cards WHERE idea_title IS NULL").all() as
+      { id: string; idea_text: string }[];
+    const fill = this.db.prepare("UPDATE cards SET idea_title = ? WHERE id = ?");
+    for (const row of untitled) fill.run(titleFromIdea(row.idea_text), row.id);
   }
 
   close(): void {
@@ -245,12 +254,12 @@ export class HiveDb {
     const at = now();
     this.db
       .prepare(
-        `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
+        `INSERT INTO cards (id, project_id, title, idea_title, idea_text, lane, state, branch, worktree_path, brief, move_error,
            spec_path, reviewed_spec_hash, review_applying, plan, build, check_round, setup, port, feedback, app_stopped,
            landing, landed, ship_after_check, waiting_since, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
+      .run(c.id, c.projectId, c.title, c.ideaTitle, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
         c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
         c.check ? JSON.stringify(c.check) : null, c.setup ? JSON.stringify(c.setup) : null, c.port, c.feedback,
@@ -264,7 +273,7 @@ export class HiveDb {
    */
   updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId" | "waitingSince">>): void {
     const cols: Record<string, string> = {
-      title: "title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
+      title: "title", ideaTitle: "idea_title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
       reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
@@ -389,17 +398,27 @@ export class HiveDb {
    * carry no lane and count as Refine's.
    */
   chatFor(cardId: string, lane: Lane): ChatItem[] {
+    return this.chatsByLane(cardId, [lane])[lane] ?? [];
+  }
+
+  /** The chat of each of `lanes` that has any, read in one pass over the card's history. */
+  chatsByLane(cardId: string, lanes: Lane[]): Partial<Record<Lane, ChatItem[]>> {
+    const wanted = new Set<Lane>(lanes);
     const rows = this.db
       .prepare("SELECT * FROM events WHERE card_id = ? AND type IN ('chat', 'error') ORDER BY at, rowid")
       .all(cardId) as any[];
-    return rows
-      .map((r) => ({ r, d: JSON.parse(r.data) }))
-      .filter(({ d }) => (d.lane ?? "refine") === lane)
-      .map(({ r, d }): ChatItem =>
+    const chats: Partial<Record<Lane, ChatItem[]>> = {};
+    for (const r of rows) {
+      const d = JSON.parse(r.data);
+      const lane: Lane = d.lane ?? "refine";
+      if (!wanted.has(lane)) continue;
+      const item: ChatItem =
         r.type === "chat"
           ? { kind: "message", id: r.id, at: r.at, from: d.from, text: d.text }
-          : { kind: "error", id: r.id, at: r.at, message: d.message, actions: errorActions(d) },
-      );
+          : { kind: "error", id: r.id, at: r.at, message: d.message, actions: errorActions(d) };
+      (chats[lane] ??= []).push(item);
+    }
+    return chats;
   }
 
   /** The last item in a lane's chat. */
@@ -451,7 +470,7 @@ function toProject(r: any): ProjectRow {
 
 function toCard(r: any): CardRow {
   return {
-    id: r.id, projectId: r.project_id, title: r.title, ideaText: r.idea_text, lane: r.lane, state: r.state,
+    id: r.id, projectId: r.project_id, title: r.title, ideaTitle: r.idea_title, ideaText: r.idea_text, lane: r.lane, state: r.state,
     branch: r.branch, worktreePath: r.worktree_path, brief: r.brief ? JSON.parse(r.brief) : null,
     moveError: r.move_error, specPath: r.spec_path ?? null, reviewedSpecHash: r.reviewed_spec_hash ?? null,
     reviewApplying: !!r.review_applying, plan: r.plan ? JSON.parse(r.plan) : null,

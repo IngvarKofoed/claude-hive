@@ -1,40 +1,23 @@
 import { useState } from "react";
 import type { ProjectSummary } from "@hive/shared";
+import { useNewIdea } from "./newIdeaContext";
 import styles from "./AddIdea.module.css";
 
-interface Props {
-  project: ProjectSummary;
-  onAddIdea: (projectId: string, text: string) => Promise<void>;
-}
-
-/** The field that adds an idea to one project, in its Ideas cell or its panel. */
-export function AddIdea({ project, onAddIdea }: Props) {
+/**
+ * The one-line field in a project's Ideas cell or panel. Enter opens New idea with this project chosen and what you
+ * typed as the title: there is one form, one Add and one place where an idea can fail.
+ */
+export function AddIdea({ project }: { project: ProjectSummary }) {
+  const { openNewIdea } = useNewIdea();
   const [idea, setIdea] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-
-  async function add() {
-    const text = idea.trim();
-    // A second Enter while the first add runs would add the same idea twice.
-    if (!text || adding) return;
-    setAdding(true);
-    setError(null);
-    try {
-      await onAddIdea(project.id, text);
-      setIdea("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add the idea.");
-    } finally {
-      setAdding(false);
-    }
-  }
 
   return (
     <form
       className={styles.idea}
       onSubmit={(event) => {
         event.preventDefault();
-        void add();
+        openNewIdea({ projectId: project.id, title: idea.trim() });
+        setIdea("");
       }}
     >
       <input
@@ -45,11 +28,6 @@ export function AddIdea({ project, onAddIdea }: Props) {
         value={idea}
         onChange={(event) => setIdea(event.target.value)}
       />
-      {error ? (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
-      ) : null}
     </form>
   );
 }

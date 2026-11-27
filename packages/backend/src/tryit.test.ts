@@ -98,7 +98,7 @@ describe("worktree setup and Try it", () => {
   async function inRefine() {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => runner.setupTurns.length === 1);
     return { id: card.id, po: lastOf("product-owner"), setup: lastSetup(), worktree: hive.card(card.id).worktreePath! };
@@ -234,7 +234,7 @@ describe("worktree setup and Try it", () => {
       for (const p of taken) db.db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)").run(`p${p}`, "x", `/x/${p}`, "t");
       for (const p of taken) {
         db.insertCard({
-          id: `c${p}`, projectId: `p${p}`, title: "x", ideaText: "x", lane: "ideas", state: "needs-you", branch: null,
+          id: `c${p}`, projectId: `p${p}`, title: "x", ideaTitle: "x", ideaText: "x", lane: "ideas", state: "needs-you", branch: null,
           worktreePath: null, brief: null, moveError: null, specPath: null, reviewedSpecHash: null, reviewApplying: false,
           plan: null, build: null, check: null, setup: null, port: p, feedback: null, appStopped: false,
           landing: null, landed: null, shipAfterCheck: false,
@@ -242,7 +242,7 @@ describe("worktree setup and Try it", () => {
       }
       await hive.addProject(repo.root);
       const project = hive.board().projects.find((p) => !p.path.startsWith("/x/"))!;
-      const card = hive.createCard(project.id, "One too many.");
+      const card = hive.createCard(project.id, "Font", "One too many.");
       await hive.moveCard(card.id, "refine");
       await waitFor(() => hive.card(card.id).setup?.status === "failed");
       expect(hive.card(card.id).setup!.reason).toMatch(/No free ports/);
@@ -256,8 +256,8 @@ describe("worktree setup and Try it", () => {
       };
       await hive.addProject(repo.root);
       const project = hive.board().projects[0]!;
-      const a = hive.createCard(project.id, "First idea.");
-      const b = hive.createCard(project.id, "Second idea.");
+      const a = hive.createCard(project.id, "Font", "First idea.");
+      const b = hive.createCard(project.id, "Font", "Second idea.");
       await Promise.all([hive.moveCard(a.id, "refine"), hive.moveCard(b.id, "refine")]);
       await waitFor(() => runner.setupTurns.length === 2);
       expect(new Set([hive.card(a.id).port, hive.card(b.id).port])).toEqual(new Set([5200, 5210]));

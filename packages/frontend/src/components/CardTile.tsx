@@ -28,7 +28,6 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, show
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const draggable = card.lane === "ideas" && !confirming && onDragStart !== undefined;
-  const openable = card.lane !== "ideas";
   const startable = card.lane === "ideas" && onStart !== undefined;
   const badge = cardBadge(card);
   const laneName = LANES.find((lane) => lane.id === card.lane)?.name ?? card.lane;
@@ -70,19 +69,16 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, show
   return (
     <article
       className={styles.tile}
-      data-openable={openable || undefined}
       data-draggable={draggable || undefined}
       draggable={draggable}
       onDragStart={draggable ? (event) => onDragStart?.(card, event) : undefined}
       onDragEnd={draggable ? () => onDragEnd?.() : undefined}
     >
-      {openable ? (
-        <button type="button" className={styles.title} onClick={() => onOpen?.(card)}>
-          {card.title}
-        </button>
-      ) : (
-        <p className={styles.title}>{card.title}</p>
-      )}
+      {/* Every card opens, an idea too: its page is where its title and text are edited
+          (docs/specs/2026-11-27-card-lane-artifacts.md). */}
+      <button type="button" className={styles.title} onClick={() => onOpen?.(card)}>
+        {card.title}
+      </button>
       {showLane ? (
         <div className={styles.lane}>
           <span className={styles.laneName}>{laneName}</span>

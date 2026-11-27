@@ -77,7 +77,7 @@ describe("Build lane", () => {
   async function inPlan() {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => hive.card(card.id).setup?.status === "done"); // the worktree's setup, in the background
     const po = runner.last;

@@ -74,7 +74,7 @@ describe("what a waiting card wants", () => {
 /** A card row, straight in a lane, for the database and Hive tests that don't walk the lanes. */
 function cardRow(id: string, projectId: string, lane: Lane, state: CardState) {
   return {
-    id, projectId, title: `Card ${id}`, ideaText: "x", lane, state, branch: null, worktreePath: null, brief: null,
+    id, projectId, title: `Card ${id}`, ideaTitle: "x", ideaText: "x", lane, state, branch: null, worktreePath: null, brief: null,
     moveError: null, specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null,
     check: null, setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null,
     shipAfterCheck: false,
@@ -185,7 +185,7 @@ describe("Hive.forYou", () => {
   async function inRefine() {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => hive.card(card.id).setup?.status === "done");
     return { id: card.id, po: runner.last, worktree: hive.card(card.id).worktreePath! };
@@ -193,7 +193,7 @@ describe("Hive.forYou", () => {
 
   it("lists a Refine card once the product owner's turn ends, never while it works, and never an idea", async () => {
     const { id, po } = await inRefine();
-    hive.createCard(hive.board().projects[0]!.id, "Another idea.");
+    hive.createCard(hive.board().projects[0]!.id, "Font", "Another idea.");
     expect(listed()).toEqual([]);
 
     po.handlers.onSessionCreated();

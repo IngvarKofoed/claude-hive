@@ -12,8 +12,3 @@
   background: var(--color-surface);
   font-size: var(--text-md);
 }
-
-.error {
-  color: var(--color-stopped-text);
-  font-size: var(--text-sm);
-}

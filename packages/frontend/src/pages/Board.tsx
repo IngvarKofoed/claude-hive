@@ -119,11 +119,6 @@ export function Board() {
     }
   }
 
-  async function addIdea(projectId: string, text: string) {
-    const card = await api.newCard({ projectId, text });
-    if (looksLike<CardSummary>(card)) setCards((prev) => upsert(prev, card));
-  }
-
   // A drop on Refine and Start make the same move, so a failure shows the same way: in the error line above the
   // board, and on the tile when the backend stored a move error.
   async function moveCard(card: CardSummary, lane: Lane) {
@@ -240,7 +235,6 @@ export function Board() {
                   onDragEnd={() => setDragging(null)}
                   onDrop={moveCard}
                   onOpen={openCard}
-                  onAddIdea={addIdea}
                   onStart={startIdea}
                   onBoard={applyBoard}
                   onDeleted={removeCard}
@@ -256,7 +250,6 @@ export function Board() {
                 project={project}
                 cards={cards.filter((card) => card.projectId === project.id)}
                 onOpen={openCard}
-                onAddIdea={addIdea}
                 onStart={startIdea}
                 onBoard={applyBoard}
                 onDeleted={removeCard}

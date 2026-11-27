@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { CardDetail, ChatAuthor, ErrorAction, Lane } from "@hive/shared";
+import type { CardDetail, ChatAuthor, ChatItem, ErrorAction, Lane } from "@hive/shared";
 import { api } from "../api/client";
 import { PendingCard } from "./PendingCard";
 import { Button } from "./ui/Button";
@@ -34,6 +34,43 @@ interface Props {
   detail: CardDetail;
   streaming: string;
   activity: string | null;
+}
+
+/** A chat's messages and error lines. Without `onAction`, error lines have no buttons. */
+function ChatItems({ items, onAction }: { items: ChatItem[]; onAction?: (action: ErrorAction) => void }) {
+  return items.map((item) =>
+    item.kind === "message" ? (
+      <ChatBubble key={item.id} from={item.from}>
+        {item.text}
+      </ChatBubble>
+    ) : (
+      <ChatBubble key={item.id} from="error">
+        <p>{item.message}</p>
+        {onAction && item.actions.length > 0 ? (
+          <div className={styles.actions}>
+            {item.actions.map((action) => (
+              <Button key={action} compact onClick={() => onAction(action)}>
+                {ERROR_ACTION_LABEL[action]}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+      </ChatBubble>
+    ),
+  );
+}
+
+/**
+ * A finished lane's chat, looked back at: only what was said, with nothing to type into or press
+ * (docs/specs/2026-11-27-card-lane-artifacts.md).
+ */
+export function PastChat({ items }: { items: ChatItem[] }) {
+  if (items.length === 0) return <p className={styles.empty}>No chat in this lane.</p>;
+  return (
+    <div className={styles.log}>
+      <ChatItems items={items} />
+    </div>
+  );
 }
 
 export function Chat({ detail, streaming, activity }: Props) {
@@ -86,26 +123,7 @@ export function Chat({ detail, streaming, activity }: Props) {
   return (
     <div className={styles.chat}>
       <div className={styles.log} role="log" aria-live="polite">
-        {detail.chat.map((item) =>
-          item.kind === "message" ? (
-            <ChatBubble key={item.id} from={item.from}>
-              {item.text}
-            </ChatBubble>
-          ) : (
-            <ChatBubble key={item.id} from="error">
-              <p>{item.message}</p>
-              {item.actions.length > 0 ? (
-                <div className={styles.actions}>
-                  {item.actions.map((action) => (
-                    <Button key={action} compact onClick={() => run(errorActions[action])}>
-                      {ERROR_ACTION_LABEL[action]}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-            </ChatBubble>
-          ),
-        )}
+        <ChatItems items={detail.chat} onAction={(action) => void run(errorActions[action])} />
         {streaming ? (
           <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
             {streaming}

@@ -22,7 +22,7 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 
 | Lane | Who | What happens | Moves on when |
 | --- | --- | --- | --- |
-| **Ideas** | you | You type an idea. Two sentences is enough. | You drag it to Refine, or press Start. |
+| **Ideas** | you | You type an idea: a title, and a text of two sentences or so. You can edit both until it starts. | You drag it to Refine, or press Start. |
 | **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**. |
 | **Mockup** | you ⇄ designer | A clickable mockup, made however the designer thinks best. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
@@ -86,7 +86,7 @@ One feature, from idea to Done. It carries everything:
 - issues and their verdicts;
 - the decisions made for you;
 - the check rounds and your feedback rounds;
-- a history tab for every lane.
+- every lane's history, reached from the lane strip on its page.
 
 ### Role
 
@@ -195,10 +195,11 @@ Clean history: one commit per card, no merge commits, no branches left behind.
 
 ## History and Done
 
-**A card has a history tab for every lane:**
+**A card keeps every lane's history.** On the card's page, the lane strip takes you back to any lane it has finished: its chat, read-only, next to what the lane produced.
 
+- **Ideas:** the idea, its title and text;
 - **Refine:** the chat and the brief;
-- **Mockup:** the versions, your comments, and the one you picked;
+- **Mockup:** the versions, your comments, and the one you picked, kept as its screenshot;
 - **Spec:** the drafts, the review's findings, and your sign-off;
 - **Plan:** the plan and its amendments;
 - **Build:** what was built, and where it departed from the plan and why;
@@ -227,12 +228,12 @@ One page, with several views:
   - ◆ versions to compare
   - ■ stopped
 - **For you:** everything waiting for you, across the whole board, oldest first.
-- **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec. You comment by selecting text in the spec or clicking on the mockup. Tabs show every lane's history.
+- **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec, each half the width. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
 - **Role prompts,** behind the ☰ menu: what each lane's sessions are told. For each role, its instructions and what its sessions get on top of them: the report they end with, and the hive's own tools.
 
-You start an idea by typing into a project's Ideas cell, or its panel, or with New idea in the header. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
+You start an idea with New idea in the header, or by typing its title into a project's Ideas cell or panel, which opens New idea for that project. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
 
 ## A Card's Journey
 

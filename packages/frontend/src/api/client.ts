@@ -12,6 +12,7 @@ import type {
   MessageBody,
   MoveBody,
   NewCardBody,
+  UpdateIdeaBody,
   DeleteResult,
 } from "@hive/shared";
 
@@ -43,6 +44,8 @@ export const api = {
   addProject: (body: AddProjectBody) => request<BoardResponse>("POST", "/projects", body),
   checkProject: (id: string) => request<BoardResponse>("POST", `/projects/${encodeURIComponent(id)}/check`),
   newCard: (body: NewCardBody) => request<CardSummary | undefined>("POST", "/cards", body),
+  updateIdea: (id: string, body: UpdateIdeaBody) =>
+    request<CardSummary>("PATCH", `/cards/${encodeURIComponent(id)}`, body),
   card: (id: string) => request<CardDetail>("GET", `/cards/${encodeURIComponent(id)}`),
   moveCard: (id: string, body: MoveBody) =>
     request<CardSummary | undefined>("POST", `/cards/${encodeURIComponent(id)}/move`, body),

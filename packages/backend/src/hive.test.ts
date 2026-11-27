@@ -4,7 +4,7 @@ import type { HiveEvent } from "@hive/shared";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
-import { answerAsMessage, Hive, HttpError, titleFromIdea } from "./hive";
+import { answerAsMessage, Hive, HttpError } from "./hive";
 import { FakeProbe, FakeRunner, makeRepo, settle, type TempRepo, waitFor } from "./testing";
 
 const role = (name: string) => ({ name, model: "opus", kind: "conversation", instructions: "Be a product owner." });
@@ -45,7 +45,7 @@ describe("Hive", () => {
     const r = repo();
     await hive.addProject(r.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, idea);
+    const card = hive.createCard(project.id, "Make the printer font adjustable.", idea);
     return { r, project, card };
   }
 
@@ -90,9 +90,38 @@ describe("Hive", () => {
   });
 
   describe("cards and the Ideas → Refine move", () => {
-    it("titles a card from the idea's first sentence", () => {
-      expect(titleFromIdea("Make it adjustable. More text.")).toBe("Make it adjustable.");
-      expect(titleFromIdea("x".repeat(80))).toHaveLength(60);
+    it("needs a title and a text for an idea, and keeps the typed title", async () => {
+      await hive.addProject(repo().root);
+      const projectId = hive.board().projects[0]!.id;
+      expect(() => hive.createCard(projectId, "  ", "Text.")).toThrow(HttpError);
+      expect(() => hive.createCard(projectId, "Title", " ")).toThrow(HttpError);
+      expect(() => hive.createCard("nope", "Title", "Text.")).toThrow(/No such project/);
+      const card = hive.createCard(projectId, "  Bigger font ", "  Make it bigger.  ");
+      expect(card.title).toBe("Bigger font");
+      expect(hive.card(card.id)).toMatchObject({ ideaTitle: "Bigger font", ideaText: "Make it bigger." });
+    });
+
+    describe("editing an idea", () => {
+      it("sets the title and the text while the card is in Ideas, and says so", async () => {
+        const { card } = await projectWithCard();
+        events.length = 0;
+        const after = hive.updateIdea(card.id, { title: " New title ", text: " New text. " });
+        expect(after.title).toBe("New title");
+        expect(hive.card(card.id)).toMatchObject({ title: "New title", ideaTitle: "New title", ideaText: "New text." });
+        expect(events.some((e) => e.type === "card.updated")).toBe(true);
+      });
+
+      it("refuses an empty field, an unknown card, a card outside Ideas and a card that is moving", async () => {
+        const { card } = await projectWithCard();
+        expect(() => hive.updateIdea(card.id, { title: " ", text: "x" })).toThrow(expect.objectContaining({ status: 400 }));
+        expect(() => hive.updateIdea(card.id, { title: "x", text: "" })).toThrow(expect.objectContaining({ status: 400 }));
+        expect(() => hive.updateIdea("nope", { title: "x", text: "x" })).toThrow(expect.objectContaining({ status: 404 }));
+        (hive as any).moving.add(card.id);
+        expect(() => hive.updateIdea(card.id, { title: "x", text: "x" })).toThrow(expect.objectContaining({ status: 409 }));
+        (hive as any).moving.delete(card.id);
+        await hive.moveCard(card.id, "refine");
+        expect(() => hive.updateIdea(card.id, { title: "x", text: "x" })).toThrow(expect.objectContaining({ status: 409 }));
+      });
     });
 
     it("creates the worktree, keeps the checkout clean and starts the product owner", async () => {
@@ -103,7 +132,8 @@ describe("Hive", () => {
       expect(r.git("worktree", "list")).toContain(".claude/worktrees/");
       expect(r.git("status", "--porcelain")).toBe("");
       expect(turn.request).toMatchObject({ resume: false, cwd: after.worktreePath });
-      expect(turn.request.message).toContain("Make the printer font adjustable");
+      expect(turn.request.message).toContain("Title: Make the printer font adjustable.");
+      expect(turn.request.message).toContain("The idea: Make the printer font adjustable. Some users find it too small.");
       expect(after.state).toBe("working");
     });
 

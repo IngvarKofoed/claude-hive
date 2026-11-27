@@ -1,6 +1,6 @@
 // The endpoints this slice builds (spec: API), a subset of docs/ARCHITECTURE.md's API.
 import { Router, type NextFunction, type Request, type Response } from "express";
-import { APP_VERSION, type HealthResponse } from "@hive/shared";
+import { APP_VERSION, type HealthResponse, type UpdateIdeaBody } from "@hive/shared";
 import type { EventHub } from "../events";
 import { HttpError, type Hive } from "../hive";
 
@@ -44,7 +44,8 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
     return hive.board();
   }));
 
-  r.post("/cards", route((req) => hive.createCard(body(req).projectId, body(req).text)));
+  r.post("/cards", route((req) => hive.createCard(body(req).projectId, body(req).title, body(req).text)));
+  r.patch("/cards/:id", route((req) => hive.updateIdea(param(req, "id"), body(req) as UpdateIdeaBody)));
   r.get("/cards/:id", route((req) => hive.card(param(req, "id"))));
   r.post("/cards/:id/move", route((req) => hive.moveCard(param(req, "id"), body(req).lane)));
   r.post("/cards/:id/messages", route((req) => hive.sendMessage(param(req, "id"), body(req).text)));

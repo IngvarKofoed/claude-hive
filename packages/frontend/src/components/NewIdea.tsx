@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProjectSummary } from "@hive/shared";
 import { api } from "../api/client";
+import { useNewIdea } from "./newIdeaContext";
 import { Button } from "./ui/Button";
 import styles from "./NewIdea.module.css";
 
@@ -12,14 +13,36 @@ export function NewIdea() {
   const formId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef<HTMLSelectElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const [open, setOpen] = useState(false);
+  const { open, preset, openNewIdea, closeNewIdea } = useNewIdea();
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState("");
+  const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const presetRef = useRef(preset);
+  presetRef.current = preset;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  // What the board's field passes in replaces the form's project and title. An empty title is no title, so a field
+  // pressed with nothing typed doesn't wipe one already typed here. Typed text is never touched. Only a preset made
+  // while this form is mounted counts: one from before was for the previous page's form, and can still be there when
+  // this one mounts, before that form's close has rendered.
+  const appliedNonce = useRef(preset.nonce);
+  useEffect(() => {
+    if (preset.nonce === appliedNonce.current) return;
+    appliedNonce.current = preset.nonce;
+    if (preset.projectId) setProjectId(preset.projectId);
+    if (preset.title) setTitle(preset.title);
+  }, [preset]);
+
+  // Every page has its own header, so leaving a page closes the form, as it did before the provider held it open.
+  useEffect(() => closeNewIdea, [closeNewIdea]);
 
   useEffect(() => {
     if (!open) return;
@@ -31,7 +54,14 @@ export function NewIdea() {
       .then((board) => {
         if (!current) return;
         setProjects(board.projects);
-        setProjectId(board.projects.length === 1 ? (board.projects[0]?.id ?? "") : "");
+        // A project passed in (or chosen before) stays; the only project is chosen when none was.
+        setProjectId((chosen) =>
+          chosen !== "" && board.projects.some((p) => p.id === chosen)
+            ? chosen
+            : board.projects.length === 1
+              ? (board.projects[0]?.id ?? "")
+              : "",
+        );
       })
       .catch((err) => {
         if (current) setLoadError(err instanceof Error ? err.message : "Could not load the projects.");
@@ -45,11 +75,14 @@ export function NewIdea() {
   const count = projects?.length ?? 0;
   useEffect(() => {
     if (!open || count === 0) return;
-    (count > 1 ? projectRef.current : textRef.current)?.focus();
-  }, [open, count]);
+    // The preset's project counts as chosen: its setProjectId hasn't rendered yet when this runs in the same commit.
+    const chosen = !!presetRef.current.projectId || projectIdRef.current !== "" || count === 1;
+    const target = !chosen ? projectRef.current : presetRef.current.title ? textRef.current : titleRef.current;
+    target?.focus();
+  }, [open, count, preset]);
 
   function hide() {
-    setOpen(false);
+    closeNewIdea();
     setError(null);
     wrapRef.current?.querySelector("button")?.focus();
   }
@@ -64,7 +97,8 @@ export function NewIdea() {
     setAdding(true);
     setError(null);
     try {
-      await api.newCard({ projectId, text: text.trim() });
+      await api.newCard({ projectId, title: title.trim(), text: text.trim() });
+      setTitle("");
       setText("");
       hide();
     } catch (err) {
@@ -74,7 +108,7 @@ export function NewIdea() {
     }
   }
 
-  const canAdd = projectId !== "" && text.trim() !== "" && !adding;
+  const canAdd = projectId !== "" && title.trim() !== "" && text.trim() !== "" && !adding;
 
   return (
     <div
@@ -92,7 +126,7 @@ export function NewIdea() {
         variant="primary"
         aria-expanded={open}
         aria-controls={open ? formId : undefined}
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : openNewIdea())}
       >
         New idea
       </Button>
@@ -132,6 +166,16 @@ export function NewIdea() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className={styles.field}>
+                Title
+                <input
+                  ref={titleRef}
+                  type="text"
+                  className={styles.control}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                />
               </label>
               <label className={styles.field}>
                 Idea

@@ -52,6 +52,15 @@ export function laneImplemented(lane: Lane): boolean {
   return LANES.find((l) => l.id === lane)?.implemented ?? false;
 }
 
+/**
+ * The lanes before `current` in board order: the ones a card has finished, as far as the hive can tell. There are no
+ * lane-visit records, so order is the only signal (docs/specs/2026-11-27-card-lane-artifacts.md).
+ */
+export function lanesBefore(current: Lane): Lane[] {
+  const index = LANES.findIndex((l) => l.id === current);
+  return LANES.slice(0, Math.max(index, 0)).map((l) => l.id);
+}
+
 // ---------- The brief ----------
 
 /** The product owner's brief, written through the hive's write_brief tool. */
@@ -393,12 +402,16 @@ export type PendingItem =
 
 export interface CardDetail extends CardSummary {
   projectName: string;
+  /** The idea's title as you typed it. `title` starts as this, and the brief's title replaces it in Refine. */
+  ideaTitle: string;
   ideaText: string;
   branch: string | null;
   worktreePath: string | null;
   brief: Brief | null;
-  /** The spec, once the card has entered Spec. */
+  /** The spec, once the card has entered Spec, while its worktree is there to read it from. */
   spec: SpecInfo | null;
+  /** Where the spec is, relative to the repo, even once it can't be read: a landed card's worktree is gone. */
+  specPath: string | null;
   /** The planner's plan, once it has written one. */
   plan: Plan | null;
   /** The developer's last `done` report, once it has built. */
@@ -425,6 +438,8 @@ export interface CardDetail extends CardSummary {
   decisions: Decision[];
   /** The chat of the card's current lane. */
   chat: ChatItem[];
+  /** The chat of every lane before the current one that has any, for looking back. Live events never touch it. */
+  pastChats: Partial<Record<Lane, ChatItem[]>>;
   pending: PendingItem | null;
   turnRunning: boolean;
 }
@@ -435,8 +450,16 @@ export interface AddProjectBody {
   path: string;
 }
 
+/** A new idea: both fields are trimmed and required (docs/specs/2026-11-27-card-lane-artifacts.md). */
 export interface NewCardBody {
   projectId: string;
+  title: string;
+  text: string;
+}
+
+/** An idea's edit, allowed only while the card is in Ideas and not moving. Both fields trimmed and required. */
+export interface UpdateIdeaBody {
+  title: string;
   text: string;
 }
 

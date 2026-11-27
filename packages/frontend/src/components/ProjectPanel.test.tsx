@@ -20,7 +20,6 @@ function renderPanel(cards: CardSummary[], extra: Partial<Parameters<typeof Proj
     project,
     cards,
     onOpen: vi.fn(),
-    onAddIdea: vi.fn().mockResolvedValue(undefined),
     onStart: vi.fn().mockResolvedValue(undefined),
     onBoard: vi.fn(),
     ...extra,
@@ -53,6 +52,12 @@ describe("ProjectPanel", () => {
     await userEvent.click(within(idea).getByRole("button", { name: "Start" }));
     expect(props.onStart).toHaveBeenCalledWith(expect.objectContaining({ id: "i1" }));
     expect(container.querySelectorAll("[draggable='true']")).toHaveLength(0);
+  });
+
+  it("opens an idea from its title, like any other card", async () => {
+    const { props } = renderPanel([card("i1", "ideas")]);
+    await userEvent.click(screen.getByRole("button", { name: "Card i1" }));
+    expect(props.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "i1" }));
   });
 
   it("folds landed cards into a count that opens and closes", async () => {

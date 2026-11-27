@@ -57,7 +57,7 @@ describe("deleting a card", () => {
   async function inRefine() {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Make the printer font adjustable.");
+    const card = hive.createCard(project.id, "Font", "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
     await waitFor(() => hive.card(card.id).setup?.status === "done");
     const detail = hive.card(card.id);
@@ -107,7 +107,7 @@ describe("deleting a card", () => {
   it("deletes an idea with no git involved", async () => {
     await hive.addProject(repo.root);
     const project = hive.board().projects[0]!;
-    const card = hive.createCard(project.id, "Just an idea.");
+    const card = hive.createCard(project.id, "Font", "Just an idea.");
     const branches = repo.git("branch", "--list");
     expect(await hive.deleteCard(card.id)).toEqual({ left: [] });
     expect(count("cards", card.id)).toBe(0);

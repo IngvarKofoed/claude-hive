@@ -5,13 +5,14 @@
   min-width: 0;
 }
 
-.brief {
+.fold {
+  min-width: 0;
   padding: var(--space-4) var(--space-5);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
-.brief[open] > .summary {
+.fold[open] > .summary {
   margin-bottom: var(--space-5);
 }
 

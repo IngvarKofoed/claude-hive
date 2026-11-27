@@ -11,7 +11,6 @@ interface Props {
   project: ProjectSummary;
   cards: CardSummary[];
   onOpen: (card: CardSummary) => void;
-  onAddIdea: (projectId: string, text: string) => Promise<void>;
   /** Start an idea: the move to Refine. There's no Refine column to drop it on here. */
   onStart: (card: CardSummary) => Promise<void>;
   /** A card was deleted from its tile. */
@@ -25,7 +24,7 @@ const laneIndex = (card: CardSummary) => LANES.findIndex((lane) => lane.id === c
  * One project on the Board By project (docs/specs/2026-11-27-board-by-project.md): the cards in progress in lane order,
  * never by state, so a card moves only when it changes lane; then the ideas; then the landed cards, folded.
  */
-export function ProjectPanel({ project, cards, onOpen, onAddIdea, onStart, onDeleted, onBoard }: Props) {
+export function ProjectPanel({ project, cards, onOpen, onStart, onDeleted, onBoard }: Props) {
   const [landedOpen, setLandedOpen] = useState(false);
   // Array.prototype.sort is stable, so cards in one lane keep the board's order: oldest first.
   const going = cards.filter(inProgress).sort((a, b) => laneIndex(a) - laneIndex(b));
@@ -46,11 +45,11 @@ export function ProjectPanel({ project, cards, onOpen, onAddIdea, onStart, onDel
 
       <div className={styles.section}>
         <h3 className={styles.sectionName}>Ideas</h3>
-        <AddIdea project={project} onAddIdea={onAddIdea} />
+        <AddIdea project={project} />
         {ideas.length > 0 ? (
           <div className={styles.cards}>
             {ideas.map((card) => (
-              <CardTile key={card.id} card={card} onStart={onStart} onDeleted={onDeleted} />
+              <CardTile key={card.id} card={card} onOpen={onOpen} onStart={onStart} onDeleted={onDeleted} />
             ))}
           </div>
         ) : null}

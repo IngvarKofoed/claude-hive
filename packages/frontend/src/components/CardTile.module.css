@@ -4,13 +4,9 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   background: var(--color-surface);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-tile);
-}
-
-.tile[data-openable] {
-  border-color: var(--color-border-strong);
 }
 
 .tile[data-draggable] {

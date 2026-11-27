@@ -25,6 +25,24 @@
   font-weight: var(--weight-semibold);
 }
 
+/* The lane being looked back at (docs/specs/2026-11-27-card-lane-artifacts.md). */
+.step[data-viewing] {
+  outline: var(--focus-width) solid var(--color-primary-bg);
+  outline-offset: var(--focus-width);
+  font-weight: var(--weight-semibold);
+}
+
+/* A finished lane, or the current one when you're looking back: the pill itself is the link. */
+.link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.link:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
 /* The compact strip: one segment per lane, the card's own lane darker and taller. */
 .strip {
   flex: 1;

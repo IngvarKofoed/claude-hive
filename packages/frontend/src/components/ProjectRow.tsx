@@ -14,7 +14,6 @@ interface Props {
   onDragEnd: () => void;
   onDrop: (card: CardSummary, lane: Lane) => void;
   onOpen: (card: CardSummary) => void;
-  onAddIdea: (projectId: string, text: string) => Promise<void>;
   /** Start an idea: the same move to Refine as dropping it there. */
   onStart: (card: CardSummary) => Promise<void>;
   /** A card was deleted from its tile. */
@@ -31,7 +30,6 @@ export function ProjectRow({
   onDragEnd,
   onDrop,
   onOpen,
-  onAddIdea,
   onStart,
   onBoard,
   onDeleted,
@@ -73,7 +71,7 @@ export function ProjectRow({
                 onStart={onStart}
               />
             ))}
-            {lane.id === "ideas" ? <AddIdea project={project} onAddIdea={onAddIdea} /> : null}
+            {lane.id === "ideas" ? <AddIdea project={project} /> : null}
           </div>
         );
       })}

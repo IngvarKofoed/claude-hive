@@ -1,30 +1,33 @@
-import type { Brief, SpecInfo } from "@hive/shared";
-import { BriefPanel } from "./BriefPanel";
+import type { SpecInfo } from "@hive/shared";
 import { Chip } from "./ui/Chip";
 import { Markdown } from "./ui/Markdown";
 import styles from "./SpecView.module.css";
 
 interface Props {
   spec: SpecInfo;
-  brief: Brief | null;
 }
 
-/** The spec as rendered Markdown, under its path and a collapsed brief. */
-export function SpecView({ spec, brief }: Props) {
-  return (
-    <div className={styles.spec}>
-      <details className={styles.brief}>
-        <summary className={styles.summary}>Brief</summary>
-        <BriefPanel brief={brief} />
-      </details>
-      <p>
-        <Chip mono>{spec.path}</Chip>
-      </p>
-      {spec.text === null ? (
+/**
+ * The spec under its path, folded shut: a click on the path opens the rendered Markdown. The brief isn't repeated
+ * here, since ✓ Refine shows it (docs/specs/2026-11-27-card-lane-artifacts.md).
+ */
+export function SpecView({ spec }: Props) {
+  if (spec.text === null) {
+    return (
+      <div className={styles.spec}>
+        <p>
+          <Chip mono>{spec.path}</Chip>
+        </p>
         <p className={styles.waiting}>The spec writer is writing the spec…</p>
-      ) : (
-        <Markdown>{spec.text}</Markdown>
-      )}
-    </div>
+      </div>
+    );
+  }
+  return (
+    <details className={styles.fold}>
+      <summary className={styles.summary}>
+        <Chip mono>{spec.path}</Chip>
+      </summary>
+      <Markdown>{spec.text}</Markdown>
+    </details>
   );
 }
