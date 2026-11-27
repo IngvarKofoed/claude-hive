@@ -11,7 +11,7 @@ import * as git from "./git";
 import { Hive } from "./hive";
 import { processApps } from "./preview/apps";
 import { lsofPorts } from "./preview/ports";
-import { loadRole } from "./sessions/roles";
+import { listRoles, loadRole } from "./sessions/roles";
 import { SdkRunner } from "./sessions/sdkRunner";
 import { SdkTrustProbe } from "./sessions/trustProbe";
 
@@ -30,7 +30,8 @@ process.on("exit", () => apps.killAll());
 process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
 const hive = new Hive({
-  db, hub, git, runner: new SdkRunner(), probe: new SdkTrustProbe(), role: (name) => loadRole(name), specFormatDir,
+  db, hub, git, runner: new SdkRunner(), probe: new SdkTrustProbe(), role: (name) => loadRole(name),
+  listRoles: () => listRoles(), specFormatDir,
   ports: lsofPorts,
   apps,
 });

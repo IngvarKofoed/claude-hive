@@ -313,6 +313,51 @@ export interface ForYouResponse {
   items: ForYouItem[];
 }
 
+// ---------- Role prompts ----------
+
+/** A JSON schema, as a report's `outputFormat` or a hive tool's inputs. The page reads only a few keywords of it. */
+export type JsonSchema = Record<string, unknown>;
+
+/** One of the hive's own tools a role's sessions are offered (docs/specs/2026-11-27-role-prompts-page.md). */
+export interface RoleTool {
+  name: string;
+  description: string;
+  input: JsonSchema;
+}
+
+/**
+ * One role as the Role prompts page shows it (docs/specs/2026-11-27-role-prompts-page.md). An errored entry has lane,
+ * model and kind null, instructions "", extras [], report null and tools []; a planned one is the same, except that it
+ * has its lane.
+ */
+export interface RoleInfo {
+  /** "developer": the file name without `.md`, and the name the hive loads it by. */
+  name: string;
+  /** From the front matter; null when missing or not a known lane. */
+  lane: Lane | null;
+  /** "opus" */
+  model: string | null;
+  /** "conversation", "work" or "one-off" */
+  kind: string | null;
+  /** The text after the front matter. */
+  instructions: string;
+  /** Full paths of the files appended after the instructions, e.g. the spec format's `format.md`. */
+  extras: string[];
+  /** The fixed-format report each turn must end with. */
+  report: JsonSchema | null;
+  /** The hive's own tools the role's sessions are offered. */
+  tools: RoleTool[];
+  /** Set when the file can't be read as a role. */
+  error?: string;
+  /** No file yet: listed from the hive's short list of roles still to be written. */
+  planned?: true;
+}
+
+/** GET /api/roles: every role, lanes in board order. */
+export interface RolesResponse {
+  roles: RoleInfo[];
+}
+
 // ---------- Card detail ----------
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */

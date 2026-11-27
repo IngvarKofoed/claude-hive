@@ -4,6 +4,8 @@ import type { Brief } from "@hive/shared";
 
 export interface Role {
   name: string;
+  /** The front matter's `lane:`, which only the Role prompts page reads. */
+  lane?: string;
   model: string;
   kind: string;
   instructions: string;

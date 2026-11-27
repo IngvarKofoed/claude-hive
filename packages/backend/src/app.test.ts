@@ -67,6 +67,12 @@ describe("the API's local-only guard", () => {
     expect(r.body).toEqual({ items: [] });
   });
 
+  it("serves the roles, with the ones still to be written even when roles/ gives none", async () => {
+    const r = await send("GET", "/api/roles", { host: `127.0.0.1:${port}` });
+    expect(r.status).toBe(200);
+    expect(r.body.roles.map((role: { name: string }) => role.name)).toEqual(["designer", "tester", "manager"]);
+  });
+
   it("refuses a foreign Host, as DNS rebinding would send", async () => {
     const r = await send("GET", "/api/board", { host: `evil.example:${port}` });
     expect(r.status).toBe(403);

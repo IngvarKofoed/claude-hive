@@ -1,6 +1,6 @@
 .header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   position: relative;
   gap: var(--space-5);
   padding: var(--space-5) var(--space-8);
@@ -25,7 +25,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  align-self: center;
 }
 
 .link {

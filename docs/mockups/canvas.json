@@ -11,9 +11,11 @@
     "CardMockup.dc.html": { "x": 1520, "y": 1100, "w": 1440, "h": 940, "title": "Card · Mockup", "expand": "fill", "is_interactive": true },
     "CardTryIt.dc.html": { "x": 0, "y": 2160, "w": 1440, "h": 980, "title": "Card · Try it", "expand": "fill", "is_interactive": true },
     "CardDone.dc.html": { "x": 1520, "y": 2160, "w": 1440, "h": 980, "title": "Card · Done", "expand": "fill", "is_interactive": true },
-    "BoardByProject.dc.html": { "x": 3040, "y": 0, "w": 1440, "h": 1250, "title": "Board · By project", "expand": "fill", "is_interactive": true }
+    "BoardByProject.dc.html": { "x": 3040, "y": 0, "w": 1440, "h": 1250, "title": "Board · By project", "expand": "fill", "is_interactive": true },
+    "HeaderMenu.dc.html": { "x": 0, "y": 3260, "w": 1440, "h": 420, "title": "Header menu", "expand": "fill", "is_interactive": true },
+    "RolePrompts.dc.html": { "x": 1520, "y": 3260, "w": 1440, "h": 980, "title": "Role prompts", "expand": "fill", "is_interactive": true }
   },
-  "order": ["Main.dc.html", "ForYou.dc.html", "CardRefine.dc.html", "CardMockup.dc.html", "CardTryIt.dc.html", "CardDone.dc.html", "BoardByProject.dc.html"],
+  "order": ["Main.dc.html", "ForYou.dc.html", "CardRefine.dc.html", "CardMockup.dc.html", "CardTryIt.dc.html", "CardDone.dc.html", "BoardByProject.dc.html", "HeaderMenu.dc.html", "RolePrompts.dc.html"],
   "notes": {
     "title": { "x": 0, "y": -300, "text": "Claude Hive", "kind": "title1", "maxW": 2960 }
   },

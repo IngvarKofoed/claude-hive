@@ -10,7 +10,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                             Browser (React)                                             │
-│                      Board · For you · Card · Lane history · Rulebooks · Projects                       │
+│               Board · For you · Card · Lane history · Rulebooks · Projects · Role prompts               │
 └─────────────┬───────────────────────────────────────────────────────────────────────┬───────────────────┘
               │                                                                       ▲ SSE: live events
               ▼ REST: moves, chat, comments, answers, sign-off                        │
@@ -78,7 +78,7 @@ claude-hive/
 │   └── frontend/
 │       └── src/
 │           ├── styles/        # tokens.css: every color, font, size, spacing and radius, and nothing else
-│           ├── pages/         # Board, For you, Card, Lane, Rulebooks, Projects
+│           ├── pages/         # Board, For you, Card, Lane, Rulebooks, Projects, Role prompts
 │           ├── components/
 │           │   ├── ui/        # Button, badge, panel, chip, chat bubble: the shared building blocks
 │           │   └── ...        # Card tile, spec view with comments, mockup frame, version compare
@@ -119,6 +119,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 - **One developer per card.** When the spec's Implementation strategy calls for several agents, the developer session runs them as its own subagents. So a card has one developer report, one session to resume, and one session committing in its worktree.
 - **The developer is always Opus.** It does the plan's Opus chunks itself and gives each chunk on another model to a subagent on that model, through Claude Code's Agent tool. It merges, integrates, tests and reports on every card.
 - **Every session has the same full access,** in Claude Code's auto mode, which the runner sets itself. A role's limits are only in its instructions: they say what the session is and whether it may change code. A reviewer doesn't edit because it's told not to, and nothing else stops it. A per-role permissions policy is parked.
+- **What a role gets beyond its file** is in one table, `ROLE_TURNS` in `hive.ts`: the spec-format files appended after its instructions, the report schema its turns end with, and the hive's own tools it's offered. Every turn is started from it, and the Role prompts page reads it too, so the page shows what sessions really get.
 - **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions. Every role is told to ask questions with `AskUserQuestion`, never in its reply: a question in prose ends a hands-off turn with nobody to answer it.
 - **The spec format** is read from `~/.claude/skills/spec-format/`. `format.md` goes to the spec writer and the planner. The "For the reviewer" part of `review.md` goes to the spec reviewer.
 
@@ -348,6 +349,7 @@ POST   /api/cards/:id/back-to-tryit       Out of Ship, until Ship is built
 POST   /api/cards/:id/setup               Set up the worktree (again)
 POST   /api/cards/:id/app/start           Start the card's app in Try it · /app/stop · /app/restart
 GET    /api/for-you                       Everything waiting for you
+GET    /api/roles                         Every role: its file, and what its sessions get beyond it
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards
 GET    /api/rules  · POST · PATCH         Rulebooks and suggested rules

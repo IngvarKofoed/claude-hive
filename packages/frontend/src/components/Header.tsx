@@ -1,6 +1,7 @@
 import { Link, NavLink } from "react-router";
 import { APP_VERSION } from "@hive/shared";
 import { useForYou } from "./forYou";
+import { HeaderMenu } from "./HeaderMenu";
 import { NewIdea } from "./NewIdea";
 import styles from "./Header.module.css";
 
@@ -27,6 +28,7 @@ export function Header() {
       </nav>
       <span className={styles.version}>{APP_VERSION}</span>
       <NewIdea />
+      <HeaderMenu />
     </header>
   );
 }

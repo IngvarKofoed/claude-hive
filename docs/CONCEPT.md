@@ -230,6 +230,7 @@ One page, with several views:
 - **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec. You comment by selecting text in the spec or clicking on the mockup. Tabs show every lane's history.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
+- **Role prompts,** behind the ☰ menu: what each lane's sessions are told. For each role, its instructions and what its sessions get on top of them: the report they end with, and the hive's own tools.
 
 You start an idea by typing into a project's Ideas cell, or its panel, or with New idea in the header. Closing the page loses nothing: sessions keep running on your machine, and anything waiting for you stays there until you're back. If the hive itself restarts, cut-off work picks up again, and your answers still reach the session that asked.
 

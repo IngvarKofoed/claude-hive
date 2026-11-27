@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Role prompts</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F6F6F3}
+a{color:#1849A9}a:hover{color:#0E3378}
+</style>
+</helmet>
+<div style="min-height: 980px; background: #F6F6F3; color: #1B1B18; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 10px 24px; min-height: 64px; box-sizing: border-box; background: #FFFFFF; border-bottom: 1px solid #E4E3DE">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"></path><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"></path></svg>
+<span style="font-weight: 700; font-size: 17px; letter-spacing: -0.01em">Claude Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Board</a>
+<a href="ForYou.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">For you <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #C2410C; color: #FFFFFF; font-size: 12px; font-weight: 700">7</span></a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Lanes</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Rulebooks</a>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; box-sizing: border-box; border-radius: 8px; font-size: 14px; font-weight: 500; color: #45443E; text-decoration: none">Projects</a>
+</nav>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 20px">
+<div style="display: flex; align-items: center; gap: 14px; font-size: 12px; color: #5F5E57">
+<span style="font-weight: 600; color: #45443E">Plan usage</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">5-hour <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 42%; height: 6px; background: #1B1B18"></span></span> 42%</span>
+<span style="display: inline-flex; align-items: center; gap: 6px">Weekly <span style="display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #E4E3DE; overflow: hidden"><span style="display: block; width: 18%; height: 6px; background: #1B1B18"></span></span> 18%</span>
+</div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1B1B18; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer">New idea</button>
+<a href="HeaderMenu.dc.html" aria-label="More" style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; box-sizing: border-box; border-radius: 8px; border: 1px solid #D6D5CF; background: #EFEFEA"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1B1B18" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"></path></svg></a>
+</div>
+</header>
+
+<main style="padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 1392px; width: 100%; box-sizing: border-box; margin: 0 auto">
+<div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">Role prompts</h1>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">What each lane's sessions are told when they start, read from <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px">roles/</span> as it is now. A session already running keeps the text it started with.</p>
+<p style="margin: 4px 0 0; font-size: 13px; color: #5F5E57">Added to the end of Claude Code's own system prompt. Your CLAUDE.md and settings still apply. What the card needs comes in the session's first message.</p>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+
+<nav aria-label="Roles" style="flex: 1 1 260px; max-width: 300px; min-width: 0; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 2px">
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Refine</span>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Product owner</span></a>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Setup</span></a>
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Spec</span>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Spec writer</span></a>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Spec reviewer</span></a>
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Plan</span>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Planner</span></a>
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Build</span>
+<a href="#" aria-current="page" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; background: #EFEFEA; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 700">Developer</span></a>
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Check</span>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Reviewer</span></a>
+
+<span style="padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5F5E57">Ship</span>
+<a href="#" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; border-radius: 8px; color: #1B1B18; text-decoration: none"><span style="font-size: 14px; font-weight: 600">Committer</span></a>
+</nav>
+
+<article aria-labelledby="role" style="flex: 999 1 640px; min-width: 0; background: #FFFFFF; border: 1px solid #E4E3DE; border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<h2 id="role" style="margin: 0; font-size: 18px; font-weight: 700">Developer</h2>
+<span style="padding: 2px 8px; border-radius: 6px; background: #EFEFEA; color: #45443E; font-size: 12px; font-weight: 600">Build lane</span>
+<span style="padding: 2px 8px; border-radius: 6px; background: #EFEFEA; color: #45443E; font-size: 12px; font-weight: 600">Opus</span>
+<span style="padding: 2px 8px; border-radius: 6px; background: #EFEFEA; color: #45443E; font-size: 12px; font-weight: 600">Work session</span>
+<span style="margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5F5E57">roles/developer.md</span>
+</div>
+
+<div style="font-size: 14px; line-height: 1.6; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0">You are the developer for one card on the Claude Hive board, in the Build lane. The card's spec is signed off and the planner has written the build plan. Your job is to build to the plan, in this git worktree, and to end with your report. You are the lead, on Opus.</p>
+<p style="margin: 0">You run without the person: nobody chats with you here. Stay in this worktree. Change code; don't push, and don't touch main or any other branch.</p>
+<ul style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">
+<li><strong>Where you are:</strong> start every turn with <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">git status</code>. A merge note in an earlier message may be out of date.</li>
+<li><strong>Merging:</strong> if the message says bringing in main stopped on conflicts, resolving them and committing the merge is your first job. If it says bringing in main failed, merge <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">main</code> yourself first.</li>
+<li><strong>Chunks:</strong> do the plan's Opus chunks yourself. Give each chunk on another model to a subagent through the Agent tool, with that model (<code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">sonnet</code>, <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">haiku</code> or <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">fable</code>) and the files the chunk owns. Run chunks that own separate files in parallel where the plan allows. Subagents never commit; you integrate their work.</li>
+<li><strong>Tests:</strong> write the tests the plan lists, and run the project's tests before you report. If dependencies are missing, install them the way the project's README or CLAUDE.md says.</li>
+<li><strong>Running things:</strong> your message gives the card's ports and, once the worktree is set up, how to start the app and run the tests. Run anything that listens only on those ports, so nothing clashes with the person's own copy.</li>
+<li><strong>Spec issues:</strong> the spec is silent, unclear or contradicts itself; it doesn't fit the code; something is missing, different or extra; a How-to-verify check can't be carried out as written. Note it, make your best guess, and keep going. Report it with your guess.</li>
+<li><strong>Decisions:</strong> decide wherever the spec leaves room, and report each decision with the alternative you didn't take. Ask with <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">AskUserQuestion</code> only when you can't go on without an answer, never in your reply.</li>
+<li><strong>Blocked:</strong> if the spec can't be built as written in this codebase, report <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px">blocked</code> with the reason. Never fill the report with a guess.</li>
+<li><strong>Leftovers:</strong> everything left in the worktree is committed when you report, so leave nothing you don't mean to keep. You may commit as you go.</li>
+<li><strong>Bugs from Check:</strong> fix the bugs Check sends you. If you think one isn't a bug, leave the code as it is, and end your summary with the bugs you left and why. The next round's reviewer reads it.</li>
+</ul>
+</div>
+</article>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

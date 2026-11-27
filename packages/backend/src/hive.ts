@@ -9,16 +9,20 @@ import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
   FeedbackBody, FileChange, ForYouItem, ForYouResponse, Landed, LandBody, Lane, PendingItem, Plan, Question,
-  SetupReport, ShipPlan, SpecInfo,
+  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo,
 } from "@hive/shared";
-import { CARD_PORTS } from "@hive/shared";
+import { CARD_PORTS, LANES } from "@hive/shared";
 import {
   CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterLanding, laneAfterPlan,
 } from "./board/moves";
 import { waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
-import type { Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome } from "./sessions/types";
+import { describeHiveTool, type HiveToolName } from "./sessions/hiveTools";
+import { PLANNED_ROLES, type RoleEntry } from "./sessions/roles";
+import type {
+  HiveTools, Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome,
+} from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
   CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, parseCheckReport, parseCommitReport,
@@ -78,6 +82,8 @@ export interface HiveDeps {
   probe: TrustProbe;
   /** Loads a role by name, e.g. "product-owner". */
   role: (name: string) => Role;
+  /** Every file in roles/, read now, for the Role prompts page. server.ts passes the real one; without it, there are none. */
+  listRoles?: () => RoleEntry[];
   /** The folder with the spec format's `format.md` and `review.md` (~/.claude/skills/spec-format). */
   specFormatDir: string;
   /** Today's date as YYYY-MM-DD, for spec file names. */
@@ -104,6 +110,32 @@ const SPEC_REVIEWER = "spec-reviewer";
 /** The worktree's setup session: in the background, its sessions are filed under Refine, where the worktree is made. */
 const SETUP = "setup";
 const CHAT_LANES: Lane[] = ["refine", "spec"];
+
+/** What a role's sessions get beyond its file. */
+interface RoleTurn {
+  /** Files from the spec format's folder, appended after the role's instructions. */
+  specFormat?: string[];
+  /** The fixed-format report each turn must end with (`outputFormat`). */
+  report?: Record<string, unknown>;
+  /** The hive's own tools its sessions are offered. */
+  tools?: HiveToolName[];
+}
+
+/**
+ * The one table of what each role gets beyond its file. turnOptions(), startTurn(), the committer's turn and the Role
+ * prompts page all read it, so the page can't drift from what sessions get
+ * (docs/specs/2026-11-27-role-prompts-page.md, Key decisions).
+ */
+const ROLE_TURNS: Record<string, RoleTurn> = {
+  "product-owner": { tools: ["write_brief"] },
+  setup: { report: SETUP_SCHEMA, tools: ["copy_local_files"] },
+  "spec-writer": { specFormat: ["format.md"] },
+  "spec-reviewer": { report: REVIEW_SCHEMA },
+  planner: { specFormat: ["format.md"], report: PLAN_SCHEMA },
+  developer: { report: DEVELOPER_SCHEMA },
+  reviewer: { report: CHECK_SCHEMA },
+  committer: { report: COMMIT_SCHEMA },
+};
 
 const AUTHOR: Record<string, ChatAuthor> = {
   "product-owner": "product-owner",
@@ -370,6 +402,43 @@ export class Hive {
     };
   }
 
+  /**
+   * Every role, as the Role prompts page shows it: each file in roles/ read now, with what ROLE_TURNS adds, and the
+   * roles still to be written (docs/specs/2026-11-27-role-prompts-page.md, Backend).
+   */
+  roles(): RolesResponse {
+    const knownLane = (lane: string | undefined): Lane | null =>
+      LANES.some((l) => l.id === lane) ? (lane as Lane) : null;
+    const empty = { model: null, kind: null, instructions: "", extras: [], report: null, tools: [] };
+    const entries = this.deps.listRoles?.() ?? [];
+    const roles: RoleInfo[] = entries.map((entry): RoleInfo => {
+      if ("error" in entry) return { name: entry.name, lane: null, ...empty, error: entry.error };
+      const { role } = entry;
+      const turn = ROLE_TURNS[entry.name] ?? {};
+      return {
+        name: entry.name,
+        lane: knownLane(role.lane),
+        model: role.model,
+        kind: role.kind,
+        instructions: role.instructions,
+        extras: (turn.specFormat ?? []).map((file) => join(this.deps.specFormatDir, file)),
+        report: turn.report ?? null,
+        tools: (turn.tools ?? []).map(describeHiveTool),
+      };
+    });
+    for (const planned of PLANNED_ROLES) {
+      if (!entries.some((entry) => entry.name === planned.name)) {
+        roles.push({ name: planned.name, lane: planned.lane, ...empty, planned: true });
+      }
+    }
+    // Lanes in board order; within a lane its own role first, then by name; roles with no lane last, by name.
+    const laneIndex = (lane: Lane | null) => (lane ? LANES.findIndex((l) => l.id === lane) : LANES.length);
+    const ownFirst = (role: RoleInfo) => (role.lane && LANE_ROLE[role.lane] === role.name ? 0 : 1);
+    roles.sort((a, b) =>
+      laneIndex(a.lane) - laneIndex(b.lane) || ownFirst(a) - ownFirst(b) || a.name.localeCompare(b.name));
+    return { roles };
+  }
+
   // ---------- projects ----------
 
   async addProject(path: string): Promise<void> {
@@ -514,7 +583,7 @@ export class Hive {
     if (this.anyTurnRunning(cardId) || this.db.openPendingFor(cardId)) {
       throw new HttpError(409, "Wait for the product owner to finish.");
     }
-    const format = this.formatFile("format.md");
+    const options = this.turnOptions(LANE_ROLE.spec!); // reads format.md: a missing one refuses here, before the move
     this.formatFile("review.md"); // the review gate needs it later; refuse now rather than in the middle of Spec
     return this.oneMoveAtATime(cardId, async () => {
       const role = this.deps.role(LANE_ROLE.spec!);
@@ -523,7 +592,7 @@ export class Hive {
       const sessionId = randomUUID();
       this.db.insertSession({ id: sessionId, cardId, lane: to, role: LANE_ROLE.spec!, kind: role.kind });
       this.watchSpec(cardId);
-      this.startTurn(cardId, sessionId, this.specFirstMessage(cardId, specPath), { extraInstructions: format });
+      this.startTurn(cardId, sessionId, this.specFirstMessage(cardId, specPath), options);
       return cardSummary(this.requireCard(cardId));
     });
   }
@@ -1533,7 +1602,7 @@ export class Hive {
     const turn = this.deps.runner.start(
       {
         sessionId: randomUUID(), resume: false, cwd: card.worktreePath!, role, message,
-        outputFormat: COMMIT_SCHEMA, persist: false,
+        outputFormat: ROLE_TURNS.committer!.report!, persist: false,
       },
       {
         onTextDelta: () => {}, onTextBlock: () => {}, onActivity: () => {}, onSessionCreated: () => {},
@@ -2000,22 +2069,30 @@ export class Hive {
 
   /** What a role's turns need beyond the basics (spec: Session runner). */
   private turnOptions(roleName: string): TurnOptions {
-    switch (roleName) {
-      case LANE_ROLE.spec:
-        return { extraInstructions: this.formatFile("format.md") };
-      case LANE_ROLE.plan:
-        return { extraInstructions: this.formatFile("format.md"), outputFormat: PLAN_SCHEMA };
-      case LANE_ROLE.build:
-        return { outputFormat: DEVELOPER_SCHEMA };
-      case LANE_ROLE.check:
-        return { outputFormat: CHECK_SCHEMA };
-      case SPEC_REVIEWER:
-        return { outputFormat: REVIEW_SCHEMA, persist: false };
-      case SETUP:
-        return { outputFormat: SETUP_SCHEMA, background: true };
-      default:
-        return {};
-    }
+    const turn = ROLE_TURNS[roleName] ?? {};
+    return {
+      ...(turn.specFormat?.length
+        ? { extraInstructions: turn.specFormat.map((file) => this.formatFile(file)).join("\n\n") }
+        : {}),
+      ...(turn.report ? { outputFormat: turn.report } : {}),
+      // Turn settings the session isn't told about stay here, out of ROLE_TURNS.
+      ...(roleName === SPEC_REVIEWER ? { persist: false } : {}),
+      ...(roleName === SETUP ? { background: true } : {}),
+    };
+  }
+
+  /** The hive's own tools a role's sessions are offered, from ROLE_TURNS, bound to the card. */
+  private hiveToolsFor(roleName: string, cardId: string): HiveTools | undefined {
+    const names = ROLE_TURNS[roleName]?.tools ?? [];
+    if (names.length === 0) return undefined;
+    return {
+      ...(names.includes("write_brief")
+        ? { writeBrief: (brief: Brief) => Promise.resolve(this.writeBrief(cardId, brief)) }
+        : {}),
+      ...(names.includes("copy_local_files")
+        ? { copyLocalFiles: (paths: string[]) => this.copyLocalFiles(cardId, paths) }
+        : {}),
+    };
   }
 
   private startTurn(cardId: string, sessionId: string, message: string, options: TurnOptions = {}): void {
@@ -2024,6 +2101,7 @@ export class Hive {
     const { background, ...turnOptions } = options;
     // The spec reviewer's report and a background setup's working are for the hive, not for the chat.
     const quiet = session.role === SPEC_REVIEWER || !!background;
+    const hiveTools = this.hiveToolsFor(session.role, cardId);
     this.db.updateSession(sessionId, { turnRunning: true, lastMessage: message });
     this.withdrawn.delete(sessionId);
     if (!background) {
@@ -2038,11 +2116,7 @@ export class Hive {
         cwd: card.worktreePath!,
         role: this.deps.role(session.role),
         message,
-        ...(session.role === LANE_ROLE.refine
-          ? { hiveTools: { writeBrief: (brief: Brief) => Promise.resolve(this.writeBrief(cardId, brief)) } }
-          : session.role === SETUP
-            ? { hiveTools: { copyLocalFiles: (paths: string[]) => this.copyLocalFiles(cardId, paths) } }
-            : {}),
+        ...(hiveTools ? { hiveTools } : {}),
         ...turnOptions,
       },
       {

@@ -11,6 +11,8 @@ The look of Claude Hive, designed as a clickable canvas: https://claude.ai/artif
 | `CardMockup.dc.html` | A card in Mockup: two versions with pinned comments |
 | `CardTryIt.dc.html` | A card in Try it: test guide, checks, decisions made for you, feedback |
 | `CardDone.dc.html` | A card in Done: lane history and everything that happened |
+| `HeaderMenu.dc.html` | The header's ☰ menu, open |
+| `RolePrompts.dc.html` | Role prompts: each role's instructions, read from `roles/` |
 | `canvas.json` | The canvas layout |
 
 These files use the design tool's own format (`.dc.html`). They render on the canvas, not on their own in a browser. They are a reference for the look, not code to copy:

@@ -26,6 +26,7 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   r.get("/health", route((): HealthResponse => ({ status: "ok", version: APP_VERSION })));
   r.get("/events", hub.handler);
   r.get("/board", route(() => hive.board()));
+  r.get("/roles", route(() => hive.roles()));
 
   // A card being deleted is gone to every request about it (docs/specs/2026-11-27-delete-a-card.md).
   r.use("/cards/:id", (req, res, next) => {

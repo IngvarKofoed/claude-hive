@@ -3,7 +3,7 @@
 import { createSdkMcpServer, getSessionMessages, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { relative } from "node:path";
-import { z } from "zod";
+import { HIVE_TOOLS } from "./hiveTools";
 import type { HiveTools, RunningTurn, SessionRunner, TurnHandlers, TurnOutcome, TurnRequest } from "./types";
 
 export const SETTING_SOURCES = ["user", "project", "local"] as const;
@@ -53,38 +53,26 @@ export class InputQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
-const briefShape = {
-  title: z.string().describe("A short name for the card"),
-  problem: z.string().describe("The problem, in a sentence or two"),
-  whoItsFor: z.string().describe("Who it's for"),
-  whatDoneLooksLike: z.array(z.string()).describe("What done looks like, as short bullets"),
-  outOfScope: z.array(z.string()).describe("What is out of scope, as short bullets"),
-  openPoints: z.array(z.string()).describe("What is still open; empty when nothing is"),
-};
-
-const copyShape = {
-  paths: z.array(z.string()).describe("Paths relative to the checkout, as the list gave them; a folder ends with /"),
-};
-
 /** The hive's tools a session is offered: only those its role was given. */
 function hiveToolList(tools: HiveTools) {
   const list = [];
   if (tools.writeBrief) {
     const writeBrief = tools.writeBrief;
+    const { description, shape } = HIVE_TOOLS.write_brief;
     list.push(tool(
       "write_brief",
-      "Replace the card's brief with this one. Send every section each time; lists may be empty.",
-      briefShape,
+      description,
+      shape,
       async (args) => ({ content: [{ type: "text" as const, text: await writeBrief(args) }] }),
     ));
   }
   if (tools.copyLocalFiles) {
     const copy = tools.copyLocalFiles;
+    const { description, shape } = HIVE_TOOLS.copy_local_files;
     list.push(tool(
       "copy_local_files",
-      "Copy git-ignored files or folders from the person's checkout into this worktree. Existing files are kept; " +
-        "folders are copied file by file. Returns one line per path: copied, kept, or refused with the reason.",
-      copyShape,
+      description,
+      shape,
       async (args) => ({ content: [{ type: "text" as const, text: await copy(args.paths) }] }),
     ));
   }
