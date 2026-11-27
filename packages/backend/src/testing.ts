@@ -65,6 +65,15 @@ export class FakeProbe implements TrustProbe {
 /** Let promise callbacks run. */
 export const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+/** Wait until `condition` holds, for work that runs real git processes in the background (Build's start and end). */
+export async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitFor timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" }).trim();
 

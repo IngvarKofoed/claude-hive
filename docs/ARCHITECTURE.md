@@ -108,13 +108,14 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `designer` | Mockup | Opus | Code, in the card's worktree | Conversation |
 | `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
 | `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
-| `developer` | Build | As the spec's Implementation strategy says | Code, in the card's worktree | Work |
+| `developer` | Build | Opus, as the lead; each chunk on its own model through subagents | Code, in the card's worktree | Work |
 | `reviewer` | Check | Strongest | Nothing | Work, new for each round |
 | `tester` | Check | Sonnet | Nothing; runs the app and takes screenshots | Work, new for each round |
 | `manager` | any hands-off lane | Sonnet | Nothing; uses the hive's lookup tools | One-off, one for each question |
 | `spec-reviewer` | Spec | Fable | Nothing; reads only the spec file and `review.md` | One-off, blind |
 
 - **One developer per card.** When the spec's Implementation strategy calls for several agents, the developer session runs them as its own subagents. So a card has one developer report, one session to resume, and one session committing in its worktree.
+- **The developer is always Opus.** It does the plan's Opus chunks itself and gives each chunk on another model to a subagent on that model, through Claude Code's Agent tool. It merges, integrates, tests and reports on every card.
 - **Every session has the same full access,** in Claude Code's auto mode, which the runner sets itself. A role's limits are only in its instructions: they say what the session is and whether it may change code. A reviewer doesn't edit because it's told not to, and nothing else stops it. A per-role permissions policy is parked.
 - **Instructions are appended** to Claude Code's own system prompt. The project's `CLAUDE.md` and settings still apply (`settingSources: ["user", "project", "local"]`). They are recorded at a session's first turn, so a changed role file reaches only new sessions. Every role is told to ask questions with `AskUserQuestion`, never in its reply: a question in prose ends a hands-off turn with nobody to answer it.
 - **The spec format** is read from `~/.claude/skills/spec-format/`. `format.md` goes to the spec writer and the planner. The "For the reviewer" part of `review.md` goes to the spec reviewer.
@@ -169,10 +170,12 @@ query({
 | Ideas | You drag the card | Refine, and the worktree is created |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
-| Plan | The planner's report is `done` | Build. Its plan is stored on the card. |
+| Plan | The planner's report is `done` | Build. Its plan is stored on the card, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. |
 | Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
 | Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
-| Build | It's built | Check, with the issues found so far still on the card |
+| Build | The developer's report is `done` | Check, with the issues found so far still on the card. The report is stored first, then the hive commits a checkpoint. |
+| Build | The report is `blocked` or missing, or `done` while a merge of main is unfinished | Stays in Build, with the reason, Retry and **Back to Spec** (until the spec keeper judges blocking issues) |
+| Build | You press **Back to Spec** on a blocked build | Spec, after aborting an unfinished merge and committing the partial work. The developer's reason goes to the spec writer; after a new sign-off the planner re-plans and the same developer carries on. |
 | Build | A blocking issue judged `code-wrong` | Plan, for an amendment plan |
 | Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round. Spec issues wait on the card for the round that passes. |
 | Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. |
@@ -190,7 +193,7 @@ query({
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
-- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's questions come straight to you on the card page, like a chat lane's.
+- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's and the developer's questions come straight to you on the card page, like a chat lane's.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -276,8 +279,8 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the project's setup: copy the listed local files, run the install command |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
-| Each lane exit | A checkpoint commit on `hive/<card>`. The lane's diff is saved to the card's history. |
-| Build starts | Bring in the latest main. The card shows how many commits it's behind. |
+| Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. |
+| Build starts | Merge the local main into `hive/<card>` (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
 | Check | Search the branch for the `HIVE-MOCK` marker. Any hit fails the check. |
 | Ship | One project at a time: squash onto the latest main in the card's worktree (message from the card, `Hive-Card:` trailer) → run the project's test command and the marker search → Approve → push to main (squash again if main moved) → update your checkout's main only when it's safe → remove the worktree and branch |
 | Park / Drop | Remove the worktree and keep the branch (Drop deletes it after a while) |
@@ -296,11 +299,11 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning, runCommand, setupCommand, testCommand, localFiles, laneLimits |
-| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report) |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
-| **Issue** | card, foundIn, description, verdict, level, reason, flips |
+| **Issue** | card, foundIn, where (the spec's section), problem, guess (what was built instead), verdict, level, reason, flips |
 | **Decision** | card, lane, what, alternative, sessionId, source |
 | **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
 | **Process** | card, port, pid, command, startedAt. What the preview service started. |

@@ -1,8 +1,7 @@
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Brief, SpecInfo } from "@hive/shared";
 import { BriefPanel } from "./BriefPanel";
 import { Chip } from "./ui/Chip";
+import { Markdown } from "./ui/Markdown";
 import styles from "./SpecView.module.css";
 
 interface Props {
@@ -24,9 +23,7 @@ export function SpecView({ spec, brief }: Props) {
       {spec.text === null ? (
         <p className={styles.waiting}>The spec writer is writing the spec…</p>
       ) : (
-        <div className={styles.markdown}>
-          <Markdown remarkPlugins={[remarkGfm]}>{spec.text}</Markdown>
-        </div>
+        <Markdown>{spec.text}</Markdown>
       )}
     </div>
   );

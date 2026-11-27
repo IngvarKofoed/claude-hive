@@ -10,7 +10,7 @@ import { EventHub } from "./events";
 import * as git from "./git";
 import { Hive } from "./hive";
 import { PLAN_SCHEMA, REVIEW_SCHEMA } from "./spec/reports";
-import { FakeProbe, FakeRunner, makeRepo, makeSpecFormat, settle, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, makeRepo, makeSpecFormat, settle, waitFor, type TempRepo } from "./testing";
 
 const role = (name: string) => ({ name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "conversation", instructions: `Be the ${name}.` });
 
@@ -258,6 +258,8 @@ describe("Spec and Plan lanes", () => {
       expect(card.lane).toBe("build");
       expect(card.plan?.steps[0]?.title).toBe("Add the setting");
       expect(events.some((e) => e.type === "plan.updated")).toBe(true);
+      // Build starts by itself: the developer's first turn (docs/specs/2026-11-26-build-lane-developer.md).
+      await waitFor(() => runner.last.request.role.name === "developer");
     });
 
     it("keeps a blocked plan in Plan with Retry and Back to Spec, which needs a new review and sign-off", async () => {

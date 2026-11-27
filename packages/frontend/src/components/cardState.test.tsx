@@ -21,6 +21,9 @@ const detail: CardDetail = {
   brief: null,
   spec: null,
   plan: null,
+  build: null,
+  issues: [],
+  decisions: [],
   chat: [],
   pending: null,
   turnRunning: true,
@@ -210,5 +213,20 @@ describe("Chat", () => {
     render(<Chat detail={{ ...detail, lane: "plan", turnRunning: true }} streaming="" activity={null} />);
     expect(screen.queryByLabelText("Your reply")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  });
+});
+
+describe("Chat in Build", () => {
+  it("has no reply box and labels the developer's messages", () => {
+    const build: CardDetail = {
+      ...detail,
+      lane: "build",
+      turnRunning: false,
+      chat: [{ kind: "message", id: "m1", at: "t", from: "developer", text: "Built the column" }],
+    };
+    render(<Chat detail={build} streaming="" activity={null} />);
+    expect(screen.queryByLabelText("Your reply")).toBeNull();
+    expect(screen.getByText("Developer")).toBeInTheDocument();
+    expect(screen.getByText("Built the column")).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
-// The fixed-format reports of the spec reviewer and the planner. Each is checked against its JSON schema by the SDK
+// The fixed-format reports of the spec reviewer, the planner and the developer. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
-import type { Plan } from "@hive/shared";
+import type { Departure, Plan } from "@hive/shared";
 
 const blockable = {
   status: { type: "string", enum: ["done", "blocked"] },
@@ -69,6 +69,41 @@ export const PLAN_SCHEMA = {
   },
 } as const;
 
+const objects = (required: string[], descriptions: Record<string, string>) => ({
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required,
+    properties: Object.fromEntries(required.map((k) => [k, { type: "string", description: descriptions[k] }])),
+  },
+});
+
+/** The developer's report (docs/specs/2026-11-26-build-lane-developer.md, Key decisions: one turn, one report). */
+export const DEVELOPER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "summary", "departures", "issues", "decisions"],
+  properties: {
+    ...blockable,
+    summary: { type: "string", description: "What was built, in a few sentences" },
+    departures: objects(["step", "what", "why"], {
+      step: "The plan step you departed from",
+      what: "What you did instead",
+      why: "Why",
+    }),
+    issues: objects(["where", "problem", "guess"], {
+      where: "The spec's section",
+      problem: "The spec is silent, unclear or contradicts itself, doesn't fit the code, or something is missing, different or extra",
+      guess: "What you built instead",
+    }),
+    decisions: objects(["what", "alternative"], {
+      what: "What you decided where the spec left room",
+      alternative: "The alternative you didn't take",
+    }),
+  },
+} as const;
+
 export interface Finding {
   kind: "decision" | "fix";
   category: string;
@@ -82,6 +117,27 @@ export type ReviewReport =
   | { status: "blocked"; reason: string };
 
 export type PlanReport = { status: "done"; plan: Plan } | { status: "blocked"; reason: string };
+
+export interface ReportedIssue {
+  where: string;
+  problem: string;
+  guess: string;
+}
+
+export interface ReportedDecision {
+  what: string;
+  alternative: string;
+}
+
+export type DeveloperReport =
+  | {
+      status: "done";
+      summary: string;
+      departures: Departure[];
+      issues: ReportedIssue[];
+      decisions: ReportedDecision[];
+    }
+  | { status: "blocked"; reason: string };
 
 const isObject = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
@@ -125,6 +181,32 @@ export function parsePlanReport(raw: unknown): PlanReport | null {
       chunks: raw.chunks.map((c: any) => ({ name: c.name, owns: c.owns, model: c.model })),
       tests: raw.tests,
     },
+  };
+}
+
+/** Every item is an object whose listed keys are all strings. */
+function allStrings<K extends string>(items: unknown, keys: K[]): items is Record<K, string>[] {
+  return Array.isArray(items) && items.every((i) => isObject(i) && keys.every((k) => typeof i[k] === "string"));
+}
+
+/** The developer's report, or null when there is none or it doesn't have the expected shape. */
+export function parseDeveloperReport(raw: unknown): DeveloperReport | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done" || typeof raw.summary !== "string") return null;
+  if (
+    !allStrings(raw.departures, ["step", "what", "why"]) ||
+    !allStrings(raw.issues, ["where", "problem", "guess"]) ||
+    !allStrings(raw.decisions, ["what", "alternative"])
+  ) {
+    return null;
+  }
+  return {
+    status: "done",
+    summary: raw.summary,
+    departures: raw.departures.map(({ step, what, why }) => ({ step, what, why })),
+    issues: raw.issues.map(({ where, problem, guess }) => ({ where, problem, guess })),
+    decisions: raw.decisions.map(({ what, alternative }) => ({ what, alternative })),
   };
 }
 

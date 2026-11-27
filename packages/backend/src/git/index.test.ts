@@ -5,11 +5,16 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   GitError,
+  abortMerge,
   cardSlug,
+  changedFiles,
+  commitAll,
   commitFile,
   createCardWorktree,
   ensureWorktreesExcluded,
   hasBranch,
+  mergeInProgress,
+  mergeMain,
   resolveRepoRoot,
 } from "./index.js";
 
@@ -137,5 +142,72 @@ describe("commitFile", () => {
     const root = makeRepo();
     const { worktreePath } = await createCardWorktree(root, "nope-card");
     await expect(commitFile(worktreePath, "missing.md", "x")).rejects.toThrow(GitError);
+  });
+});
+
+describe("Build: bringing in main, checkpoints and changed files", () => {
+  /** A repo whose card worktree has a local identity, so the hive's own merges and commits work in it. */
+  async function cardRepo() {
+    const root = makeRepo();
+    git(root, "config", "user.name", "T");
+    git(root, "config", "user.email", "t@example.com");
+    await ensureWorktreesExcluded(root);
+    const { worktreePath } = await createCardWorktree(root, "card-1");
+    return { root, wt: worktreePath };
+  }
+
+  it("reports main already in, then merges new commits on main", async () => {
+    const { root, wt } = await cardRepo();
+    expect(await mergeMain(wt)).toEqual({ kind: "clean", commits: 0 });
+    writeFileSync(join(root, "b.txt"), "b\n");
+    git(root, "add", "b.txt");
+    git(root, "commit", "-m", "b on main");
+    expect(await mergeMain(wt)).toEqual({ kind: "clean", commits: 1 });
+    expect(existsSync(join(wt, "b.txt"))).toBe(true);
+  });
+
+  it("stops on conflicts, names the files, and says so again until the merge is finished or aborted", async () => {
+    const { root, wt } = await cardRepo();
+    writeFileSync(join(wt, "a.txt"), "card\n");
+    git(wt, "commit", "-am", "card change");
+    writeFileSync(join(root, "a.txt"), "main\n");
+    git(root, "commit", "-am", "main change");
+
+    expect(await mergeMain(wt)).toEqual({ kind: "conflict", files: ["a.txt"] });
+    expect(await mergeInProgress(wt)).toBe(true);
+    expect(await mergeMain(wt)).toEqual({ kind: "conflict", files: ["a.txt"] });
+
+    await abortMerge(wt);
+    expect(await mergeInProgress(wt)).toBe(false);
+    expect(readFileSync(join(wt, "a.txt"), "utf8")).toBe("card\n");
+  });
+
+  it("commits everything left as a checkpoint, and says when there was nothing", async () => {
+    const { wt } = await cardRepo();
+    expect(await commitAll(wt, "Build: nothing")).toBe(false);
+    writeFileSync(join(wt, "new.txt"), "new\n");
+    writeFileSync(join(wt, "a.txt"), "changed\n");
+    expect(await commitAll(wt, "Build: card")).toBe(true);
+    expect(git(wt, "status", "--porcelain")).toBe("");
+    expect(git(wt, "log", "-1", "--format=%s").trim()).toBe("Build: card");
+  });
+
+  it("commits a checkpoint even when a pre-commit hook would refuse it", async () => {
+    const { root, wt } = await cardRepo();
+    const hooks = join(root, ".git", "hooks");
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(wt, "new.txt"), "new\n");
+    expect(await commitAll(wt, "Build: card")).toBe(true);
+  });
+
+  it("lists the files changed on the branch against main, with null counts for a binary file", async () => {
+    const { wt } = await cardRepo();
+    writeFileSync(join(wt, "a.txt"), "a\nmore\n");
+    writeFileSync(join(wt, "img.bin"), Buffer.from([0, 1, 2, 0, 255]));
+    await commitAll(wt, "Build: card");
+    const files = await changedFiles(wt);
+    expect(files).toContainEqual({ path: "a.txt", added: 1, removed: 0 });
+    expect(files).toContainEqual({ path: "img.bin", added: null, removed: null });
   });
 });

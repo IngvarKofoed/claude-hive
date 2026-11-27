@@ -16,9 +16,10 @@ const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
   refine: "product-owner",
   spec: "spec-writer",
   plan: "planner",
+  build: "developer",
 };
 
-/** Why the reply box is closed right now, or null when you can write. Plan has no reply box at all (see Chat). */
+/** Why the reply box is closed right now, or null when you can write. Plan and Build have no reply box at all (see Chat). */
 export function replyHint(detail: CardDetail): string | null {
   if (detail.lane !== "spec" || !detail.spec) return null;
   if (detail.spec.review === "running") return "Wait for the review";
@@ -33,7 +34,7 @@ interface Props {
 }
 
 export function Chat({ detail, streaming, activity }: Props) {
-  const readOnly = detail.lane === "plan";
+  const readOnly = detail.lane === "plan" || detail.lane === "build";
   const hint = replyHint(detail);
   const closed = hint !== null;
   const [text, setText] = useState("");

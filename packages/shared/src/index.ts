@@ -40,7 +40,7 @@ export const LANES: readonly LaneInfo[] = [
   { id: "mockup", name: "Mockup", who: "you ⇄ designer", limit: 2, withYou: true, implemented: false },
   { id: "spec", name: "Spec", who: "spec writer, then you", limit: 2, withYou: true, implemented: true },
   { id: "plan", name: "Plan", who: "planner", limit: 2, withYou: false, implemented: true },
-  { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: false },
+  { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: true },
   { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: false },
   { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: false },
   { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: false },
@@ -105,6 +105,54 @@ export interface Plan {
   tests: string[];
 }
 
+// ---------- The build ----------
+
+/** Where the developer departed from the plan, and why. */
+export interface Departure {
+  step: string;
+  what: string;
+  why: string;
+}
+
+/** A file changed on the card's branch against main. Null line counts mean a binary file. */
+export interface FileChange {
+  path: string;
+  added: number | null;
+  removed: number | null;
+}
+
+/**
+ * The developer's `done` report, as the board keeps it on the card (docs/specs/2026-11-26-build-lane-developer.md).
+ * `files` is the whole branch against main, filled in once the hive's checkpoint is committed.
+ */
+export interface BuildReport {
+  summary: string;
+  departures: Departure[];
+  files: FileChange[];
+}
+
+/** A mismatch between spec and code, found while building. Judged later by the spec keeper. */
+export interface SpecIssue {
+  id: string;
+  /** The lane the issue was found in. */
+  foundIn: Lane;
+  /** The spec's section. */
+  where: string;
+  problem: string;
+  /** What was done instead. */
+  guess: string;
+}
+
+/** A decision made without you, listed so you can ask for it the other way in Try it. */
+export interface Decision {
+  id: string;
+  lane: Lane;
+  what: string;
+  alternative: string;
+  /** Who decided, e.g. "developer". */
+  source: string;
+}
+
 // ---------- Board ----------
 
 /** working: a turn is running. needs-you: it's your turn, or a question waits. */
@@ -136,10 +184,11 @@ export interface BoardResponse {
 // ---------- Card detail ----------
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
-export type ChatAuthor = "you" | "product-owner" | "spec-writer" | "planner" | "hive";
+export type ChatAuthor = "you" | "product-owner" | "spec-writer" | "planner" | "developer" | "hive";
 
 /**
- * What an error line offers: retry the failed turn, run the review again, or send a blocked plan back to Spec.
+ * What an error line offers: retry the failed turn, run the review again, or send a blocked plan or build back to
+ * Spec.
  */
 export type ErrorAction = "retry" | "review" | "back-to-spec";
 
@@ -175,6 +224,12 @@ export interface CardDetail extends CardSummary {
   spec: SpecInfo | null;
   /** The planner's plan, once it has written one. */
   plan: Plan | null;
+  /** The developer's last `done` report, once it has built. */
+  build: BuildReport | null;
+  /** Spec issues found so far, waiting for the spec keeper. */
+  issues: SpecIssue[];
+  /** Decisions made without you. */
+  decisions: Decision[];
   /** The chat of the card's current lane. */
   chat: ChatItem[];
   pending: PendingItem | null;

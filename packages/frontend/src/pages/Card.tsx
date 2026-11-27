@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router";
 import { laneImplemented, type CardDetail } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
+import { BuildView } from "../components/BuildView";
 import { Chat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
@@ -46,7 +47,15 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
               <SpecView spec={detail.spec} brief={detail.brief} />
             </Panel>
           ) : null}
-          {detail.plan ? <PlanPanel detail={detail} /> : null}
+          {/* The newest work first: the build report sits above the plan, beside the spec, not under it. */}
+          <div className={styles.stack}>
+            {detail.build || detail.issues.length > 0 || detail.decisions.length > 0 ? (
+              <Panel title="Build">
+                <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+              </Panel>
+            ) : null}
+            {detail.plan ? <PlanPanel detail={detail} /> : null}
+          </div>
         </div>
       </>
     );
@@ -76,6 +85,19 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
     return (
       <div className={styles.columns}>
         <Panel title="Planner" className={styles.chatPanel}>
+          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+        </Panel>
+        <div className={styles.sidePanel}>
+          <PlanPanel detail={detail} />
+        </div>
+      </div>
+    );
+  }
+
+  if (detail.lane === "build") {
+    return (
+      <div className={styles.columns}>
+        <Panel title="Developer" className={styles.chatPanel}>
           <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
         <div className={styles.sidePanel}>

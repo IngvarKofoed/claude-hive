@@ -1,8 +1,11 @@
 // SQLite through better-sqlite3. This slice creates only the tables it uses (spec: Data).
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Brief, CardState, ChatItem, ErrorAction, Lane, PendingItem, Plan, ProjectSummary } from "@hive/shared";
+import type {
+  Brief, BuildReport, CardState, ChatItem, Decision, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+} from "@hive/shared";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -53,6 +56,29 @@ CREATE TABLE IF NOT EXISTS events (
   data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_card ON events(card_id, at);
+CREATE TABLE IF NOT EXISTS issues (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL REFERENCES cards(id),
+  found_in TEXT NOT NULL,
+  spec_section TEXT NOT NULL,
+  problem TEXT NOT NULL,
+  guess TEXT NOT NULL,
+  verdict TEXT,
+  level TEXT,
+  reason TEXT,
+  flips INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL REFERENCES cards(id),
+  lane TEXT NOT NULL,
+  what TEXT NOT NULL,
+  alternative TEXT NOT NULL,
+  session_id TEXT,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 /** Columns added after the first slice; added to an existing database on open. */
@@ -61,6 +87,7 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "reviewed_spec_hash", type: "TEXT" },
   { table: "cards", column: "review_applying", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "plan", type: "TEXT" },
+  { table: "cards", column: "build", type: "TEXT" },
 ];
 
 export interface ProjectRow {
@@ -88,6 +115,8 @@ export interface CardRow {
   /** A review's findings were sent to the spec writer and haven't been applied in full yet. */
   reviewApplying: boolean;
   plan: Plan | null;
+  /** The developer's last `done` report. */
+  build: BuildReport | null;
 }
 
 export interface SessionRow {
@@ -173,19 +202,20 @@ export class HiveDb {
     this.db
       .prepare(
         `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
-           spec_path, reviewed_spec_hash, review_applying, plan, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           spec_path, reviewed_spec_hash, review_applying, plan, build, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
-        c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, now());
+        c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
+        now());
   }
 
   updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId">>): void {
     const cols: Record<string, string> = {
       title: "title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
-      reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan",
+      reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -193,7 +223,7 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (key === "brief" || key === "plan") values.push(value ? JSON.stringify(value) : null);
+      if (key === "brief" || key === "plan" || key === "build") values.push(value ? JSON.stringify(value) : null);
       else if (key === "reviewApplying") values.push(value ? 1 : 0);
       else values.push(value);
     }
@@ -228,7 +258,9 @@ export class HiveDb {
     return (this.db.prepare("SELECT * FROM sessions WHERE turn_running = 1").all() as any[]).map(toSession);
   }
 
-  updateSession(id: string, patch: { turnRunning?: boolean; existsYet?: boolean; lastMessage?: string }): void {
+  updateSession(
+    id: string, patch: { turnRunning?: boolean; existsYet?: boolean; lastMessage?: string | null },
+  ): void {
     if (patch.turnRunning !== undefined)
       this.db.prepare("UPDATE sessions SET turn_running = ? WHERE id = ?").run(patch.turnRunning ? 1 : 0, id);
     if (patch.existsYet !== undefined)
@@ -293,6 +325,43 @@ export class HiveDb {
   lastChatItem(cardId: string, lane: Lane): ChatItem | undefined {
     return this.chatFor(cardId, lane).at(-1);
   }
+
+  // ---------- spec issues and decisions ----------
+
+  /** Runs `fn` in one SQLite transaction: all of its writes land, or none do. */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
+  addIssue(cardId: string, issue: Omit<SpecIssue, "id">): void {
+    this.db
+      .prepare(
+        `INSERT INTO issues (id, card_id, found_in, spec_section, problem, guess, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), cardId, issue.foundIn, issue.where, issue.problem, issue.guess, now());
+  }
+
+  issuesFor(cardId: string): SpecIssue[] {
+    return (
+      this.db.prepare("SELECT * FROM issues WHERE card_id = ? ORDER BY created_at, rowid").all(cardId) as any[]
+    ).map((r) => ({ id: r.id, foundIn: r.found_in, where: r.spec_section, problem: r.problem, guess: r.guess }));
+  }
+
+  addDecision(cardId: string, decision: Omit<Decision, "id">, sessionId: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO decisions (id, card_id, lane, what, alternative, session_id, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), cardId, decision.lane, decision.what, decision.alternative, sessionId, decision.source, now());
+  }
+
+  decisionsFor(cardId: string): Decision[] {
+    return (
+      this.db.prepare("SELECT * FROM decisions WHERE card_id = ? ORDER BY created_at, rowid").all(cardId) as any[]
+    ).map((r) => ({ id: r.id, lane: r.lane, what: r.what, alternative: r.alternative, source: r.source }));
+  }
 }
 
 function toProject(r: any): ProjectRow {
@@ -305,6 +374,7 @@ function toCard(r: any): CardRow {
     branch: r.branch, worktreePath: r.worktree_path, brief: r.brief ? JSON.parse(r.brief) : null,
     moveError: r.move_error, specPath: r.spec_path ?? null, reviewedSpecHash: r.reviewed_spec_hash ?? null,
     reviewApplying: !!r.review_applying, plan: r.plan ? JSON.parse(r.plan) : null,
+    build: r.build ? JSON.parse(r.build) : null,
   };
 }
 

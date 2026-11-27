@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canMove, laneAfter, laneAfterPlan } from "./board/moves";
+import { canMove, laneAfter, laneAfterBuild, laneAfterPlan } from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
 import { describeTool, InputQueue } from "./sessions/sdkRunner";
 
@@ -22,7 +22,21 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
 
   it("Plan → Spec on Back to Spec", () => {
     expect(laneAfter("plan", "back-to-spec")).toBe("spec");
-    expect(laneAfter("build", "back-to-spec")).toBeNull();
+    expect(laneAfter("check", "back-to-spec")).toBeNull();
+  });
+
+  it("Build → Check when the developer's report is done, and stays in Build when it's blocked or missing", () => {
+    expect(laneAfterBuild("done")).toBe("check");
+    expect(laneAfterBuild("blocked")).toBe("build");
+    expect(laneAfterBuild("missing")).toBe("build");
+  });
+
+  it("stays in Build when the report is done but the merge of main is unfinished", () => {
+    expect(laneAfterBuild("done", true)).toBe("build");
+  });
+
+  it("Build → Spec on Back to Spec, until the spec keeper exists", () => {
+    expect(laneAfter("build", "back-to-spec")).toBe("spec");
   });
 
   it("allows dragging only Ideas → Refine", () => {

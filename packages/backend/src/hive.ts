@@ -1,21 +1,24 @@
 // The hive's orchestration: projects, cards and their moves, and every session's turns, from Ideas through Refine,
-// Spec and Plan (docs/specs/2026-11-26-board-refine-chat.md, docs/specs/2026-11-26-spec-lane-review-gate.md).
+// Spec, Plan and Build (docs/specs/2026-11-26-board-refine-chat.md, docs/specs/2026-11-26-spec-lane-review-gate.md,
+// docs/specs/2026-11-26-build-lane-developer.md).
 // Plain code decides; Claude sessions only do the work (packages/backend/CLAUDE.md, Rules).
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type {
-  AnswerBody, BoardResponse, Brief, CardDetail, CardSummary, ChatAuthor, ChatItem, ErrorAction, Lane, PendingItem,
-  Question, SpecInfo,
+  AnswerBody, BoardResponse, Brief, CardDetail, CardSummary, ChatAuthor, ChatItem, ErrorAction, FileChange, Lane,
+  PendingItem, Plan, Question, SpecInfo,
 } from "@hive/shared";
-import { canMove, laneAfter, laneAfterPlan } from "./board/moves";
+import { canMove, laneAfter, laneAfterBuild, laneAfterPlan } from "./board/moves";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import type { Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
-  findingsMessage, parsePlanReport, parseReviewReport, PLAN_SCHEMA, REVIEW_SCHEMA,
+  DEVELOPER_SCHEMA, findingsMessage, parseDeveloperReport, parsePlanReport, parseReviewReport, PLAN_SCHEMA,
+  REVIEW_SCHEMA,
 } from "./spec/reports";
+import type { MergeResult } from "./git";
 
 /** The git service's API (packages/backend/src/git). */
 export interface GitService {
@@ -24,6 +27,11 @@ export interface GitService {
   ensureWorktreesExcluded(root: string): Promise<void>;
   createCardWorktree(root: string, slug: string): Promise<{ worktreePath: string; branch: string }>;
   commitFile(worktree: string, path: string, message: string): Promise<boolean>;
+  mergeMain(worktree: string): Promise<MergeResult>;
+  mergeInProgress(worktree: string): Promise<boolean>;
+  abortMerge(worktree: string): Promise<void>;
+  commitAll(worktree: string, message: string): Promise<boolean>;
+  changedFiles(worktree: string): Promise<FileChange[]>;
   cardSlug(title: string, id: string): string;
 }
 
@@ -54,6 +62,7 @@ const LANE_ROLE: Partial<Record<Lane, string>> = {
   refine: "product-owner",
   spec: "spec-writer",
   plan: "planner",
+  build: "developer",
 };
 const REVIEWER = "spec-reviewer";
 const CHAT_LANES: Lane[] = ["refine", "spec"];
@@ -62,6 +71,7 @@ const AUTHOR: Record<string, ChatAuthor> = {
   "product-owner": "product-owner",
   "spec-writer": "spec-writer",
   planner: "planner",
+  developer: "developer",
 };
 
 /** The idea's first sentence, cut to 60 characters (spec: Board and moves). */
@@ -97,6 +107,44 @@ function briefText(brief: Brief | null): string {
   ].join("\n");
 }
 
+/** The plan as text, for the developer's message. */
+function planText(plan: Plan | null): string {
+  if (!plan) return "(The card has no plan.)";
+  const steps = plan.steps.map((s, i) =>
+    [`${i + 1}. ${s.title} [chunk: ${s.chunk}]`, s.detail ? `   ${s.detail}` : "", `   Checked by: ${s.check}`]
+      .filter(Boolean)
+      .join("\n"));
+  const chunks = plan.chunks.map((c) => `- ${c.name} (${c.model}): ${c.owns.join(", ") || "(no files listed)"}`);
+  return ["Steps:", ...steps, "", "Chunks:", ...chunks, "", "Tests:", list(plan.tests)].join("\n");
+}
+
+/** What bringing in main did, as the hive's note in Build's chat. */
+export function mergeNote(merge: MergeResult): string {
+  switch (merge.kind) {
+    case "clean":
+      return merge.commits === 0 ? "Main was already in." : `Brought in main: ${count(merge.commits, "new commit", "new commits")}.`;
+    case "conflict":
+      return `Bringing in main stopped on conflicts in ${merge.files.join(", ") || "some files"}. The developer resolves them first.`;
+    case "failed":
+      return `Bringing in main failed: ${sentence(merge.reason)} The developer was told to bring it in itself.`;
+  }
+}
+
+/** What bringing in main did, and what to do about it, for the developer. */
+function mergeInstruction(merge: MergeResult): string {
+  switch (merge.kind) {
+    case "clean":
+      return merge.commits === 0
+        ? "main was already in this branch."
+        : `the hive merged ${count(merge.commits, "new commit", "new commits")} from main into this branch.`;
+    case "conflict":
+      return `the merge of main stopped on conflicts in ${merge.files.join(", ") || "some files"}. Resolve them and ` +
+        "commit the merge first.";
+    case "failed":
+      return `git merge main failed: ${sentence(merge.reason)} Merge main into this branch yourself first.`;
+  }
+}
+
 /** A question waiting for an answer that a live turn is blocked on. */
 interface Waiter {
   resolve(answer: AnswerBody): void;
@@ -111,6 +159,7 @@ export class Hive {
   private withdrawn = new Set<string>(); // session ids whose turn had a question withdrawn
   private followUps = new Map<string, string[]>(); // session id → messages that missed a turn already ending
   private moving = new Set<string>(); // card ids with a move in flight
+  private starting = new Set<string>(); // card ids whose developer is being started (bringing in main)
   private reviews = new Map<string, { sessionId: string; hash: string }>(); // card id → running review and H0
   private lastSpec = new Map<string, string>(); // card id → the spec.updated last sent, to send only changes
   private watch = new SpecWatch();
@@ -151,6 +200,9 @@ export class Hive {
       brief: card.brief,
       spec: card.specPath ? this.refreshSpec(card.id) : null,
       plan: card.plan,
+      build: card.build,
+      issues: this.db.issuesFor(card.id),
+      decisions: this.db.decisionsFor(card.id),
       chat: this.db.chatFor(card.id, card.lane),
       pending: this.db.openPendingFor(card.id)?.item ?? null,
       turnRunning: this.anyTurnRunning(card.id),
@@ -203,7 +255,7 @@ export class Hive {
     const card: CardRow = {
       id: randomUUID(), projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
       state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
-      specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null,
+      specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null,
     };
     this.db.insertCard(card);
     this.emitCard(card.id);
@@ -307,23 +359,37 @@ export class Hive {
     });
   }
 
-  /** A blocked plan goes back to the spec writer with the planner's reason; a new review and sign-off follow. */
+  /**
+   * A blocked plan or build goes back to the spec writer with its reason; a new review and sign-off follow. A build's
+   * partial work is committed first, after aborting an unfinished merge of main, which the next Build merges again.
+   */
   async backToSpec(cardId: string): Promise<CardSummary> {
     const card = this.requireCard(cardId);
-    const to = laneAfter(card.lane, "back-to-spec");
-    if (!to) throw new HttpError(409, "Only a card in Plan can go back to Spec.");
-    if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the planner to finish.");
-    const last = this.db.lastChatItem(cardId, "plan");
+    const from = card.lane;
+    const to = laneAfter(from, "back-to-spec");
+    if (!to) throw new HttpError(409, "Only a card in Plan or Build can go back to Spec.");
+    const who = from === "build" ? "developer" : "planner";
+    if (this.anyTurnRunning(cardId)) throw new HttpError(409, `Wait for the ${who} to finish.`);
+    const last = this.db.lastChatItem(cardId, from);
     if (!last || last.kind !== "error" || !last.actions.includes("back-to-spec")) {
-      throw new HttpError(409, "Only a blocked plan goes back to Spec.");
+      throw new HttpError(409, `Only a blocked ${from === "build" ? "build" : "plan"} goes back to Spec.`);
     }
     const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
     if (!writer) throw new HttpError(409, "This card has no spec writer to go back to.");
     return this.oneMoveAtATime(cardId, async () => {
+      if (from === "build") {
+        const worktree = card.worktreePath!;
+        try {
+          if (await this.deps.git.mergeInProgress(worktree)) await this.deps.git.abortMerge(worktree);
+          await this.deps.git.commitAll(worktree, `Build (unfinished): ${card.title}`);
+        } catch (error) {
+          throw new HttpError(409, `The build's partial work couldn't be committed: ${(error as Error).message}`);
+        }
+      }
       this.db.updateCard(cardId, { lane: to, reviewedSpecHash: null, reviewApplying: false });
       this.watchSpec(cardId);
       this.startTurn(cardId, writer.id, [
-        "The planner couldn't plan from the signed-off spec. What it reported:",
+        `The ${who} couldn't ${from === "build" ? "build" : "plan"} from the signed-off spec. What it reported:`,
         "",
         last.message,
         "",
@@ -400,6 +466,7 @@ export class Hive {
 
   async stop(cardId: string): Promise<void> {
     this.requireCard(cardId);
+    if (this.starting.has(cardId)) throw new HttpError(409, "Build is bringing in main. Stop once the developer runs.");
     for (const session of this.cardSessions(cardId)) {
       const running = this.turns.get(session.id);
       if (!running) continue;
@@ -410,13 +477,29 @@ export class Hive {
 
   retry(cardId: string): void {
     const card = this.requireCard(cardId);
-    const session = this.requireLaneSession(cardId);
     this.refuseWhileMoving(cardId);
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "A turn is already running.");
     const last = this.db.lastChatItem(cardId, card.lane);
-    if (!last || last.kind !== "error" || !last.actions.includes("retry") || !session.lastMessage) {
+    if (!last || last.kind !== "error" || !last.actions.includes("retry")) {
       throw new HttpError(409, "There is no failed turn to retry.");
     }
+    if (card.lane === "build") {
+      // A stored report whose checkpoint failed: redo only the checkpoint and the move, not the build.
+      if (card.build) {
+        void this.oneMoveAtATime(cardId, () => this.finishBuild(cardId))
+          .catch((error: unknown) => this.log(`Finishing the build of card ${cardId} failed: ${String(error)}`));
+        return;
+      }
+      // A developer that has had no turn yet in this visit: start it afresh, bringing in main again.
+      const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+      if (!developer?.lastMessage) {
+        void this.startDeveloper(cardId)
+          .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+        return;
+      }
+    }
+    const session = this.requireLaneSession(cardId);
+    if (!session.lastMessage) throw new HttpError(409, "There is no failed turn to retry.");
     this.startTurn(cardId, session.id, session.lastMessage, this.turnOptions(session.role));
   }
 
@@ -530,13 +613,112 @@ export class Hive {
     this.db.addEvent(cardId, "plan", report.plan, randomUUID());
     this.deps.hub.emit({ type: "plan.updated", cardId, plan: report.plan });
     this.emitCard(cardId);
+    void this.startDeveloper(cardId)
+      .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+  }
+
+  // ---------- the developer ----------
+
+  /**
+   * Each entry to Build: bring in main, then start the developer, or resume it with the revised spec and plan.
+   * Whatever bringing in main did is told to the developer; there is no separate error path for it.
+   */
+  private async startDeveloper(cardId: string): Promise<void> {
+    const roleName = LANE_ROLE.build!;
+    this.starting.add(cardId);
+    this.setState(cardId, "working");
+    try {
+      // A new visit starts without a report (Card.build is set only between a done report and the move to Check),
+      // and without a last message: until this visit's first turn starts, Retry starts the developer afresh,
+      // bringing in main again, instead of re-sending an earlier visit's message with its old plan.
+      this.db.updateCard(cardId, { build: null });
+      const existing = this.db.getSessionFor(cardId, "build", roleName);
+      if (existing) this.db.updateSession(existing.id, { lastMessage: null });
+      const role = this.deps.role(roleName); // a broken role file fails here, before the merge
+      const card = this.requireCard(cardId);
+      const merge = await this.deps.git.mergeMain(card.worktreePath!);
+      this.addNote(cardId, "build", mergeNote(merge));
+      let developer = this.db.getSessionFor(cardId, "build", roleName);
+      const again = !!developer?.existsYet;
+      if (!developer) {
+        const id = randomUUID();
+        this.db.insertSession({ id, cardId, lane: "build", role: roleName, kind: role.kind });
+        developer = this.db.getSession(id)!;
+      }
+      const opening = again
+        ? `The spec was revised and signed off again: ${card.specPath}, and the planner re-planned. Bring your work ` +
+          "in line with the spec and the new plan below, then end with your report."
+        : `The spec for this card is signed off: ${card.specPath}. Read it, then build to the planner's plan below, ` +
+          "and end with your report.";
+      this.startTurn(cardId, developer.id, [
+        opening,
+        "",
+        `Bringing in main: ${mergeInstruction(merge)}`,
+        "",
+        "The plan:",
+        "",
+        planText(card.plan),
+      ].join("\n"), this.turnOptions(roleName));
+    } catch (error) {
+      this.addError(cardId, "build", `Build couldn't start: ${(error as Error).message}`, ["retry"]);
+    } finally {
+      this.starting.delete(cardId);
+      if (!this.anyTurnRunning(cardId)) {
+        this.setState(cardId, "needs-you");
+        this.deps.hub.emit({ type: "turn.ended", cardId });
+      }
+    }
+  }
+
+  private async onDeveloperEnded(cardId: string, session: SessionRow, outcome: TurnOutcome, stopped: boolean): Promise<void> {
+    const fail = (message: string, actions: ErrorAction[]) => this.addError(cardId, "build", message, actions);
+    if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return fail("The developer was stopped.", ["retry"]);
+    if (outcome.kind === "error") return fail(`The developer failed: ${outcome.message}`, ["retry"]);
+    const report = parseDeveloperReport(outcome.report);
+    if (!report) return fail("The developer didn't return a report.", ["retry", "back-to-spec"]);
+    if (report.status === "blocked") {
+      return fail(`The developer couldn't build this: ${report.reason}`, ["retry", "back-to-spec"]);
+    }
+    const card = this.requireCard(cardId);
+    const mergeUnfinished = await this.deps.git.mergeInProgress(card.worktreePath!);
+    if (laneAfterBuild("done", mergeUnfinished) !== "check") {
+      return fail("The developer reported done, but the merge of main isn't finished.", ["retry", "back-to-spec"]);
+    }
+    // The report is stored before the checkpoint, so nothing in it is lost if git refuses the commit.
+    this.db.transaction(() => {
+      this.db.updateCard(cardId, { build: { summary: report.summary, departures: report.departures, files: [] } });
+      for (const issue of report.issues) this.db.addIssue(cardId, { foundIn: "build", ...issue });
+      for (const decision of report.decisions) {
+        this.db.addDecision(cardId, { lane: "build", source: "developer", ...decision }, session.id);
+      }
+      this.db.addEvent(cardId, "build", report, randomUUID());
+    });
+    await this.finishBuild(cardId);
+  }
+
+  /** Leave Build with a done report stored: the checkpoint, the changed files, then the move to Check. */
+  private async finishBuild(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    let files: FileChange[];
+    try {
+      await this.deps.git.commitAll(card.worktreePath!, `Build: ${card.title}`);
+      files = await this.deps.git.changedFiles(card.worktreePath!);
+    } catch (error) {
+      const why = sentence((error as Error).message);
+      this.addError(cardId, "build", `The build's checkpoint couldn't be committed: ${why} Retry commits it again.`, ["retry"]);
+      return;
+    }
+    this.db.updateCard(cardId, { build: { ...card.build!, files }, lane: laneAfterBuild("done") });
+    this.emitCard(cardId);
   }
 
   // ---------- startup ----------
 
   /**
-   * After a restart. A chat lane's cut-off turn is not resumed; it waits for you. A cut-off planner turn is resumed
-   * once, as for any hands-off lane. A cut-off review, or review turn, gets its own way to start again.
+   * After a restart. A chat lane's cut-off turn is not resumed; it waits for you. A cut-off planner or developer turn
+   * is resumed once, as for any hands-off lane. A cut-off review, or review turn, gets its own way to start again.
+   * A card in Build that nothing is resuming gets a line with Retry, so it's never stuck without a way on; nothing
+   * starts a build by itself, since that would spend a long Opus turn without anyone asking.
    */
   recoverAfterRestart(): void {
     for (const session of this.db.listRunningSessions()) {
@@ -546,16 +728,19 @@ export class Hive {
       if (!card) continue;
       if (session.role === REVIEWER) {
         this.addError(card.id, "spec", "The review was cut off when the hive stopped. Press Review again.", ["review"]);
-      } else if (session.role === LANE_ROLE.plan) {
-        // A missing spec format or role file must not stop the hive from starting; the planner waits for Retry.
+      } else if (session.role === LANE_ROLE.plan || session.role === LANE_ROLE.build) {
+        const planner = session.role === LANE_ROLE.plan;
+        // A missing spec format or role file must not stop the hive from starting; the session waits for Retry.
         try {
-          this.startTurn(card.id, session.id,
-            "Your last turn was cut off when the hive stopped. Finish the build plan and report it.",
-            this.turnOptions(session.role));
+          this.startTurn(card.id, session.id, planner
+            ? "Your last turn was cut off when the hive stopped. Finish the build plan and report it."
+            : "Your last turn was cut off when the hive stopped. Carry on building to the plan, then report.",
+          this.turnOptions(session.role));
         } catch (error) {
           this.db.updateSession(session.id, { turnRunning: false });
           this.db.updateCard(card.id, { state: "needs-you" });
-          this.addError(card.id, "plan", `The planner couldn't restart: ${(error as Error).message}`, ["retry"]);
+          this.addError(card.id, session.lane,
+            `The ${planner ? "planner" : "developer"} couldn't restart: ${(error as Error).message}`, ["retry"]);
         }
       } else if (session.role === LANE_ROLE.spec && card.reviewApplying) {
         this.addError(card.id, "spec",
@@ -565,7 +750,25 @@ export class Hive {
         this.addError(card.id, session.lane, "The last reply was cut off when the hive stopped. Send a message to carry on.", []);
       }
     }
-    for (const card of this.db.listCards()) if (card.lane === "spec" && card.specPath) this.watchSpec(card.id);
+    for (const card of this.db.listCards()) {
+      if (card.lane === "spec" && card.specPath) this.watchSpec(card.id);
+      if (card.lane === "build") this.offerBuildWayOn(card);
+    }
+  }
+
+  /** A card in Build with nothing running and no error line offering Retry gets one. */
+  private offerBuildWayOn(card: CardRow): void {
+    if (this.anyTurnRunning(card.id)) return;
+    const last = this.db.lastChatItem(card.id, "build");
+    if (last?.kind === "error" && last.actions.includes("retry")) return;
+    const developer = this.db.getSessionFor(card.id, "build", LANE_ROLE.build!);
+    const message = card.build
+      ? "The build's checkpoint wasn't committed: the hive stopped first. Retry commits it."
+      : !developer?.lastMessage
+        ? "Build hasn't started yet."
+        : "Build was cut off when the hive stopped. Retry carries on.";
+    this.addError(card.id, "build", message, ["retry"]);
+    this.setState(card.id, "needs-you");
   }
 
   // ---------- turns ----------
@@ -577,6 +780,8 @@ export class Hive {
         return { extraInstructions: this.formatFile("format.md") };
       case LANE_ROLE.plan:
         return { extraInstructions: this.formatFile("format.md"), outputFormat: PLAN_SCHEMA };
+      case LANE_ROLE.build:
+        return { outputFormat: DEVELOPER_SCHEMA };
       case REVIEWER:
         return { outputFormat: REVIEW_SCHEMA, persist: false };
       default:
@@ -630,7 +835,7 @@ export class Hive {
         kind: "error",
         message: error instanceof Error ? error.message : String(error),
       }))
-      .then((outcome) => {
+      .then(async (outcome) => {
         if (this.turns.get(sessionId) === turn) this.turns.delete(sessionId);
         const stopped = this.stopping.delete(sessionId);
         this.db.updateSession(sessionId, { turnRunning: false });
@@ -639,6 +844,7 @@ export class Hive {
 
         if (session.role === REVIEWER) this.onReviewEnded(cardId, outcome, stopped);
         else if (session.role === LANE_ROLE.plan) this.onPlannerEnded(cardId, outcome, stopped);
+        else if (session.role === LANE_ROLE.build) await this.onDeveloperEnded(cardId, session, outcome, stopped);
         else if (session.role === LANE_ROLE.spec && this.requireCard(cardId).reviewApplying) {
           this.onWriterEnded(cardId, outcome, stopped, withdrew);
         } else if (outcome.kind === "error" && !stopped) {
@@ -860,8 +1066,9 @@ export class Hive {
     return ids.filter((s): s is SessionRow => !!s);
   }
 
+  /** A turn is running on the card, or its developer is being started (bringing in main comes first). */
   private anyTurnRunning(cardId: string): boolean {
-    return this.cardSessions(cardId).some((s) => this.turns.has(s.id));
+    return this.starting.has(cardId) || this.cardSessions(cardId).some((s) => this.turns.has(s.id));
   }
 
   /** The session of the card's current lane's role. */
@@ -879,6 +1086,9 @@ export function cardSummary(c: CardRow): CardSummary {
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** git's reason as a sentence, so the hive's next sentence doesn't run on from it. */
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
 function toQuestions(raw: unknown): Question[] {
   if (!Array.isArray(raw)) return [];

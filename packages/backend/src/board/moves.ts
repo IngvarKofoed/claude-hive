@@ -18,11 +18,20 @@ export function laneAfter(from: Lane, action: CardAction): Lane | null {
     case "signoff":
       return from === "spec" ? "plan" : null;
     case "back-to-spec":
-      return from === "plan" ? "spec" : null;
+      // A blocked plan, or a blocked build until the spec keeper exists (docs/specs/2026-11-26-build-lane-developer.md)
+      return from === "plan" || from === "build" ? "spec" : null;
   }
 }
 
 /** Where the planner's report leaves the card: a done plan moves it to Build; anything else keeps it in Plan. */
 export function laneAfterPlan(report: "done" | "blocked" | "missing"): Lane {
   return report === "done" ? "build" : "plan";
+}
+
+/**
+ * Where the developer's report leaves the card: a done report moves it to Check; anything else keeps it in Build. A
+ * `done` report while a merge of main is still unfinished doesn't count as done.
+ */
+export function laneAfterBuild(report: "done" | "blocked" | "missing", mergeUnfinished = false): Lane {
+  return report === "done" && !mergeUnfinished ? "check" : "build";
 }
