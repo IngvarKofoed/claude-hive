@@ -1,0 +1,31 @@
+.open {
+  margin-left: auto;
+  color: var(--color-text-subtle);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-stopped-bg);
+  border: var(--border-width) solid var(--color-stopped-border);
+  border-radius: var(--radius-md);
+  color: var(--color-stopped-text);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.left {
+  margin: 0;
+  padding-left: var(--space-6);
+  overflow-wrap: anywhere;
+}
+
+.error {
+  color: var(--color-stopped-text);
+  font-weight: var(--weight-semibold);
+}

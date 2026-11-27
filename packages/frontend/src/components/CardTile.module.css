@@ -35,6 +35,7 @@ button.title {
 
 .meta {
   display: flex;
+  align-items: center;
   gap: var(--space-3);
 }
 
@@ -46,4 +47,45 @@ button.title {
   color: var(--color-stopped-text);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+/* Delete stays out of the way: it shows on hover and on keyboard focus (docs/specs/2026-11-27-delete-a-card.md). */
+.delete {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-subtle);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tile:hover .delete,
+.delete:focus-visible {
+  opacity: 1;
+}
+
+.delete:hover {
+  color: var(--color-stopped-text);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-stopped-bg);
+  border: var(--border-width) solid var(--color-stopped-border);
+  border-radius: var(--radius-sm);
+}
+
+.question {
+  color: var(--color-stopped-text);
+  font-size: var(--text-sm);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
 }

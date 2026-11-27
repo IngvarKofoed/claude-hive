@@ -27,6 +27,13 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   r.get("/events", hub.handler);
   r.get("/board", route(() => hive.board()));
 
+  // A card being deleted is gone to every request about it (docs/specs/2026-11-27-delete-a-card.md).
+  r.use("/cards/:id", (req, res, next) => {
+    if (hive.isDeleting(param(req, "id"))) res.status(404).json({ error: "No such card." });
+    else next();
+  });
+  r.delete("/cards/:id", route((req) => hive.deleteCard(param(req, "id"))));
+
   r.post("/projects", route(async (req) => {
     await hive.addProject(body(req).path);
     return hive.board();

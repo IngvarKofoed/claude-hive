@@ -4,6 +4,7 @@ import { laneImplemented, type CardDetail } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
 import { CheckView } from "../components/CheckView";
+import { DeleteCard } from "../components/DeleteCard";
 import { Chat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
@@ -223,7 +224,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
 
 export function Card() {
   const { id } = useParams();
-  const { live, error, reload } = useCardLive(id);
+  const { live, error, reload, gone } = useCardLive(id);
 
   return (
     <>
@@ -249,6 +250,7 @@ export function Card() {
                 ) : (
                   <Badge tone="needs-you">● needs you</Badge>
                 )}
+                <DeleteCard detail={live.detail} gone={gone} />
               </div>
               {live.detail.branch || live.detail.worktreePath ? (
                 <p className={styles.where}>

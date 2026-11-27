@@ -197,6 +197,7 @@ query({
 | Ship | It's on main | Done |
 | any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you |
 | any before Ship | You park it | Ideas. The worktree is removed and the branch kept. |
+| any | You delete it | Gone, after everything it runs is stopped: its worktree and branch are removed and its rows deleted. Refused while it lands on main or moves. |
 
 ## Questions and Permissions
 
@@ -293,6 +294,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | Build starts | Merge the base into `hive/<card>`: a freshly fetched `origin/main`, or local main without a remote (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
 | Ship | One project at a time: Land on main (the approval) → fetch → squash onto the base with `merge-tree` and `commit-tree`, touching no working folder; a conflict goes to Build → the message from the `committer` session, with `Spec:` and `Hive-Card:` lines → switch the worktree to the commit and run the setup's test command → `git push origin <commit>:refs/heads/main`, never forced (squash again if main moved, up to 3 times), or a fast-forward of local main without a remote → update your checkout's main only when it's safe → remove the worktree and branch |
 | Park / Drop | Remove the worktree and keep the branch (Drop deletes it after a while) |
+| Delete | `git worktree remove --force`, or `git worktree prune` when the folder is already gone, then `git branch -D hive/<card>`. A step that fails is reported, and the card is deleted anyway. |
 
 Ship never touches uncommitted work in your checkout. It updates your checkout's main only when main isn't checked out there, or it is and the checkout is clean. Otherwise it tells you, and in a project with no remote it waits.
 
@@ -325,6 +327,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 GET    /api/board                         Projects × lanes with their cards
 POST   /api/cards                         New idea { projectId, text }
 POST   /api/cards/:id/move                Drag { lane }; also park and drop
+DELETE /api/cards/:id                     Delete the card: { left } lists anything git left behind
 GET    /api/cards/:id                     The card with every lane's history
 POST   /api/cards/:id/messages            Chat in the current lane { text }
 POST   /api/cards/:id/comments            Comment { on: spec | mockup, anchor, text }

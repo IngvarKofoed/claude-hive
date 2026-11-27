@@ -12,6 +12,8 @@ import { applyCardEvent, type CardLive } from "./cardState";
  */
 export function useCardLive(id: string | undefined) {
   const [live, setLive] = useState<CardLive | null>(null);
+  /** The card was deleted, here or elsewhere. */
+  const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const liveRef = useRef<CardLive | null>(null);
   const bufferRef = useRef<HiveEvent[] | null>(null);
@@ -42,7 +44,14 @@ export function useCardLive(id: string | undefined) {
     liveRef.current = null;
     setLive(null);
     setError(null);
+    setGone(false);
     const unsubscribe = subscribe((event) => {
+      // Checked before buffering: a delete during a load would otherwise be dropped with the buffer, or replayed onto a
+      // card that no longer exists.
+      if (event.type === "card.deleted" && event.cardId === id) {
+        setGone(true);
+        return;
+      }
       if (bufferRef.current) {
         bufferRef.current.push(event);
         return;
@@ -67,5 +76,5 @@ export function useCardLive(id: string | undefined) {
     };
   }, [id, load]);
 
-  return { live, error, reload: load };
+  return { live, error, reload: load, gone };
 }

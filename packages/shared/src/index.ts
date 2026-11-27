@@ -371,6 +371,11 @@ export interface MoveBody {
   lane: Lane;
 }
 
+/** What deleting a card left behind (DELETE /api/cards/:id): a line for each git step that failed, with git's reason. */
+export interface DeleteResult {
+  left: string[];
+}
+
 /** Land on main (POST /api/cards/:id/land). `discard` throws away the worktree's uncommitted work first. */
 export interface LandBody {
   discard?: boolean;
@@ -421,5 +426,7 @@ export type HiveEvent =
   | { type: "setup.updated"; cardId: string; setup: SetupReport; port: number | null }
   | { type: "app.updated"; cardId: string; apps: AppProcess[]; appStopped: boolean }
   | { type: "pending.updated"; cardId: string; pending: PendingItem | null }
+  /** The card was deleted: everything about it is gone (docs/specs/2026-11-27-delete-a-card.md). */
+  | { type: "card.deleted"; cardId: string }
   | { type: "turn.started"; cardId: string }
   | { type: "turn.ended"; cardId: string };

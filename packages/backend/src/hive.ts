@@ -55,6 +55,9 @@ export interface GitService {
   discardChanges(worktree: string): Promise<void>;
   switchWorktree(worktree: string, target: { commit: string } | { branch: string }): Promise<void>;
   removeCardWorktree(root: string, worktree: string, branch: string): Promise<void>;
+  removeWorktree(root: string, worktree: string): Promise<void>;
+  pruneWorktrees(root: string): Promise<void>;
+  deleteBranch(root: string, branch: string): Promise<void>;
   cardSlug(title: string, id: string): string;
 }
 
@@ -301,6 +304,8 @@ export class Hive {
   private previousSetup = new Map<string, SetupReport>(); // card id → its last finished setup, while it's prepared again
   private portQueue: Promise<unknown> = Promise.resolve(); // port blocks are handed out one card at a time
   private setupStopped = new Set<string>(); // card ids whose setup you stopped in Build before its turn started
+  private deleting = new Set<string>(); // card ids being deleted: late callbacks for them stand down
+  private deletingTurns = new Map<string, Set<string>>(); // card id → its interrupted turns that haven't ended yet
   private readonly ports: PortService;
   private readonly apps: AppRunner;
   private lastSpec = new Map<string, string>(); // card id → the spec.updated last sent, to send only changes
@@ -617,6 +622,115 @@ export class Hive {
     }
   }
 
+  // ---------- deleting a card ----------
+
+  /** A card being deleted counts as gone at the public entry points (the routes ask before calling in). */
+  isDeleting(cardId: string): boolean {
+    return this.deleting.has(cardId);
+  }
+
+  /**
+   * Background work for the card stands down: it's being deleted, or already is. The mark alone isn't enough, since
+   * it lifts when the delete ends while a start awaiting git may still be on its way.
+   */
+  private gone(cardId: string): boolean {
+    return this.deleting.has(cardId) || !this.db.getCard(cardId);
+  }
+
+  /**
+   * Deletes a card for good: everything it runs is stopped, its worktree and branch are removed, and every row and bit
+   * of memory about it goes. Refused only while it lands on main or a move is in flight. A git step that fails is
+   * listed in `left`, and the card is deleted anyway (docs/specs/2026-11-27-delete-a-card.md).
+   */
+  async deleteCard(cardId: string): Promise<{ left: string[] }> {
+    if (this.deleting.has(cardId)) throw new HttpError(404, "No such card.");
+    const card = this.requireCard(cardId); // read once; the steps below work from this row
+    if (this.landingProjects.get(card.projectId) === cardId) throw new HttpError(409, "Wait for the landing to finish.");
+    if (this.moving.has(cardId)) throw new HttpError(409, "This card is moving. Try again in a moment.");
+    const root = this.db.getProject(card.projectId)?.path;
+    const sessions = this.db.sessionsFor(cardId);
+    this.deleting.add(cardId);
+
+    // Every running turn of every session of the card is interrupted, and not waited for: the mark above stays until
+    // the last of them has ended, so even a late one stands down.
+    const interrupted = new Set<string>();
+    for (const session of sessions) {
+      const turn = this.turns.get(session.id);
+      if (!turn) continue;
+      interrupted.add(session.id);
+      this.stopping.add(session.id);
+      void turn.interrupt().catch(() => undefined);
+    }
+    if (interrupted.size) this.deletingTurns.set(cardId, interrupted);
+
+    await this.apps.clear(cardId).catch((error: unknown) => this.log(`Stopping the app of card ${cardId} failed: ${String(error)}`));
+    if (card.port !== null && card.worktreePath) {
+      await this.ports.stopListeners(cardPorts(card.port), card.worktreePath)
+        .catch((error: unknown) => this.log(`Clearing the ports of card ${cardId} failed: ${String(error)}`));
+    }
+    this.watch.unwatch(cardId);
+
+    const left: string[] = [];
+    if (root && card.worktreePath) {
+      try {
+        if (existsSync(card.worktreePath)) await this.deps.git.removeWorktree(root, card.worktreePath);
+        else await this.deps.git.pruneWorktrees(root);
+      } catch (error) {
+        left.push(`The worktree ${card.worktreePath}: ${sentence((error as Error).message)}`);
+      }
+    }
+    if (root && card.branch && (await this.deps.git.hasBranch(root, card.branch).catch(() => false))) {
+      try {
+        await this.deps.git.deleteBranch(root, card.branch);
+      } catch (error) {
+        left.push(`The branch ${card.branch}: ${sentence((error as Error).message)}`);
+      }
+    }
+
+    this.db.deleteCard(cardId);
+    for (const id of [cardId]) {
+      this.reviews.delete(id);
+      this.lastSpec.delete(id);
+      this.moving.delete(id);
+      this.starting.delete(id);
+      this.previousSetup.delete(id);
+      this.setupStopped.delete(id);
+      clearTimeout(this.appTimers.get(id));
+      this.appTimers.delete(id);
+    }
+    for (const session of sessions) {
+      if (interrupted.has(session.id)) continue; // its turn end clears its own
+      this.followUps.delete(session.id);
+      this.withdrawn.delete(session.id);
+      this.stopping.delete(session.id);
+      clearTimeout(this.setupTimers.get(session.id));
+      this.setupTimers.delete(session.id);
+      this.timedOut.delete(session.id);
+    }
+    for (const [itemId] of [...this.waiters]) {
+      if (!this.db.getPending(itemId)) this.waiters.delete(itemId);
+    }
+    if (!this.deletingTurns.has(cardId)) this.deleting.delete(cardId);
+    this.deps.hub.emit({ type: "card.deleted", cardId });
+    return { left };
+  }
+
+  /** An interrupted turn of a deleted card has ended: its bookkeeping goes, and the last one lifts the mark. */
+  private standDown(cardId: string, sessionId: string): void {
+    this.followUps.delete(sessionId);
+    this.withdrawn.delete(sessionId);
+    this.stopping.delete(sessionId);
+    clearTimeout(this.setupTimers.get(sessionId));
+    this.setupTimers.delete(sessionId);
+    this.timedOut.delete(sessionId);
+    const left = this.deletingTurns.get(cardId);
+    left?.delete(sessionId);
+    if (!left || left.size === 0) {
+      this.deletingTurns.delete(cardId);
+      if (!this.db.getCard(cardId)) this.deleting.delete(cardId);
+    }
+  }
+
   // ---------- chat ----------
 
   sendMessage(cardId: string, text: string): void {
@@ -855,6 +969,7 @@ export class Hive {
    * from, and a new setup session (docs/specs/2026-11-27-worktree-setup-and-try-it.md, Setup).
    */
   private async startSetup(cardId: string): Promise<void> {
+    if (this.gone(cardId)) return;
     const card = this.requireCard(cardId);
     if (!card.worktreePath || card.setup?.status === "running") return;
     const project = this.db.getProject(card.projectId)!;
@@ -872,6 +987,7 @@ export class Hive {
         return this.endSetup(cardId, { reason: "No free ports: every block of 10 in 5200–5999 is taken by a card." });
       }
       const local = await this.deps.git.listLocalFiles(project.path);
+      if (this.gone(cardId)) return;
       // What wasn't copied: the candidates first, as the ones worth a look, then the junk. `.claude/` holds the hive's
       // own worktrees and your Claude settings, and is never worth naming.
       const junk = local.junk.filter((j) => j !== ".claude/" && !j.startsWith(".claude/"));
@@ -896,6 +1012,7 @@ export class Hive {
         "End with your report.",
       ].join("\n"), this.turnOptions(SETUP));
     } catch (error) {
+      if (this.gone(cardId)) return;
       this.endSetup(cardId, { reason: sentence((error as Error).message) });
     }
   }
@@ -1038,6 +1155,7 @@ export class Hive {
    * started by hand, or a leftover, can't pass for it (docs/specs/2026-11-27-try-it-runs-the-app.md).
    */
   private async startApp(cardId: string): Promise<void> {
+    if (this.gone(cardId)) return;
     const card = this.requireCard(cardId);
     if (card.lane !== "tryit" || card.setup?.status !== "done" || !card.worktreePath) return;
     const entries = appEntries(card);
@@ -1051,6 +1169,7 @@ export class Hive {
       }
     }
     // It moved on, or you pressed Stop, while the ports were cleared.
+    if (this.gone(cardId)) return;
     const now = this.requireCard(cardId);
     if (now.lane !== "tryit" || now.appStopped) return;
     this.apps.start(cardId, entries, card.worktreePath, (kind) => this.appChanged(cardId, kind));
@@ -1488,6 +1607,7 @@ export class Hive {
    * separate error path for it.
    */
   private async startDeveloper(cardId: string): Promise<void> {
+    if (this.gone(cardId)) return;
     const roleName = LANE_ROLE.build!;
     this.starting.add(cardId);
     this.setState(cardId, "working");
@@ -1528,6 +1648,7 @@ export class Hive {
       const base = await this.deps.git.mainBase(this.db.getProject(card.projectId)!.path);
       if (base.fetchFailed) this.addNote(cardId, "build", `Couldn't fetch origin: ${sentence(base.fetchFailed)} Using the last fetched ${base.ref}.`);
       const merge = await this.deps.git.mergeMain(card.worktreePath!, base.ref);
+      if (this.gone(cardId)) return;
       this.addNote(cardId, "build", mergeNote(merge, base.ref));
       let developer = this.db.getSessionFor(cardId, "build", roleName);
       const again = !!developer?.existsYet;
@@ -1594,10 +1715,10 @@ export class Hive {
             ];
       this.startTurn(cardId, developer.id, withRunning(card, message).join("\n"), this.turnOptions(roleName));
     } catch (error) {
-      this.addError(cardId, "build", `Build couldn't start: ${(error as Error).message}`, ["retry"]);
+      if (!this.gone(cardId)) this.addError(cardId, "build", `Build couldn't start: ${(error as Error).message}`, ["retry"]);
     } finally {
       this.starting.delete(cardId);
-      if (!this.anyTurnRunning(cardId)) {
+      if (!this.gone(cardId) && !this.anyTurnRunning(cardId)) {
         this.setState(cardId, "needs-you");
         this.deps.hub.emit({ type: "turn.ended", cardId });
       }
@@ -1641,10 +1762,13 @@ export class Hive {
       await this.deps.git.commitAll(card.worktreePath!, `Build: ${card.title}`);
       files = await this.deps.git.changedFiles(card.worktreePath!);
     } catch (error) {
+      if (this.gone(cardId)) return;
       const why = sentence((error as Error).message);
       this.addError(cardId, "build", `The build's checkpoint couldn't be committed: ${why} Retry commits it again.`, ["retry"]);
       return;
     }
+    // Deleted while the checkpoint was committed: nothing to move.
+    if (this.gone(cardId)) return;
     this.db.updateCard(cardId, { build: { ...card.build!, files }, lane: laneAfterBuild("done") });
     this.emitCard(cardId);
     await this.stopCardServers(cardId, "build");
@@ -1658,6 +1782,7 @@ export class Hive {
    * for the same round, since a review is a fresh read (docs/specs/2026-11-27-check-lane-reviewer.md, A round).
    */
   private startReviewer(cardId: string): void {
+    if (this.gone(cardId)) return;
     const roleName = LANE_ROLE.check!;
     const card = this.requireCard(cardId);
     const round = (card.check?.round ?? 0) + 1;
@@ -1892,7 +2017,8 @@ export class Hive {
           if (!quiet) this.deps.hub.emit({ type: "chat.delta", cardId, text });
         },
         onTextBlock: (text) => {
-          if (!quiet) this.addChat(cardId, session.lane, AUTHOR[session.role] ?? "hive", text);
+          // An interrupted turn of a card being deleted may still flush a block: there's no card to write it to.
+          if (!quiet && !this.deleting.has(cardId)) this.addChat(cardId, session.lane, AUTHOR[session.role] ?? "hive", text);
         },
         onActivity: (text) => {
           if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
@@ -1921,6 +2047,8 @@ export class Hive {
       }))
       .then(async (outcome) => {
         if (this.turns.get(sessionId) === turn) this.turns.delete(sessionId);
+        // A card being deleted: nothing is written back, only this turn's bookkeeping goes.
+        if (this.deleting.has(cardId)) return this.standDown(cardId, sessionId);
         const stopped = this.stopping.delete(sessionId);
         this.db.updateSession(sessionId, { turnRunning: false });
         this.dropOpenPending(cardId, sessionId);
@@ -1973,6 +2101,8 @@ export class Hive {
     cardId: string, session: SessionRow, toolName: string, input: Record<string, unknown>, signal: AbortSignal,
   ): Promise<ToolDecision> {
     if (toolName.startsWith("mcp__hive__")) return { behavior: "allow", updatedInput: input };
+    // A card being deleted has nobody to ask, and no row to hang a question on.
+    if (this.deleting.has(cardId)) return { behavior: "deny", message: "The card is being deleted.", interrupt: true };
     if (session.role === SPEC_REVIEWER && toolName === "AskUserQuestion") {
       return { behavior: "deny", message: "A blind reviewer has nobody to ask. Put the question in a finding instead." };
     }

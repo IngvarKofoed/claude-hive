@@ -178,6 +178,24 @@ export async function changedFiles(worktree: string): Promise<{ path: string; ad
     });
 }
 
+/** Deleting a card: `git worktree remove --force` (docs/specs/2026-11-27-delete-a-card.md). */
+export async function removeWorktree(root: string, worktree: string): Promise<void> {
+  const r = await git(root, ["worktree", "remove", "--force", worktree]);
+  if (!r.ok) throw new GitError(reason(r.stderr));
+}
+
+/** Forgets worktrees whose folder is already gone, so their branch can be deleted. */
+export async function pruneWorktrees(root: string): Promise<void> {
+  const r = await git(root, ["worktree", "prune"]);
+  if (!r.ok) throw new GitError(reason(r.stderr));
+}
+
+/** `git branch -D`: the card's branch goes, whatever it holds. */
+export async function deleteBranch(root: string, branch: string): Promise<void> {
+  const r = await git(root, ["branch", "-D", branch]);
+  if (!r.ok) throw new GitError(reason(r.stderr));
+}
+
 /** A folder- and branch-safe slug from the title plus the first 6 chars of the id. */
 export function cardSlug(title: string, id: string): string {
   const base = title

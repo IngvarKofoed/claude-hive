@@ -16,6 +16,8 @@ interface Props {
   onDrop: (card: CardSummary, lane: Lane) => void;
   onOpen: (card: CardSummary) => void;
   onAddIdea: (projectId: string, text: string) => Promise<void>;
+  /** A card was deleted from its tile. */
+  onDeleted?: (card: CardSummary) => void;
   onBoard: (board: BoardResponse) => void;
 }
 
@@ -29,6 +31,7 @@ export function ProjectRow({
   onOpen,
   onAddIdea,
   onBoard,
+  onDeleted,
 }: Props) {
   const [idea, setIdea] = useState("");
   const [ideaError, setIdeaError] = useState<string | null>(null);
@@ -95,7 +98,14 @@ export function ProjectRow({
             }}
           >
             {laneCards.map((card) => (
-              <CardTile key={card.id} card={card} onOpen={onOpen} onDragStart={onDragStart} onDragEnd={onDragEnd} />
+              <CardTile
+                key={card.id}
+                card={card}
+                onOpen={onOpen}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onDeleted={onDeleted}
+              />
             ))}
             {lane.id === "ideas" ? (
               <form

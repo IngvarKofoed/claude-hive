@@ -54,6 +54,7 @@ export function Board() {
   useHiveEvents((event) => {
     if (event.type === "project.updated") setProjects((prev) => upsert(prev, event.project));
     else if (event.type === "card.updated") setCards((prev) => upsert(prev, event.card));
+    else if (event.type === "card.deleted") setCards((prev) => prev.filter((card) => card.id !== event.cardId));
   });
 
   // Refetch whatever changed while the stream was down.
@@ -162,6 +163,7 @@ export function Board() {
                 onOpen={(card) => navigate(`/cards/${card.id}`)}
                 onAddIdea={addIdea}
                 onBoard={applyBoard}
+                onDeleted={(card) => setCards((prev) => prev.filter((c) => c.id !== card.id))}
               />
             ))}
           </div>

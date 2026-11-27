@@ -173,6 +173,7 @@ It works down a ladder:
 - **Lanes commit checkpoints freely** on the card's branch. The card shows how far it is behind main, and Build starts by bringing in the latest main.
 - **Parking a card** (back to Ideas) removes the worktree but keeps the branch. Moving the card forward again rebuilds the worktree.
 - **Dropping a card** removes the worktree and keeps the branch for a while.
+- **Deleting a card** is for test cards and dead ideas: it stops everything the card runs, removes its worktree and its branch, and erases the card and its history from the hive. Work that isn't on main is lost, and the page says so before you confirm.
 
 ## Ship
 

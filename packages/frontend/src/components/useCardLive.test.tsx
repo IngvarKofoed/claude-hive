@@ -126,4 +126,14 @@ describe("useCardLive", () => {
     const { result } = renderHook(() => useCardLive("c1"));
     await waitFor(() => expect(result.current.error).toBe("Card not found"));
   });
+
+  it("says when the card was deleted, and ignores other cards' deletes", async () => {
+    vi.spyOn(api, "card").mockResolvedValue(detail);
+    const { result } = renderHook(() => useCardLive("c1"));
+    await waitFor(() => expect(result.current.live).not.toBeNull());
+    act(() => emit({ type: "card.deleted", cardId: "c2" }));
+    expect(result.current.gone).toBe(false);
+    act(() => emit({ type: "card.deleted", cardId: "c1" }));
+    expect(result.current.gone).toBe(true);
+  });
 });

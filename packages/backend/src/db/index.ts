@@ -267,12 +267,30 @@ export class HiveDb {
     this.db.prepare(`UPDATE cards SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
   }
 
+  /**
+   * Deletes a card and every row that belongs to it, in one transaction and children first, since they reference the
+   * card (docs/specs/2026-11-27-delete-a-card.md).
+   */
+  deleteCard(id: string): void {
+    this.transaction(() => {
+      for (const table of ["pending_items", "events", "issues", "decisions", "sessions"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE card_id = ?`).run(id);
+      }
+      this.db.prepare("DELETE FROM cards WHERE id = ?").run(id);
+    });
+  }
+
   // ---------- sessions ----------
 
   insertSession(s: { id: string; cardId: string; lane: Lane; role: string; kind: string }): void {
     this.db
       .prepare("INSERT INTO sessions (id, card_id, lane, role, kind, started_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(s.id, s.cardId, s.lane, s.role, s.kind, now());
+  }
+
+  /** Every session of a card. */
+  sessionsFor(cardId: string): SessionRow[] {
+    return (this.db.prepare("SELECT * FROM sessions WHERE card_id = ?").all(cardId) as any[]).map(toSession);
   }
 
   /** The card's session in a lane with a role (one per card per lane and role), the newest if there are several. */

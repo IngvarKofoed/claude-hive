@@ -10,6 +10,7 @@ import type {
   MessageBody,
   MoveBody,
   NewCardBody,
+  DeleteResult,
 } from "@hive/shared";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -56,6 +57,7 @@ export const api = {
   feedback: (id: string, text: string) =>
     request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/feedback`, { text } satisfies FeedbackBody),
   accept: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/accept`),
+  deleteCard: (id: string) => request<DeleteResult>("DELETE", `/cards/${encodeURIComponent(id)}`),
   backToTryIt: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-tryit`),
   shipPlan: (id: string) => request<ShipPlan>("GET", `/cards/${encodeURIComponent(id)}/ship`),
   land: (id: string, discard?: boolean) =>
