@@ -285,6 +285,34 @@ export interface BoardResponse {
   cards: CardSummary[];
 }
 
+// ---------- For you ----------
+
+/**
+ * What a card waiting for you wants (docs/specs/2026-11-27-for-you.md, What each entry says). `question` and
+ * `permission` are answered on the list; every other kind opens the card. `waiting` is the fallback that shouldn't
+ * happen: a card that waits with nothing to say why.
+ */
+export type ForYouKind =
+  | "question" | "permission" | "stuck" | "your-turn" | "sign-off" | "review-again" | "try-it" | "land" | "waiting";
+
+/** One card waiting for you, as the For you page lists it. */
+export interface ForYouItem {
+  card: CardSummary;
+  projectName: string;
+  /** When the card started waiting for you (ISO time). */
+  since: string;
+  kind: ForYouKind;
+  /** What the card wants, in one line. */
+  text: string;
+  /** The open question or permission, answered on the list. Null for every other kind. */
+  pending: PendingItem | null;
+}
+
+/** GET /api/for-you: every card waiting for you, the one waiting longest first. */
+export interface ForYouResponse {
+  items: ForYouItem[];
+}
+
 // ---------- Card detail ----------
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */

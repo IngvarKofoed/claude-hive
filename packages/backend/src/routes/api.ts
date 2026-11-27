@@ -79,6 +79,7 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
     hive.setupAgain(param(req, "id"));
     return { ok: true };
   }));
+  r.get("/for-you", route(() => hive.forYou()));
   r.post("/for-you/:itemId", route((req) => hive.answer(param(req, "itemId"), body(req) as any)));
 
   r.use((_req, res) => res.status(404).json({ error: "No such endpoint." }));

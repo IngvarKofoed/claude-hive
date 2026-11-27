@@ -96,6 +96,7 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "landing", type: "TEXT" },
   { table: "cards", column: "landed", type: "TEXT" },
   { table: "cards", column: "ship_after_check", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "waiting_since", type: "TEXT" },
 ];
 
 /** A landing under way: stored before the push, so a hive restart can finish it or undo it. */
@@ -148,6 +149,11 @@ export interface CardRow {
   landed: Landed | null;
   /** Ship sent the card back to Build: after Check it returns to Ship, not Try it. */
   shipAfterCheck: boolean;
+  /**
+   * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
+   * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
+   */
+  waitingSince: string;
 }
 
 export interface SessionRow {
@@ -184,7 +190,13 @@ export class HiveDb {
       const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
         (c) => c.name === column,
       );
-      if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      if (has) continue;
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      // Cards already there when the column arrives take their newest history row as the start of their wait.
+      if (column === "waiting_since") {
+        this.db.exec(`UPDATE cards SET waiting_since = COALESCE(
+          (SELECT MAX(at) FROM events WHERE events.card_id = cards.id), created_at)`);
+      }
     }
   }
 
@@ -229,23 +241,28 @@ export class HiveDb {
     return r ? toCard(r) : undefined;
   }
 
-  insertCard(c: CardRow): void {
+  insertCard(c: Omit<CardRow, "waitingSince">): void {
+    const at = now();
     this.db
       .prepare(
         `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
            spec_path, reviewed_spec_hash, review_applying, plan, build, check_round, setup, port, feedback, app_stopped,
-           landing, landed, ship_after_check, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           landing, landed, ship_after_check, waiting_since, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
         c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
         c.check ? JSON.stringify(c.check) : null, c.setup ? JSON.stringify(c.setup) : null, c.port, c.feedback,
         c.appStopped ? 1 : 0, c.landing ? JSON.stringify(c.landing) : null, c.landed ? JSON.stringify(c.landed) : null,
-        c.shipAfterCheck ? 1 : 0, now());
+        c.shipAfterCheck ? 1 : 0, at, at);
   }
 
-  updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId">>): void {
+  /**
+   * Writes the patch. A patch that leaves the card `needs-you` after it was working, or in another lane than before,
+   * also restarts `waiting_since`: every state change goes through here, restart recovery included, so none can miss it.
+   */
+  updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId" | "waitingSince">>): void {
     const cols: Record<string, string> = {
       title: "title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
@@ -264,6 +281,16 @@ export class HiveDb {
       else values.push(value);
     }
     if (sets.length === 0) return;
+    if (patch.state !== undefined || patch.lane !== undefined) {
+      const before = this.db.prepare("SELECT state, lane FROM cards WHERE id = ?").get(id) as
+        { state: CardState; lane: Lane } | undefined;
+      const state = patch.state ?? before?.state;
+      const lane = patch.lane ?? before?.lane;
+      if (before && state === "needs-you" && (before.state !== "needs-you" || before.lane !== lane)) {
+        sets.push("waiting_since = ?");
+        values.push(now());
+      }
+    }
     this.db.prepare(`UPDATE cards SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
   }
 
@@ -432,6 +459,7 @@ function toCard(r: any): CardRow {
     setup: r.setup ? JSON.parse(r.setup) : null, port: r.port ?? null, feedback: r.feedback ?? null,
     appStopped: !!r.app_stopped, landing: r.landing ? JSON.parse(r.landing) : null,
     landed: r.landed ? JSON.parse(r.landed) : null, shipAfterCheck: !!r.ship_after_check,
+    waitingSince: r.waiting_since ?? r.created_at,
   };
 }
 

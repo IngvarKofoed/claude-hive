@@ -61,6 +61,12 @@ describe("the API's local-only guard", () => {
     expect(r.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
+  it("serves For you", async () => {
+    const r = await send("GET", "/api/for-you", { host: `127.0.0.1:${port}` });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ items: [] });
+  });
+
   it("refuses a foreign Host, as DNS rebinding would send", async () => {
     const r = await send("GET", "/api/board", { host: `evil.example:${port}` });
     expect(r.status).toBe(403);

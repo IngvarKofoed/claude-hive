@@ -8,12 +8,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
-  FeedbackBody, FileChange, Landed, LandBody, Lane, PendingItem, Plan, Question, SetupReport, ShipPlan, SpecInfo,
+  FeedbackBody, FileChange, ForYouItem, ForYouResponse, Landed, LandBody, Lane, PendingItem, Plan, Question,
+  SetupReport, ShipPlan, SpecInfo,
 } from "@hive/shared";
 import { CARD_PORTS } from "@hive/shared";
 import {
   CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterLanding, laneAfterPlan,
 } from "./board/moves";
+import { waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import type { Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome } from "./sessions/types";
@@ -411,15 +413,44 @@ export class Hive {
   createCard(projectId: string, text: string): CardSummary {
     if (!this.db.getProject(projectId)) throw new HttpError(404, "No such project.");
     if (typeof text !== "string" || !text.trim()) throw new HttpError(400, "Type an idea first.");
-    const card: CardRow = {
-      id: randomUUID(), projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
+    const id = randomUUID();
+    this.db.insertCard({
+      id, projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
       state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
       specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
       setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null, shipAfterCheck: false,
-    };
-    this.db.insertCard(card);
-    this.emitCard(card.id);
-    return cardSummary(card);
+    });
+    this.emitCard(id);
+    return cardSummary(this.requireCard(id));
+  }
+
+  /**
+   * Every card waiting for you, the one waiting longest first, each with what it wants
+   * (docs/specs/2026-11-27-for-you.md). A card being deleted is already gone.
+   */
+  forYou(): ForYouResponse {
+    const projects = new Map(this.db.listProjects().map((p) => [p.id, p.name]));
+    const items = this.db
+      .listCards()
+      .filter((card) => waitsForYou(card) && !this.deleting.has(card.id))
+      .map((card): ForYouItem => {
+        const pending = this.db.openPendingFor(card.id)?.item ?? null;
+        const review = card.lane === "spec" && card.specPath ? (this.refreshSpec(card.id)?.review ?? null) : null;
+        const { kind, text } = whatItWants({
+          lane: card.lane, pending, lastChat: this.db.lastChatItem(card.id, card.lane), review,
+        });
+        return {
+          card: cardSummary(card),
+          projectName: projects.get(card.projectId) ?? "",
+          since: card.waitingSince,
+          kind,
+          text,
+          pending: kind === "question" || kind === "permission" ? pending : null,
+        };
+      });
+    // listCards is oldest card first, and the sort is stable, so equal times keep that order.
+    items.sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : 0));
+    return { items };
   }
 
   async moveCard(id: string, lane: Lane): Promise<CardSummary> {
@@ -1283,6 +1314,8 @@ export class Hive {
     if (!to) throw new HttpError(409, "Only a card in Ship can go back to Try it.");
     if (this.landingProjects.get(card.projectId) === cardId) throw new HttpError(409, "The card is landing.");
     return this.oneMoveAtATime(cardId, async () => {
+      // A line in Ship's chat, so a failed landing's error isn't what the card reads as when it comes back.
+      this.addNote(cardId, "ship", "Back to Try it.");
       this.db.updateCard(cardId, { lane: to, shipAfterCheck: false });
       this.emitCard(cardId);
       void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));

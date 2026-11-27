@@ -5,6 +5,7 @@ import type {
   BoardResponse,
   CardDetail,
   CardSummary,
+  ForYouResponse,
   FeedbackBody,
   ShipPlan,
   MessageBody,
@@ -35,6 +36,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   board: () => request<BoardResponse>("GET", "/board"),
+  forYou: () => request<ForYouResponse>("GET", "/for-you"),
   // Both return the whole board, with the project as it now stands.
   addProject: (body: AddProjectBody) => request<BoardResponse>("POST", "/projects", body),
   checkProject: (id: string) => request<BoardResponse>("POST", `/projects/${encodeURIComponent(id)}/check`),

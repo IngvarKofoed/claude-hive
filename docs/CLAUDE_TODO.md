@@ -16,3 +16,6 @@ is not a record of anything; `docs/changelog/` is. A line you add here is read a
   port per version for comparing side by side, since only the card has a port. Surfaced by a design review of the docs.
 - **The `git init` first commit takes everything in the folder** — secrets or build output a `.gitignore` would
   keep out end up committed. Surfaced by `2026-11-26-projects-always-git`.
+- **Ship's Approve item isn't built** — the docs make the push at Ship an Approve item (`PendingItem` kind `approve`),
+  which For you would list. The code's Land on main button on the card page stands in for it, so For you lists a Ship
+  card by its lane and opens the card. Surfaced by `2026-11-27-for-you`.
