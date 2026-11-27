@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router";
 import { laneImplemented, type CardDetail } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
+import { CheckView } from "../components/CheckView";
 import { Chat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
@@ -32,6 +33,15 @@ function PlanPanel({ detail }: { detail: CardDetail }) {
   );
 }
 
+function BuildPanel({ detail }: { detail: CardDetail }) {
+  if (!detail.build && detail.issues.length === 0 && detail.decisions.length === 0) return null;
+  return (
+    <Panel title="Build">
+      <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+    </Panel>
+  );
+}
+
 function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
@@ -49,11 +59,12 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
           ) : null}
           {/* The newest work first: the build report sits above the plan, beside the spec, not under it. */}
           <div className={styles.stack}>
-            {detail.build || detail.issues.length > 0 || detail.decisions.length > 0 ? (
-              <Panel title="Build">
-                <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+            {detail.check ? (
+              <Panel title="Check">
+                <CheckView check={detail.check} />
               </Panel>
             ) : null}
+            <BuildPanel detail={detail} />
             {detail.plan ? <PlanPanel detail={detail} /> : null}
           </div>
         </div>
@@ -100,8 +111,31 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
         <Panel title="Developer" className={styles.chatPanel}>
           <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
-        <div className={styles.sidePanel}>
+        <div className={`${styles.sidePanel} ${styles.stack}`}>
+          {detail.check && detail.check.bugs.length > 0 ? (
+            <Panel title="Check found">
+              <CheckView check={detail.check} />
+            </Panel>
+          ) : null}
           <PlanPanel detail={detail} />
+        </div>
+      </div>
+    );
+  }
+
+  if (detail.lane === "check") {
+    return (
+      <div className={styles.columns}>
+        <Panel title="Reviewer" className={styles.chatPanel}>
+          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+        </Panel>
+        <div className={`${styles.sidePanel} ${styles.stack}`}>
+          {detail.check ? (
+            <Panel title="Check">
+              <CheckView check={detail.check} />
+            </Panel>
+          ) : null}
+          <BuildPanel detail={detail} />
         </div>
       </div>
     );

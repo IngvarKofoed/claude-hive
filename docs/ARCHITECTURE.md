@@ -49,7 +49,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 | **Question router** | Questions in the chat lanes go straight to the page. Questions in hands-off lanes go to the manager ladder. |
 | **Spec keeper** | Judges each batch of spec issues as a new turn in the spec writer's session, which carries on after sign-off. |
 | **Review gate** | Runs the blind spec review and tracks the spec's hash, so sign-off is only possible on reviewed text. |
-| **Git service** | Worktrees, setup, checkpoints, bringing in main, the fake-data marker check, and Ship. |
+| **Git service** | Worktrees, setup, checkpoints, bringing in main, and Ship. |
 | **Preview service** | Gives each card's app its own port, starts and stops it, and takes screenshots for the mockup reference and the tester. |
 | **History** | Every event on every card, each lane's changes, and the archive at Done. |
 
@@ -71,7 +71,7 @@ claude-hive/
 │   │       ├── sessions/      # Session runner, role loading, canUseTool
 │   │       ├── questions/     # Question router and manager ladder
 │   │       ├── spec/          # Spec keeper, review gate, spec-format loading
-│   │       ├── git/           # Worktrees, setup, checkpoints, marker check, ship
+│   │       ├── git/           # Worktrees, setup, checkpoints, ship
 │   │       ├── preview/       # Ports, running apps, screenshots
 │   │       ├── history/       # Event log, lane diffs, archive
 │   │       └── db/            # SQLite schema and queries
@@ -105,11 +105,11 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | Role | Lane | Model | May change (told in its instructions) | Session kind |
 | --- | --- | --- | --- | --- |
 | `product-owner` | Refine | Opus | Nothing in the repo; writes the card's brief | Conversation |
-| `designer` | Mockup | Opus | Code, in the card's worktree | Conversation |
+| `designer` | Mockup | Opus | Code, in the card's worktree, if its mockup needs it | Conversation |
 | `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
 | `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
 | `developer` | Build | Opus, as the lead; each chunk on its own model through subagents | Code, in the card's worktree | Work |
-| `reviewer` | Check | Strongest | Nothing | Work, new for each round |
+| `reviewer` | Check | Opus | Nothing | Work, new for each round |
 | `tester` | Check | Sonnet | Nothing; runs the app and takes screenshots | Work, new for each round |
 | `manager` | any hands-off lane | Sonnet | Nothing; uses the hive's lookup tools | One-off, one for each question |
 | `spec-reviewer` | Spec | Fable | Nothing; reads only the spec file and `review.md` | One-off, blind |
@@ -155,7 +155,7 @@ query({
 - **planner:** the steps, the chunks with the files each owns, the tests, and how each step is checked. The report is the plan: it's stored on the card, with no hive tool and no file in the repo;
 - **spec reviewer:** findings, each a `decision` or a `fix`, with where, what's at stake, and the options;
 - **developer:** what was built, departures from the plan, issues, and decisions made without you;
-- **reviewer:** findings, each marked `bug`, `spec-gap` or `extra`;
+- **reviewer:** bugs, each with where in the code and what's wrong, which fail the round; and spec issues, in the developer's shape;
 - **tester:** each How-to-verify bullet marked `pass`, `fail` or `cant-verify`, with evidence;
 - **spec keeper:** for each issue, a verdict (`spec-wrong` or `code-wrong`), a level (`minor`, `changes-signoff` or `severe`) and a reason;
 - **manager:** the ladder step, the answer or recommendation, and its source.
@@ -170,15 +170,18 @@ query({
 | Ideas | You drag the card | Refine, and the worktree is created |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
-| Plan | The planner's report is `done` | Build. Its plan is stored on the card, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. |
+| Plan | The planner's report is `done` | Build. Its plan is stored on the card, Check's rounds start over, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. |
 | Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
 | Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
-| Build | The developer's report is `done` | Check, with the issues found so far still on the card. The report is stored first, then the hive commits a checkpoint. |
+| Build | The developer's report is `done` | Check, with the issues found so far still on the card. The report is stored first, then the hive commits a checkpoint, and a new reviewer starts the next round. |
 | Build | The report is `blocked` or missing, or `done` while a merge of main is unfinished | Stays in Build, with the reason, Retry and **Back to Spec** (until the spec keeper judges blocking issues) |
 | Build | You press **Back to Spec** on a blocked build | Spec, after aborting an unfinished merge and committing the partial work. The developer's reason goes to the spec writer; after a new sign-off the planner re-plans and the same developer carries on. |
 | Build | A blocking issue judged `code-wrong` | Plan, for an amendment plan |
-| Check | The reviewer finds a bug, the tester finds a failure, or the marker is still there | Build, counting one round. Spec issues wait on the card for the round that passes. |
-| Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. |
+| Check | The reviewer finds a bug in round 1, or the tester finds a failure | Build, counting one round. The hive merges main again and resumes the same developer with the bugs. Spec issues wait on the card for the round that passes. |
+| Check | Round 2 or later still finds bugs | Stays in Check, with **Back to Build** (one more round) and **Move on** (to Try it as built), until ■ stopped exists |
+| Check | The reviewer's report is `blocked` or missing | Stays in Check, with Retry (a new reviewer for the same round) and **Move on** |
+| Check | You press **Back to Build** or **Move on** | Build, with the last round's bugs, or Try it |
+| Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. Until the spec keeper exists, a round without bugs goes straight to Try it, with its issues unjudged. |
 | Check | Everything passes, but the batch has a `code-wrong` verdict | Plan, for one amendment plan covering every `code-wrong` issue |
 | Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. |
 | Try it | You answer a `changes-signoff` question with "change the code" | Plan, for an amendment plan |
@@ -193,7 +196,7 @@ query({
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
-- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's and the developer's questions come straight to you on the card page, like a chat lane's.
+- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -279,10 +282,9 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the project's setup: copy the listed local files, run the install command |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
-| Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. |
+| Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. Check, which changes nothing, makes none. |
 | Build starts | Merge the local main into `hive/<card>` (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
-| Check | Search the branch for the `HIVE-MOCK` marker. Any hit fails the check. |
-| Ship | One project at a time: squash onto the latest main in the card's worktree (message from the card, `Hive-Card:` trailer) → run the project's test command and the marker search → Approve → push to main (squash again if main moved) → update your checkout's main only when it's safe → remove the worktree and branch |
+| Ship | One project at a time: squash onto the latest main in the card's worktree (message from the card, `Hive-Card:` trailer) → run the project's test command → Approve → push to main (squash again if main moved) → update your checkout's main only when it's safe → remove the worktree and branch |
 | Park / Drop | Remove the worktree and keep the branch (Drop deletes it after a while) |
 
 Ship never touches uncommitted work in your checkout. It updates your checkout's main only when main isn't checked out there, or it is and the checkout is clean. Otherwise it tells you, and in a project with no remote it waits.
@@ -299,7 +301,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning, runCommand, setupCommand, testCommand, localFiles, laneLimits |
-| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build) |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
@@ -322,7 +324,9 @@ POST   /api/cards/:id/comments            Comment { on: spec | mockup, anchor, t
 POST   /api/cards/:id/good                Leave Refine or Mockup
 POST   /api/cards/:id/review              Start the blind review of the spec
 POST   /api/cards/:id/signoff             Leave Spec (refused unless the review is fresh)
-POST   /api/cards/:id/back-to-spec        Send a blocked plan back to Spec
+POST   /api/cards/:id/back-to-spec        Send a blocked plan or build back to Spec
+POST   /api/cards/:id/back-to-build       One more Check round for a card Check stopped
+POST   /api/cards/:id/move-on             Move a card Check stopped, or couldn't review, on to Try it
 POST   /api/cards/:id/versions/:v/pick    Pick a mockup version
 POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
 POST   /api/cards/:id/stop                Stop the running turn

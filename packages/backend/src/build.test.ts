@@ -242,7 +242,9 @@ describe("Build lane", () => {
       const turns = runner.turns.length;
       hive.retry(id);
       await waitFor(() => hive.card(id).lane === "check");
-      expect(runner.turns.length).toBe(turns);
+      // The only new turn is Check's reviewer: the developer didn't run again.
+      expect(runner.turns.length).toBe(turns + 1);
+      expect(runner.last.request.role.name).toBe("reviewer");
       expect(hive.card(id).build!.files).toContainEqual({ path: "fonts.ts", added: 1, removed: 0 });
       expect(hive.card(id).issues).toHaveLength(1);
     });
@@ -306,7 +308,7 @@ describe("Build lane", () => {
       const restarted = newHive();
       restarted.recoverAfterRestart();
       expect(runner.turns.length).toBe(before + 1);
-      expect(runner.last.request.message).toMatch(/Carry on building to the plan/);
+      expect(runner.last.request.message).toMatch(/Carry on with what you were doing, then end with your report/);
       expect(runner.last.request.resume).toBe(true);
       restarted.close();
     });

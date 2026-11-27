@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
-  Brief, BuildReport, CardState, ChatItem, Decision, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Brief, BuildReport, CardState, ChatItem, CheckRound, Decision, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -88,6 +88,7 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "review_applying", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "plan", type: "TEXT" },
   { table: "cards", column: "build", type: "TEXT" },
+  { table: "cards", column: "check_round", type: "TEXT" },
 ];
 
 export interface ProjectRow {
@@ -117,6 +118,8 @@ export interface CardRow {
   plan: Plan | null;
   /** The developer's last `done` report. */
   build: BuildReport | null;
+  /** Check's last finished round since the last plan. */
+  check: CheckRound | null;
 }
 
 export interface SessionRow {
@@ -202,13 +205,13 @@ export class HiveDb {
     this.db
       .prepare(
         `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
-           spec_path, reviewed_spec_hash, review_applying, plan, build, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           spec_path, reviewed_spec_hash, review_applying, plan, build, check_round, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
         c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
-        now());
+        c.check ? JSON.stringify(c.check) : null, now());
   }
 
   updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId">>): void {
@@ -216,6 +219,7 @@ export class HiveDb {
       title: "title", ideaText: "idea_text", lane: "lane", state: "state", branch: "branch",
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
       reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
+      check: "check_round",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -223,7 +227,7 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (key === "brief" || key === "plan" || key === "build") values.push(value ? JSON.stringify(value) : null);
+      if (key === "brief" || key === "plan" || key === "build" || key === "check") values.push(value ? JSON.stringify(value) : null);
       else if (key === "reviewApplying") values.push(value ? 1 : 0);
       else values.push(value);
     }
@@ -374,7 +378,7 @@ function toCard(r: any): CardRow {
     branch: r.branch, worktreePath: r.worktree_path, brief: r.brief ? JSON.parse(r.brief) : null,
     moveError: r.move_error, specPath: r.spec_path ?? null, reviewedSpecHash: r.reviewed_spec_hash ?? null,
     reviewApplying: !!r.review_applying, plan: r.plan ? JSON.parse(r.plan) : null,
-    build: r.build ? JSON.parse(r.build) : null,
+    build: r.build ? JSON.parse(r.build) : null, check: r.check_round ? JSON.parse(r.check_round) : null,
   };
 }
 

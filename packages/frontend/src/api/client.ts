@@ -48,6 +48,8 @@ export const api = {
   review: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/review`),
   signoff: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/signoff`),
   backToSpec: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-spec`),
+  backToBuild: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-build`),
+  moveOn: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/move-on`),
   answer: (itemId: string, body: AnswerBody) =>
     request<unknown>("POST", `/for-you/${encodeURIComponent(itemId)}`, body),
 };

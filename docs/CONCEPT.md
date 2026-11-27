@@ -24,11 +24,11 @@ Lanes are the columns, and projects are the rows (swimlanes). Each lane has a li
 | --- | --- | --- | --- |
 | **Ideas** | you | You type an idea. Two sentences is enough. | You drag it to Refine. |
 | **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**. |
-| **Mockup** | you ⇄ designer | A clickable mockup built in the real app, with fake data. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
+| **Mockup** | you ⇄ designer | A clickable mockup, made however the designer thinks best. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
 | **Plan** | planner | The build plan the spec deliberately leaves out: the steps in order, which chunk each agent owns, the tests, and how each step is checked. | The plan is written. |
-| **Build** | developer | Brings in the latest main first, then builds to the plan. One developer per card, which hands chunks to its own subagents when the spec's Implementation strategy calls for several agents. Replaces the mockup's fake data with the real thing. | It's built. |
-| **Check** | reviewer, tester | Read-only. They review the whole branch against main and compare the code with the spec (missing, different, extra). They run the spec's How-to-verify checks and compare the screens with the approved mockup. Check fails if any fake data is left. | Everything passes. |
+| **Build** | developer | Brings in the latest main first, then builds to the plan. One developer per card, which hands chunks to its own subagents when the spec's Implementation strategy calls for several agents. | It's built. |
+| **Check** | reviewer, tester | Read-only. They review the whole branch against main and compare the code with the spec (missing, different, extra). They run the spec's How-to-verify checks and compare the screens with the approved mockup. | Everything passes. |
 | **Try it** | you | You test by hand, with the app already running and a test guide ready. | You accept, or give feedback. |
 | **Ship** | the hive | Lands the card on main as one commit. | It's on main. |
 | **Done** | | The card's full story, kept so you can look back. | |
@@ -110,13 +110,10 @@ What the hive knows about how you want things. Each project has one, plus one sh
 - **You can write rules yourself, both ways:** rules that decide (*"use the existing button styles"*) and rules that make the hive ask (*"always ask before adding a library"*).
 - **Every session reads its project's rulebook first.**
 
-## The Mockup Becomes the Build
+## Mockups
 
-- **The designer writes real code** in the app's own components and conventions. Its code stays and becomes the start of the build.
-- **Fake data is marked** with a marker such as `HIVE-MOCK`. Build replaces it. Check searches for the marker and sends the card back if one is left.
-- **Check reviews the whole branch against main,** because the mockup code is never reviewed on its own.
+- **How a mockup is made is the designer's call:** in the app itself, or as a page of its own. The hive adds nothing of its own to it.
 - **The approved mockup is the visual reference.** The tester compares the finished screens with it.
-- **The spec can point at mockup code** in its Key decisions, e.g. *"(reuses) the PrinterSettings panel built in the mockup"*.
 
 ## Spec Issues During the Build
 
@@ -182,7 +179,7 @@ It works down a ladder:
 Clean history: one commit per card, no merge commits, no branches left behind.
 
 1. Squash the card into one commit on top of the latest main, in the card's worktree and the repo's commit style. The message has the card's title, a line or two from the spec's "What you get", the spec's path, and a `Hive-Card:` trailer that links back to the card.
-2. Re-run the checks: the project's test command and the search for fake data.
+2. Re-run the checks: the project's test command.
 3. **Approve:** *"Land printer font size on main and push?"* A rule can turn this step off for a project.
 4. Push that commit to main. If main has moved since step 1, start again from step 1.
 5. Bring your checkout's main up to date, when that's safe.

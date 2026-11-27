@@ -21,6 +21,7 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     spec: { path: "docs/specs/x.md", text, review },
     plan: null,
     build: null,
+    check: null,
     issues: [],
     decisions: [],
     chat: [],

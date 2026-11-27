@@ -22,6 +22,7 @@ const detail: CardDetail = {
   spec: null,
   plan: null,
   build: null,
+  check: null,
   issues: [],
   decisions: [],
   chat: [],
@@ -76,6 +77,15 @@ describe("applyCardEvent", () => {
     expect(s.detail.plan).toEqual(plan);
     expect(applyCardEvent(start, { type: "spec.updated", cardId: "other", spec })).toBe(start);
     expect(applyCardEvent(start, { type: "plan.updated", cardId: "other", plan })).toBe(start);
+  });
+
+  it("takes a finished Check round and its issues from check.updated", () => {
+    const check = { round: 2, summary: "Still off by one", bugs: [{ where: "a.ts:3", problem: "floor, not round" }] };
+    const issues = [{ id: "i1", foundIn: "check" as const, where: "Outcome", problem: "silent", guess: "kept it" }];
+    const s = applyCardEvent(start, { type: "check.updated", cardId: "c1", check, issues });
+    expect(s.detail.check).toEqual(check);
+    expect(s.detail.issues).toEqual(issues);
+    expect(applyCardEvent(start, { type: "check.updated", cardId: "other", check, issues })).toBe(start);
   });
 
   it("takes a lane change from card.updated", () => {
@@ -142,23 +152,36 @@ describe("Chat", () => {
     const retry = vi.spyOn(api, "retry").mockResolvedValue(undefined);
     const review = vi.spyOn(api, "review").mockResolvedValue({ ok: true });
     const back = vi.spyOn(api, "backToSpec").mockResolvedValue({} as never);
+    const backBuild = vi.spyOn(api, "backToBuild").mockResolvedValue({} as never);
+    const moveOn = vi.spyOn(api, "moveOn").mockResolvedValue({} as never);
     const withError: CardDetail = {
       ...detail,
       turnRunning: false,
       chat: [
-        { kind: "error", id: "e1", at: "t", message: "Blocked", actions: ["retry", "review", "back-to-spec"] },
+        { kind: "error", id: "e1", at: "t", message: "Blocked", actions: ["retry", "review", "back-to-spec", "back-to-build", "move-on"] },
         { kind: "error", id: "e2", at: "t", message: "Plain", actions: [] },
       ],
     };
     render(<Chat detail={withError} streaming="" activity={null} />);
-    expect(screen.getAllByRole("button", { name: /Retry|Review again|Back to Spec/ })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: /Retry|Review again|Back to Spec|Back to Build|Move on/ })).toHaveLength(5);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.click(screen.getByRole("button", { name: "Review again" }));
     await userEvent.click(screen.getByRole("button", { name: "Back to Spec" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back to Build" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move on" }));
+    expect(backBuild).toHaveBeenCalledWith("c1");
+    expect(moveOn).toHaveBeenCalledWith("c1");
     expect(retry).toHaveBeenCalledWith("c1");
     expect(review).toHaveBeenCalledWith("c1");
     expect(back).toHaveBeenCalledWith("c1");
     vi.restoreAllMocks();
+  });
+
+  it("has no reply box in Check, and labels the reviewer", () => {
+    const chat: CardDetail["chat"] = [{ kind: "message", id: "1", at: "t", from: "reviewer", text: "Found one bug" }];
+    render(<Chat detail={{ ...detail, lane: "check", turnRunning: false, chat }} streaming="" activity={null} />);
+    expect(screen.queryByLabelText("Your reply")).toBeNull();
+    expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
   it("labels each author and shows hive notes as a quiet line", () => {

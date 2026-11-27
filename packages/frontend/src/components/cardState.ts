@@ -38,6 +38,10 @@ export function applyCardEvent(state: CardLive, event: HiveEvent): CardLive {
     case "plan.updated":
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, plan: event.plan } };
+    case "check.updated":
+      // A round that stops the card in Check doesn't change its lane, so nothing else refetches it.
+      if (event.cardId !== id) return state;
+      return { ...state, detail: { ...state.detail, check: event.check, issues: event.issues } };
     case "pending.updated":
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, pending: event.pending } };

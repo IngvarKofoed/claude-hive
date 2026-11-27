@@ -33,6 +33,7 @@ const detail: CardDetail = {
   spec: null,
   plan: null,
   build: null,
+  check: null,
   issues: [],
   decisions: [],
   chat: [{ kind: "message", id: "m1", at: "t", from: "you", text: "first" }],

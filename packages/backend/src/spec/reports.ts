@@ -1,6 +1,6 @@
-// The fixed-format reports of the spec reviewer, the planner and the developer. Each is checked against its JSON schema by the SDK
+// The fixed-format reports of the spec reviewer, the planner, the developer and Check's reviewer. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
-import type { Departure, Plan } from "@hive/shared";
+import type { Bug, Departure, Plan } from "@hive/shared";
 
 const blockable = {
   status: { type: "string", enum: ["done", "blocked"] },
@@ -104,6 +104,26 @@ export const DEVELOPER_SCHEMA = {
   },
 } as const;
 
+/** Check's reviewer's report (docs/specs/2026-11-27-check-lane-reviewer.md, Key decisions: the reviewer's report). */
+export const CHECK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "summary", "bugs", "issues"],
+  properties: {
+    ...blockable,
+    summary: { type: "string", description: "What you checked and what you found, in a few sentences" },
+    bugs: objects(["where", "problem"], {
+      where: "Where in the code, as file:line",
+      problem: "What's wrong: the code doesn't do what the spec clearly says, or it's broken",
+    }),
+    issues: objects(["where", "problem", "guess"], {
+      where: "The spec's section",
+      problem: "The spec is silent, unclear or contradicts itself, doesn't fit the code, or the code does more than it asks",
+      guess: "What the code does",
+    }),
+  },
+} as const;
+
 export interface Finding {
   kind: "decision" | "fix";
   category: string;
@@ -114,6 +134,10 @@ export interface Finding {
 
 export type ReviewReport =
   | { status: "done"; summary: string; findings: Finding[] }
+  | { status: "blocked"; reason: string };
+
+export type CheckReport =
+  | { status: "done"; summary: string; bugs: Bug[]; issues: ReportedIssue[] }
   | { status: "blocked"; reason: string };
 
 export type PlanReport = { status: "done"; plan: Plan } | { status: "blocked"; reason: string };
@@ -207,6 +231,20 @@ export function parseDeveloperReport(raw: unknown): DeveloperReport | null {
     departures: raw.departures.map(({ step, what, why }) => ({ step, what, why })),
     issues: raw.issues.map(({ where, problem, guess }) => ({ where, problem, guess })),
     decisions: raw.decisions.map(({ what, alternative }) => ({ what, alternative })),
+  };
+}
+
+/** Check's reviewer's report, or null when there is none or it doesn't have the expected shape. */
+export function parseCheckReport(raw: unknown): CheckReport | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done" || typeof raw.summary !== "string") return null;
+  if (!allStrings(raw.bugs, ["where", "problem"]) || !allStrings(raw.issues, ["where", "problem", "guess"])) return null;
+  return {
+    status: "done",
+    summary: raw.summary,
+    bugs: raw.bugs.map(({ where, problem }) => ({ where, problem })),
+    issues: raw.issues.map(({ where, problem, guess }) => ({ where, problem, guess })),
   };
 }
 

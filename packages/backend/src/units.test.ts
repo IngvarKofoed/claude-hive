@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canMove, laneAfter, laneAfterBuild, laneAfterPlan } from "./board/moves";
+import { CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterPlan } from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
 import { describeTool, InputQueue } from "./sessions/sdkRunner";
 
@@ -37,6 +37,33 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
 
   it("Build → Spec on Back to Spec, until the spec keeper exists", () => {
     expect(laneAfter("build", "back-to-spec")).toBe("spec");
+  });
+
+  it("Check → Try it when the reviewer's report is done with no bugs", () => {
+    expect(laneAfterCheck("done", 0, 1)).toBe("tryit");
+    expect(laneAfterCheck("done", 0, 5)).toBe("tryit");
+  });
+
+  it("Check → Build when round 1 finds bugs", () => {
+    expect(CHECK_ROUNDS).toBe(2);
+    expect(laneAfterCheck("done", 3, 1)).toBe("build");
+  });
+
+  it("stays in Check when round 2 or later still finds bugs (the round limit)", () => {
+    expect(laneAfterCheck("done", 1, 2)).toBe("check");
+    expect(laneAfterCheck("done", 1, 3)).toBe("check");
+  });
+
+  it("stays in Check when the reviewer's report is blocked or missing", () => {
+    expect(laneAfterCheck("blocked", 0, 1)).toBe("check");
+    expect(laneAfterCheck("missing", 0, 1)).toBe("check");
+  });
+
+  it("Check → Build on Back to Build, and Check → Try it on Move on", () => {
+    expect(laneAfter("check", "back-to-build")).toBe("build");
+    expect(laneAfter("check", "move-on")).toBe("tryit");
+    expect(laneAfter("build", "back-to-build")).toBeNull();
+    expect(laneAfter("build", "move-on")).toBeNull();
   });
 
   it("allows dragging only Ideas → Refine", () => {

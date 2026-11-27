@@ -307,10 +307,12 @@ describe("Spec and Plan lanes", () => {
       hive.review(s.id);
       await reviewer().end(report([]));
       await hive.signoff(s.id);
+      runner.last.handlers.onSessionCreated();
       const before = runner.turns.length;
       const restarted = newHive();
       restarted.recoverAfterRestart();
       expect(runner.turns.length).toBe(before + 1);
+      expect(runner.last.request.resume).toBe(true);
       expect(runner.last.request.message).toMatch(/cut off when the hive stopped/);
       restarted.close();
     });

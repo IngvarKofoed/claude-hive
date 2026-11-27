@@ -28,6 +28,8 @@ touch main or any other branch.
   the report with a guess.
 - **Leftovers:** everything left in the worktree is committed when you report, so leave nothing you don't mean to
   keep. You may commit as you go.
-- **Fake data:** replace any fake data marked `HIVE-MOCK` with the real thing, and add none.
-- **Your report** covers everything since your last `done` report: a blocked turn, a retried one and a resumed one
-  are all the same piece of work.
+- **Your report:** each `done` report replaces the card's build report, so its `summary` and `departures` describe
+  the whole build as it stands now. Its `issues` and `decisions` list only what's new since your last `done` report:
+  a blocked turn, a retried one and a resumed one are all the same piece of work.
+- **Bugs from Check:** fix the bugs Check sends you. If you think one isn't a bug, leave the code as it is, and end
+  your summary with the bugs you left and why. The next round's reviewer reads it.

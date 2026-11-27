@@ -41,7 +41,7 @@ export const LANES: readonly LaneInfo[] = [
   { id: "spec", name: "Spec", who: "spec writer, then you", limit: 2, withYou: true, implemented: true },
   { id: "plan", name: "Plan", who: "planner", limit: 2, withYou: false, implemented: true },
   { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: true },
-  { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: false },
+  { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: true },
   { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: false },
   { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: false },
   { id: "done", name: "Done", who: "", limit: null, withYou: false, implemented: false },
@@ -153,6 +153,26 @@ export interface Decision {
   source: string;
 }
 
+// ---------- Check ----------
+
+/** A bug Check's reviewer found: code that doesn't do what the spec clearly says, or is broken. */
+export interface Bug {
+  /** Where in the code, as `file:line`. */
+  where: string;
+  problem: string;
+}
+
+/**
+ * The last finished Check round, as the board keeps it on the card (docs/specs/2026-11-27-check-lane-reviewer.md).
+ * Bugs fail the round; no bugs moves the card on to Try it.
+ */
+export interface CheckRound {
+  /** 1 for the first round since the last plan. */
+  round: number;
+  summary: string;
+  bugs: Bug[];
+}
+
 // ---------- Board ----------
 
 /** working: a turn is running. needs-you: it's your turn, or a question waits. */
@@ -184,13 +204,13 @@ export interface BoardResponse {
 // ---------- Card detail ----------
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
-export type ChatAuthor = "you" | "product-owner" | "spec-writer" | "planner" | "developer" | "hive";
+export type ChatAuthor = "you" | "product-owner" | "spec-writer" | "planner" | "developer" | "reviewer" | "hive";
 
 /**
- * What an error line offers: retry the failed turn, run the review again, or send a blocked plan or build back to
- * Spec.
+ * What an error line offers: retry the failed turn, run the review again, send a blocked plan or build back to Spec,
+ * or, for a card that Check stopped, send it back to Build for one more round or move it on to Try it.
  */
-export type ErrorAction = "retry" | "review" | "back-to-spec";
+export type ErrorAction = "retry" | "review" | "back-to-spec" | "back-to-build" | "move-on";
 
 export type ChatItem =
   | { kind: "message"; id: string; at: string; from: ChatAuthor; text: string }
@@ -226,6 +246,8 @@ export interface CardDetail extends CardSummary {
   plan: Plan | null;
   /** The developer's last `done` report, once it has built. */
   build: BuildReport | null;
+  /** Check's last finished round since the last plan, once one has finished. */
+  check: CheckRound | null;
   /** Spec issues found so far, waiting for the spec keeper. */
   issues: SpecIssue[];
   /** Decisions made without you. */
@@ -285,6 +307,8 @@ export type HiveEvent =
   | { type: "brief.updated"; cardId: string; brief: Brief }
   | { type: "spec.updated"; cardId: string; spec: SpecInfo }
   | { type: "plan.updated"; cardId: string; plan: Plan }
+  /** A Check round finished: the round as stored, and the card's spec issues with the ones it added. */
+  | { type: "check.updated"; cardId: string; check: CheckRound; issues: SpecIssue[] }
   | { type: "pending.updated"; cardId: string; pending: PendingItem | null }
   | { type: "turn.started"; cardId: string }
   | { type: "turn.ended"; cardId: string };

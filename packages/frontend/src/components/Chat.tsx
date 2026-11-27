@@ -10,6 +10,8 @@ const ERROR_ACTION_LABEL: Record<ErrorAction, string> = {
   retry: "Retry",
   review: "Review again",
   "back-to-spec": "Back to Spec",
+  "back-to-build": "Back to Build",
+  "move-on": "Move on",
 };
 
 const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
@@ -17,9 +19,10 @@ const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
   spec: "spec-writer",
   plan: "planner",
   build: "developer",
+  check: "reviewer",
 };
 
-/** Why the reply box is closed right now, or null when you can write. Plan and Build have no reply box at all (see Chat). */
+/** Why the reply box is closed right now, or null when you can write. Plan, Build and Check have no reply box at all (see Chat). */
 export function replyHint(detail: CardDetail): string | null {
   if (detail.lane !== "spec" || !detail.spec) return null;
   if (detail.spec.review === "running") return "Wait for the review";
@@ -34,7 +37,7 @@ interface Props {
 }
 
 export function Chat({ detail, streaming, activity }: Props) {
-  const readOnly = detail.lane === "plan" || detail.lane === "build";
+  const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check";
   const hint = replyHint(detail);
   const closed = hint !== null;
   const [text, setText] = useState("");
@@ -67,6 +70,8 @@ export function Chat({ detail, streaming, activity }: Props) {
     retry: () => api.retry(detail.id),
     review: () => api.review(detail.id),
     "back-to-spec": () => api.backToSpec(detail.id),
+    "back-to-build": () => api.backToBuild(detail.id),
+    "move-on": () => api.moveOn(detail.id),
   };
 
   async function run(action: () => Promise<unknown>) {
