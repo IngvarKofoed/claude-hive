@@ -33,6 +33,8 @@ const detail: CardDetail = {
   chat: [],
   pending: null,
   turnRunning: true,
+  landed: null,
+  landing: false,
 };
 const start: CardLive = { detail, streaming: "", activity: null };
 

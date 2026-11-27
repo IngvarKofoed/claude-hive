@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
-  Brief, BuildReport, CardState, ChatItem, CheckRound, Decision, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Brief, BuildReport, CardState, ChatItem, CheckRound, Decision, Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -93,7 +93,17 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "port", type: "INTEGER" },
   { table: "cards", column: "feedback", type: "TEXT" },
   { table: "cards", column: "app_stopped", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "landing", type: "TEXT" },
+  { table: "cards", column: "landed", type: "TEXT" },
+  { table: "cards", column: "ship_after_check", type: "INTEGER NOT NULL DEFAULT 0" },
 ];
+
+/** A landing under way: stored before the push, so a hive restart can finish it or undo it. */
+export interface Landing {
+  base: string;
+  commit: string;
+  pushed: boolean;
+}
 
 export interface ProjectRow {
   id: string;
@@ -132,6 +142,12 @@ export interface CardRow {
   feedback: string | null;
   /** You stopped the card's app in Try it, so a hive restart or a finished setup leaves it stopped. */
   appStopped: boolean;
+  /** A landing under way (docs/specs/2026-11-27-ship-lane.md). */
+  landing: Landing | null;
+  /** Where the card landed. */
+  landed: Landed | null;
+  /** Ship sent the card back to Build: after Check it returns to Ship, not Try it. */
+  shipAfterCheck: boolean;
 }
 
 export interface SessionRow {
@@ -218,14 +234,15 @@ export class HiveDb {
       .prepare(
         `INSERT INTO cards (id, project_id, title, idea_text, lane, state, branch, worktree_path, brief, move_error,
            spec_path, reviewed_spec_hash, review_applying, plan, build, check_round, setup, port, feedback, app_stopped,
-           created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           landing, landed, ship_after_check, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
         c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
         c.check ? JSON.stringify(c.check) : null, c.setup ? JSON.stringify(c.setup) : null, c.port, c.feedback,
-        c.appStopped ? 1 : 0, now());
+        c.appStopped ? 1 : 0, c.landing ? JSON.stringify(c.landing) : null, c.landed ? JSON.stringify(c.landed) : null,
+        c.shipAfterCheck ? 1 : 0, now());
   }
 
   updateCard(id: string, patch: Partial<Omit<CardRow, "id" | "projectId">>): void {
@@ -234,6 +251,7 @@ export class HiveDb {
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
       reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
+      landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -241,8 +259,8 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (key === "brief" || key === "plan" || key === "build" || key === "check" || key === "setup") values.push(value ? JSON.stringify(value) : null);
-      else if (key === "reviewApplying" || key === "appStopped") values.push(value ? 1 : 0);
+      if (["brief", "plan", "build", "check", "setup", "landing", "landed"].includes(key)) values.push(value ? JSON.stringify(value) : null);
+      else if (key === "reviewApplying" || key === "appStopped" || key === "shipAfterCheck") values.push(value ? 1 : 0);
       else values.push(value);
     }
     if (sets.length === 0) return;
@@ -394,7 +412,8 @@ function toCard(r: any): CardRow {
     reviewApplying: !!r.review_applying, plan: r.plan ? JSON.parse(r.plan) : null,
     build: r.build ? JSON.parse(r.build) : null, check: r.check_round ? JSON.parse(r.check_round) : null,
     setup: r.setup ? JSON.parse(r.setup) : null, port: r.port ?? null, feedback: r.feedback ?? null,
-    appStopped: !!r.app_stopped,
+    appStopped: !!r.app_stopped, landing: r.landing ? JSON.parse(r.landing) : null,
+    landed: r.landed ? JSON.parse(r.landed) : null, shipAfterCheck: !!r.ship_after_check,
   };
 }
 

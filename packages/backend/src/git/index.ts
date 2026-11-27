@@ -78,14 +78,18 @@ export async function ensureWorktreesExcluded(root: string): Promise<void> {
   await appendFile(file, `${prefix}${WORKTREES_LINE}\n`);
 }
 
-/** `git worktree add <root>/.claude/worktrees/<slug> -b hive/<slug> main`, run in `root`. */
+/**
+ * `git worktree add <root>/.claude/worktrees/<slug> -b hive/<slug> <base>`, run in `root`. The base is the hive's one
+ * base: a fetched `origin/main`, or `main` without a remote (docs/specs/2026-11-27-ship-lane.md).
+ */
 export async function createCardWorktree(
   root: string,
   slug: string,
+  base = "main",
 ): Promise<{ worktreePath: string; branch: string }> {
   const worktreePath = join(root, ".claude", "worktrees", slug);
   const branch = `hive/${slug}`;
-  const r = await git(root, ["worktree", "add", worktreePath, "-b", branch, "main"]);
+  const r = await git(root, ["worktree", "add", "--no-track", worktreePath, "-b", branch, base]);
   if (!r.ok) throw new GitError(reason(r.stderr));
   return { worktreePath, branch };
 }
@@ -121,17 +125,18 @@ async function conflictedFiles(worktree: string): Promise<string[]> {
 }
 
 /**
- * Bring the local main into the worktree's branch with `git merge --no-edit --no-verify main`. A merge left
- * unfinished earlier is reported as a conflict without starting a new one. `--no-verify`, because a project's hook
- * mustn't stop a lane's own bookkeeping; Ship runs the project's checks on what lands.
+ * Bring the base (a fetched `origin/main`, or local `main` without a remote) into the worktree's branch with
+ * `git merge --no-edit --no-verify <base>`. A merge left unfinished earlier is reported as a conflict without starting
+ * a new one. `--no-verify`, because a project's hook mustn't stop a lane's own bookkeeping; Ship runs the project's
+ * checks on what lands.
  */
-export async function mergeMain(worktree: string): Promise<MergeResult> {
+export async function mergeMain(worktree: string, base = "main"): Promise<MergeResult> {
   if (await mergeInProgress(worktree)) return { kind: "conflict", files: await conflictedFiles(worktree) };
-  const count = await git(worktree, ["rev-list", "--count", "HEAD..main"]);
+  const count = await git(worktree, ["rev-list", "--count", `HEAD..${base}`]);
   if (!count.ok) return { kind: "failed", reason: reason(count.stderr) };
   const commits = Number(count.stdout.trim()) || 0;
   if (commits === 0) return { kind: "clean", commits: 0 };
-  const merge = await git(worktree, ["merge", "--no-edit", "--no-verify", "main"]);
+  const merge = await git(worktree, ["merge", "--no-edit", "--no-verify", base]);
   if (merge.ok) return { kind: "clean", commits };
   if (await mergeInProgress(worktree)) return { kind: "conflict", files: await conflictedFiles(worktree) };
   return { kind: "failed", reason: reason(merge.stderr || merge.stdout) };
@@ -186,3 +191,4 @@ export function cardSlug(title: string, id: string): string {
 }
 
 export * from "./localFiles";
+export * from "./ship";

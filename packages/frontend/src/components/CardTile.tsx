@@ -13,7 +13,8 @@ interface Props {
 export function CardTile({ card, onOpen, onDragStart, onDragEnd }: Props) {
   const draggable = card.lane === "ideas";
   const openable = card.lane !== "ideas";
-  const badge = !laneImplemented(card.lane) ? (
+  // A landed card needs nothing from you.
+  const badge = card.lane === "done" ? null : !laneImplemented(card.lane) ? (
     <Badge tone="neutral">Not implemented yet</Badge>
   ) : card.state === "working" ? (
       <Badge tone="working">▶ working</Badge>

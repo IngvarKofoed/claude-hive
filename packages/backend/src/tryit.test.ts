@@ -201,6 +201,17 @@ describe("worktree setup and Try it", () => {
       expect(hive.card(id).setup).toMatchObject({ status: "failed", reason: "It didn't return a report." });
     });
 
+    it("keeps the setup that worked when preparing it again fails", async () => {
+      const { id, setup } = await inRefine();
+      await setup.end({ kind: "ok", report: setupDone });
+      hive.setupAgain(id);
+      await waitFor(() => runner.setupTurns.length === 2);
+      await lastSetup().end({ kind: "ok", report: { ...setupDone, status: "blocked", blockedReason: "The install hung." } });
+      await waitFor(() => notes(id).some((n) => n.startsWith("Preparing the worktree again didn't finish")));
+      expect(hive.card(id).setup).toMatchObject({ status: "done", start: setupDone.start, test: "npm test" });
+      expect(notes(id).at(-1)).toBe("Preparing the worktree again didn't finish: The install hung. The earlier setup stays.");
+    });
+
     it("refuses the setup's questions", async () => {
       const { setup } = await inRefine();
       await expect(setup.handlers.canUseTool("AskUserQuestion", { questions: [] }, new AbortController().signal))
@@ -226,6 +237,7 @@ describe("worktree setup and Try it", () => {
           id: `c${p}`, projectId: `p${p}`, title: "x", ideaText: "x", lane: "ideas", state: "needs-you", branch: null,
           worktreePath: null, brief: null, moveError: null, specPath: null, reviewedSpecHash: null, reviewApplying: false,
           plan: null, build: null, check: null, setup: null, port: p, feedback: null, appStopped: false,
+          landing: null, landed: null, shipAfterCheck: false,
         });
       }
       await hive.addProject(repo.root);

@@ -51,6 +51,11 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   r.post("/cards/:id/feedback", route((req) => hive.feedback(param(req, "id"), req.body ?? {})));
   r.post("/cards/:id/accept", route((req) => hive.accept(param(req, "id"))));
   r.post("/cards/:id/back-to-tryit", route((req) => hive.backToTryIt(param(req, "id"))));
+  r.get("/cards/:id/ship", route((req) => hive.shipPlan(param(req, "id"))));
+  r.post("/cards/:id/land", route(async (req) => {
+    await hive.land(param(req, "id"), req.body ?? {});
+    return { ok: true };
+  }));
   r.post("/cards/:id/app/start", route(async (req) => {
     await hive.appStart(param(req, "id"));
     return { ok: true };

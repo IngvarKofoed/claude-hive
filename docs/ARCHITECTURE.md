@@ -114,6 +114,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `tester` | Check | Sonnet | Nothing; runs the app and takes screenshots | Work, new for each round |
 | `manager` | any hands-off lane | Sonnet | Nothing; uses the hive's lookup tools | One-off, one for each question |
 | `spec-reviewer` | Spec | Fable | Nothing; reads only the spec file and `review.md` | One-off, blind |
+| `committer` | Ship | Sonnet | Nothing; writes the commit message a card lands with | One-off |
 
 - **One developer per card.** When the spec's Implementation strategy calls for several agents, the developer session runs them as its own subagents. So a card has one developer report, one session to resume, and one session committing in its worktree.
 - **The developer is always Opus.** It does the plan's Opus chunks itself and gives each chunk on another model to a subagent on that model, through Claude Code's Agent tool. It merges, integrates, tests and reports on every card.
@@ -187,9 +188,12 @@ query({
 | Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. Until the hive picks the lane, only Build is offered: your words go to the same developer, and Check starts again from round 1. |
 | Try it | You answer a `changes-signoff` question with "change the code" | Plan, for an amendment plan |
 | Try it | You accept | Ship |
-| Ship | You press **Back to Try it** (until Ship is built) | Try it |
+| Ship | You press **Back to Try it**, before landing starts | Try it |
+| Ship | You press **Land on main**, and the commit reaches main | Done, after removing the worktree and branch |
 | Build, Check, Try it | The card moves to another lane | That lane, after stopping what listens on the card's ports from inside its worktree |
 | Ship | A conflict with the latest main | Build. After Check passes, it comes straight back to Ship. |
+| Ship | A test fails on the squash, and you press **Back to Build** | Build, the same way, with the test output |
+| Ship | A test fails, the push is refused, or main keeps moving | Stays in Ship, with the reason and Retry |
 | Ship | It's on main | Done |
 | any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you |
 | any before Ship | You park it | Ideas. The worktree is removed and the branch kept. |
@@ -250,7 +254,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 - **A cut-off turn is resumed once in a hands-off lane.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops. A chat lane's cut-off turn is not resumed: the chat says the reply was cut off and waits for your next message, since a retry would only talk over you.
 - **Answers outlive the turn that asked.** A question or Approve item waiting for you is a `PendingItem` row. If the turn that asked is gone when you answer, the answer goes to that session as a new turn, together with the question and options it asked.
 - **The card apps the hive runs end with it.** At startup it sweeps a Try it card's ports and starts its app again, unless you stopped it: your Stop is stored on the card.
-- **Ship can start over.** Nothing reaches main before the push, so a Ship that was cut off starts again from the squash.
+- **A landing survives a restart.** The hive stores the squash commit before the push. At startup, one whose commit is on main is finished; any other is undone, the worktree goes back to its branch, and Retry starts the landing over.
 
 ## Spec Keeper and Review Gate
 
@@ -283,11 +287,11 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | When | What the git service does |
 | --- | --- |
 | Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
-| Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the worktree's setup in the background. A setup session picks the git-ignored local files the app needs, and the hive copies them: never over an existing file, as copy-on-write clones, never from outside the checkout. The session installs dependencies and works out how to start the app and its tests on the card's ports. |
+| Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> <base>`, where the base is a freshly fetched `origin/main`, or main without a remote; then the worktree's setup in the background. A setup session picks the git-ignored local files the app needs, and the hive copies them: never over an existing file, as copy-on-write clones, never from outside the checkout. The session installs dependencies and works out how to start the app and its tests on the card's ports. |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
 | Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. Check, which changes nothing, makes none. |
-| Build starts | Merge the local main into `hive/<card>` (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
-| Ship | One project at a time: squash onto the latest main in the card's worktree (message from the card, `Hive-Card:` trailer) → run the project's test command → Approve → push to main (squash again if main moved) → update your checkout's main only when it's safe → remove the worktree and branch |
+| Build starts | Merge the base into `hive/<card>`: a freshly fetched `origin/main`, or local main without a remote (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
+| Ship | One project at a time: Land on main (the approval) → fetch → squash onto the base with `merge-tree` and `commit-tree`, touching no working folder; a conflict goes to Build → the message from the `committer` session, with `Spec:` and `Hive-Card:` lines → switch the worktree to the commit and run the setup's test command → `git push origin <commit>:refs/heads/main`, never forced (squash again if main moved, up to 3 times), or a fast-forward of local main without a remote → update your checkout's main only when it's safe → remove the worktree and branch |
 | Park / Drop | Remove the worktree and keep the branch (Drop deletes it after a while) |
 
 Ship never touches uncommitted work in your checkout. It updates your checkout's main only when main isn't checked out there, or it is and the checkout is clean. Otherwise it tells you, and in a project with no remote it waits.
@@ -304,8 +308,8 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, trustWarning, runCommand, testCommand, laneLimits. The setup session decides each card's local files and install; `runCommand` and `testCommand` wait for the preview service and Ship. |
-| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done) |
+| **Project** | name, path, trustWarning, laneLimits. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
@@ -335,6 +339,8 @@ POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
 POST   /api/cards/:id/stop                Stop the running turn
 POST   /api/cards/:id/retry               Send a failed turn's message again
 POST   /api/cards/:id/accept              Accept in Try it
+GET    /api/cards/:id/ship                What Land on main would do now
+POST   /api/cards/:id/land                Land on main { discard? }
 POST   /api/cards/:id/back-to-tryit       Out of Ship, until Ship is built
 POST   /api/cards/:id/setup               Set up the worktree (again)
 POST   /api/cards/:id/app/start           Start the card's app in Try it · /app/stop · /app/restart

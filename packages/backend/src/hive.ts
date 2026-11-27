@@ -8,20 +8,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
-  FeedbackBody, FileChange, Lane, PendingItem, Plan, Question, SetupReport, SpecInfo,
+  FeedbackBody, FileChange, Landed, LandBody, Lane, PendingItem, Plan, Question, SetupReport, ShipPlan, SpecInfo,
 } from "@hive/shared";
 import { CARD_PORTS } from "@hive/shared";
-import { CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterPlan } from "./board/moves";
+import {
+  CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterLanding, laneAfterPlan,
+} from "./board/moves";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import type { Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
-  CHECK_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, parseCheckReport, parseDeveloperReport, parsePlanReport,
-  parseReviewReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SETUP_SCHEMA,
+  CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, parseCheckReport, parseCommitReport,
+  parseDeveloperReport, parsePlanReport, parseReviewReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
-import type { CopyOutcome, LocalFileList, MergeResult } from "./git";
-import { fakeApps, type AppEntry, type AppRunner } from "./preview/apps";
+import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, SquashResult } from "./git";
+import { fakeApps, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
 import { cardPorts, fakePorts, type PortService } from "./preview/ports";
 
 /** The git service's API (packages/backend/src/git). */
@@ -29,15 +31,30 @@ export interface GitService {
   resolveRepoRoot(path: string): Promise<string>;
   hasBranch(root: string, branch: string): Promise<boolean>;
   ensureWorktreesExcluded(root: string): Promise<void>;
-  createCardWorktree(root: string, slug: string): Promise<{ worktreePath: string; branch: string }>;
+  createCardWorktree(root: string, slug: string, base?: string): Promise<{ worktreePath: string; branch: string }>;
   commitFile(worktree: string, path: string, message: string): Promise<boolean>;
-  mergeMain(worktree: string): Promise<MergeResult>;
+  mergeMain(worktree: string, base?: string): Promise<MergeResult>;
   mergeInProgress(worktree: string): Promise<boolean>;
   abortMerge(worktree: string): Promise<void>;
   commitAll(worktree: string, message: string): Promise<boolean>;
   changedFiles(worktree: string): Promise<FileChange[]>;
   listLocalFiles(root: string): Promise<LocalFileList>;
   copyLocalFiles(root: string, worktree: string, paths: string[]): Promise<CopyOutcome[]>;
+  mainBase(root: string): Promise<MainBase>;
+  hasOrigin(root: string): Promise<boolean>;
+  squashTree(root: string, baseRef: string, branch: string): Promise<SquashResult>;
+  commitTree(root: string, tree: string, parent: string, message: string): Promise<string>;
+  diffStat(root: string, base: string, tree: string): Promise<string>;
+  recentMessages(root: string, baseRef: string, count?: number): Promise<string[]>;
+  pushMain(root: string, commit: string): Promise<PushResult>;
+  unpushedCount(root: string): Promise<number>;
+  mainCheckout(root: string): Promise<{ path: string; dirty: boolean } | null>;
+  isOn(root: string, commit: string, ref: string): Promise<boolean>;
+  moveLocalMain(root: string, commit: string): Promise<string>;
+  worktreeStatus(worktree: string): Promise<string[]>;
+  discardChanges(worktree: string): Promise<void>;
+  switchWorktree(worktree: string, target: { commit: string } | { branch: string }): Promise<void>;
+  removeCardWorktree(root: string, worktree: string, branch: string): Promise<void>;
   cardSlug(title: string, id: string): string;
 }
 
@@ -216,30 +233,31 @@ function some(names: string[]): string {
   return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
 }
 
-/** What bringing in main did, as the hive's note in Build's chat. */
-export function mergeNote(merge: MergeResult): string {
+/** What bringing in the base (`main`, or a fetched `origin/main`) did, as the hive's note in Build's chat. */
+export function mergeNote(merge: MergeResult, base = "main"): string {
+  const name = base === "main" ? "Main" : base;
   switch (merge.kind) {
     case "clean":
-      return merge.commits === 0 ? "Main was already in." : `Brought in main: ${count(merge.commits, "new commit", "new commits")}.`;
+      return merge.commits === 0 ? `${name} was already in.` : `Brought in ${base}: ${count(merge.commits, "new commit", "new commits")}.`;
     case "conflict":
-      return `Bringing in main stopped on conflicts in ${merge.files.join(", ") || "some files"}. The developer resolves them first.`;
+      return `Bringing in ${base} stopped on conflicts in ${merge.files.join(", ") || "some files"}. The developer resolves them first.`;
     case "failed":
-      return `Bringing in main failed: ${sentence(merge.reason)} The developer was told to bring it in itself.`;
+      return `Bringing in ${base} failed: ${sentence(merge.reason)} The developer was told to bring it in itself.`;
   }
 }
 
-/** What bringing in main did, and what to do about it, for the developer. */
-function mergeInstruction(merge: MergeResult): string {
+/** What bringing in the base did, and what to do about it, for the developer. */
+function mergeInstruction(merge: MergeResult, base = "main"): string {
   switch (merge.kind) {
     case "clean":
       return merge.commits === 0
-        ? "main was already in this branch."
-        : `the hive merged ${count(merge.commits, "new commit", "new commits")} from main into this branch.`;
+        ? `${base} was already in this branch.`
+        : `the hive merged ${count(merge.commits, "new commit", "new commits")} from ${base} into this branch.`;
     case "conflict":
-      return `the merge of main stopped on conflicts in ${merge.files.join(", ") || "some files"}. Resolve them and ` +
+      return `the merge of ${base} stopped on conflicts in ${merge.files.join(", ") || "some files"}. Resolve them and ` +
         "commit the merge first.";
     case "failed":
-      return `git merge main failed: ${sentence(merge.reason)} Merge main into this branch yourself first.`;
+      return `git merge ${base} failed: ${sentence(merge.reason)} Merge ${base} into this branch yourself first.`;
   }
 }
 
@@ -279,6 +297,8 @@ export class Hive {
   private setupTimers = new Map<string, ReturnType<typeof setTimeout>>(); // setup session id → its time limit
   private timedOut = new Set<string>(); // setup session ids stopped by their time limit
   private appTimers = new Map<string, ReturnType<typeof setTimeout>>(); // card id → a pending app.updated for output
+  private landingProjects = new Map<string, string>(); // project id → the card landing on its main, one at a time
+  private previousSetup = new Map<string, SetupReport>(); // card id → its last finished setup, while it's prepared again
   private portQueue: Promise<unknown> = Promise.resolve(); // port blocks are handed out one card at a time
   private setupStopped = new Set<string>(); // card ids whose setup you stopped in Build before its turn started
   private readonly ports: PortService;
@@ -333,6 +353,8 @@ export class Hive {
       feedback: card.feedback,
       apps: card.lane === "tryit" ? this.apps.status(card.id) : [],
       appStopped: card.appStopped,
+      landed: card.landed,
+      landing: this.landingProjects.get(card.projectId) === card.id,
       issues: this.db.issuesFor(card.id),
       decisions: this.db.decisionsFor(card.id),
       chat: this.db.chatFor(card.id, card.lane),
@@ -388,7 +410,7 @@ export class Hive {
       id: randomUUID(), projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
       state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
       specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
-      setup: null, port: null, feedback: null, appStopped: false,
+      setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null, shipAfterCheck: false,
     };
     this.db.insertCard(card);
     this.emitCard(card.id);
@@ -420,7 +442,9 @@ export class Hive {
     let worktree: { worktreePath: string; branch: string };
     try {
       await this.deps.git.ensureWorktreesExcluded(project.path);
-      worktree = await this.deps.git.createCardWorktree(project.path, this.deps.git.cardSlug(card.title, card.id));
+      // The hive's one base: a fetched origin/main, or main without a remote (docs/specs/2026-11-27-ship-lane.md).
+      const base = await this.deps.git.mainBase(project.path);
+      worktree = await this.deps.git.createCardWorktree(project.path, this.deps.git.cardSlug(card.title, card.id), base.ref);
     } catch (error) {
       this.db.updateCard(id, { moveError: (error as Error).message });
       this.emitCard(id);
@@ -524,7 +548,9 @@ export class Hive {
       }
       // Stored Try it feedback goes with it: the developer's reason carries it to the spec writer, and after the new
       // sign-off the developer must get the new plan.
-      this.db.updateCard(cardId, { lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null });
+      this.db.updateCard(cardId, {
+        lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null, shipAfterCheck: false,
+      });
       this.watchSpec(cardId);
       this.startTurn(cardId, writer.id, [
         `The ${who} couldn't ${from === "build" ? "build" : "plan"} from the signed-off spec. What it reported:`,
@@ -541,8 +567,18 @@ export class Hive {
   async backToBuild(cardId: string): Promise<CardSummary> {
     const card = this.requireCard(cardId);
     const to = laneAfter(card.lane, "back-to-build");
-    if (!to) throw new HttpError(409, "Only a card in Check can go back to Build.");
+    if (!to) throw new HttpError(409, "Only a card in Check or Ship can go back to Build.");
     this.requireOffered(cardId, card.lane, "back-to-build");
+    if (card.lane === "ship") {
+      // A Retry's landing runs with the old error line still last until its first note: it mustn't be pulled from under it.
+      if (this.landingProjects.get(card.projectId) === cardId) throw new HttpError(409, "The card is landing.");
+      // The tests failed on the squash: their output goes to the developer, and after Check the card returns to Ship.
+      const last = this.db.lastChatItem(cardId, "ship");
+      return this.oneMoveAtATime(cardId, async () => {
+        this.shipToBuild(cardId, last?.kind === "error" ? last.message : "Landing on main stopped.");
+        return cardSummary(this.requireCard(cardId));
+      });
+    }
     return this.oneMoveAtATime(cardId, async () => {
       const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
       this.db.transaction(() => {
@@ -565,7 +601,7 @@ export class Hive {
     return this.oneMoveAtATime(cardId, async () => {
       this.addNote(cardId, "check", "You moved the card on to Try it as built.");
       await this.stopCardServers(cardId, "check");
-      this.db.updateCard(cardId, { lane: to });
+      this.db.updateCard(cardId, { lane: to, shipAfterCheck: false });
       this.emitCard(cardId);
       void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
       return cardSummary(this.requireCard(cardId));
@@ -662,7 +698,7 @@ export class Hive {
     }
   }
 
-  retry(cardId: string): void {
+  retry(cardId: string): void | Promise<void> {
     const card = this.requireCard(cardId);
     this.refuseWhileMoving(cardId);
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "A turn is already running.");
@@ -670,6 +706,8 @@ export class Hive {
     if (!last || last.kind !== "error" || !last.actions.includes("retry")) {
       throw new HttpError(409, "There is no failed turn to retry.");
     }
+    // Every Retry in Ship starts the landing over (docs/specs/2026-11-27-ship-lane.md).
+    if (card.lane === "ship") return this.land(cardId, {});
     if (card.lane === "check") {
       // A review is a fresh read: Retry starts a new reviewer for the same round.
       this.startReviewer(cardId);
@@ -820,6 +858,9 @@ export class Hive {
     const card = this.requireCard(cardId);
     if (!card.worktreePath || card.setup?.status === "running") return;
     const project = this.db.getProject(card.projectId)!;
+    // A re-run that fails keeps the setup that worked before it.
+    if (card.setup?.status === "done") this.previousSetup.set(cardId, card.setup);
+    else this.previousSetup.delete(cardId);
     // Marked running at once, so a second start (Build entry, a button) waits for this one instead of racing it.
     this.setSetup(cardId, noSetup());
     this.setupStopped.delete(cardId);
@@ -916,6 +957,24 @@ export class Hive {
     { continueBuild = true } = {},
   ): void {
     const card = this.requireCard(cardId);
+    const previous = this.previousSetup.get(cardId);
+    this.previousSetup.delete(cardId);
+    if (!("done" in end) && previous) {
+      // Preparing it again didn't finish: the setup that worked stays, commands and all.
+      this.setSetup(cardId, previous);
+      this.addNote(cardId, card.lane, `Preparing the worktree again didn't finish: ${end.reason} The earlier setup stays.`);
+      if (card.lane === "tryit" && !card.appStopped) {
+        void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
+      }
+      if (continueBuild && card.lane === "build" && !this.starting.has(cardId)) {
+        const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+        if (!developer?.lastMessage) {
+          void this.startDeveloper(cardId)
+            .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+        }
+      }
+      return;
+    }
     const was = card.setup ?? noSetup();
     const setup: SetupReport = "done" in end
       ? { ...was, ...end.done, status: "done", reason: null }
@@ -1069,7 +1128,9 @@ export class Hive {
       await this.apps.clear(cardId);
       const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
       this.db.transaction(() => {
-        this.db.updateCard(cardId, { lane: to, build: null, check: null, feedback: text, appStopped: false });
+        this.db.updateCard(cardId, {
+          lane: to, build: null, check: null, feedback: text, appStopped: false, shipAfterCheck: false,
+        });
         if (developer) this.db.updateSession(developer.id, { lastMessage: null });
         this.db.addEvent(cardId, "feedback", { text }, randomUUID());
       });
@@ -1101,12 +1162,318 @@ export class Hive {
     const card = this.requireCard(cardId);
     const to = laneAfter(card.lane, "back-to-tryit");
     if (!to) throw new HttpError(409, "Only a card in Ship can go back to Try it.");
+    if (this.landingProjects.get(card.projectId) === cardId) throw new HttpError(409, "The card is landing.");
     return this.oneMoveAtATime(cardId, async () => {
-      this.db.updateCard(cardId, { lane: to });
+      this.db.updateCard(cardId, { lane: to, shipAfterCheck: false });
       this.emitCard(cardId);
       void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
       return cardSummary(this.requireCard(cardId));
     });
+  }
+
+  // ---------- Ship ----------
+
+  /** What Land on main would do now, for the Ship page (docs/specs/2026-11-27-ship-lane.md, The page). */
+  async shipPlan(cardId: string): Promise<ShipPlan> {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "ship") throw new HttpError(409, "Only a card in Ship has a landing to plan.");
+    const root = this.db.getProject(card.projectId)!.path;
+    const origin = await this.deps.git.hasOrigin(root);
+    const test = this.landingTests(card);
+    const where = origin ? null : await this.deps.git.mainCheckout(root);
+    const landing = this.landingProjects.get(card.projectId);
+    return {
+      base: origin ? "origin/main" : "main",
+      uncommitted: card.worktreePath ? await this.deps.git.worktreeStatus(card.worktreePath) : [],
+      unpushed: origin ? await this.deps.git.unpushedCount(root) : 0,
+      tests: test.command,
+      noTestsReason: test.why,
+      checkoutBlocks: !!where?.dirty,
+      busy: landing !== undefined && landing !== cardId,
+    };
+  }
+
+  /** The test command that runs on the squash, or why none will. */
+  private landingTests(card: CardRow): { command: string | null; why: string | null } {
+    if (card.setup?.status !== "done") return { command: null, why: "the worktree has no finished setup" };
+    if (!card.setup.test.trim()) return { command: null, why: "the setup found no test command" };
+    return { command: card.setup.test.trim(), why: null };
+  }
+
+  /**
+   * Land on main is your approval: the checks that need nothing but git are made at once, so a refusal reaches the
+   * page; the rest runs in the background, step by step in Ship's history (docs/specs/2026-11-27-ship-lane.md).
+   */
+  async land(cardId: string, body: LandBody): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "ship" || !card.worktreePath || !card.branch) {
+      throw new HttpError(409, "Only a card in Ship can land on main.");
+    }
+    this.refuseWhileMoving(cardId);
+    if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    if (this.landingProjects.has(card.projectId)) throw new HttpError(409, "A card of this project is landing already.");
+    const root = this.db.getProject(card.projectId)!.path;
+    const discard = body?.discard === true;
+    // Claimed before the git checks below, so a second press (or another card) can't pass them while they run.
+    this.landingProjects.set(card.projectId, cardId);
+    let origin: boolean;
+    try {
+      const uncommitted = await this.deps.git.worktreeStatus(card.worktreePath);
+      if (uncommitted.length > 0 && !discard) {
+        throw new HttpError(409, "The card's worktree has uncommitted work that wouldn't land. Discard it, or send the card back.");
+      }
+      origin = await this.deps.git.hasOrigin(root);
+      const unpushed = origin ? await this.deps.git.unpushedCount(root) : 0;
+      if (unpushed > 0) {
+        throw new HttpError(409,
+          `Your local main has ${count(unpushed, "commit", "commits")} that ${unpushed === 1 ? "isn't" : "aren't"} on origin. ` +
+          "Push them first, then press Land on main.");
+      }
+      if (!origin && (await this.deps.git.mainCheckout(root))?.dirty) {
+        throw new HttpError(409, "Your checkout has main checked out with uncommitted changes, and without a remote main " +
+          "can only move through it. Commit or stash them, then press Land on main again.");
+      }
+    } catch (error) {
+      if (this.landingProjects.get(card.projectId) === cardId) this.landingProjects.delete(card.projectId);
+      throw error;
+    }
+    this.setState(cardId, "working");
+    void this.landFlow(cardId, { discard, origin })
+      .catch((error: unknown) => this.log(`Landing card ${cardId} failed: ${String(error)}`))
+      .finally(() => {
+        if (this.landingProjects.get(card.projectId) === cardId) this.landingProjects.delete(card.projectId);
+        try {
+          // A card sent back to Build has its developer starting; anything else waits for you.
+          if (!this.anyTurnRunning(cardId)) this.setState(cardId, "needs-you");
+        } catch {
+          // the database closed under a test
+        }
+      });
+  }
+
+  private async landFlow(cardId: string, opts: { discard: boolean; origin: boolean }): Promise<void> {
+    const card = this.requireCard(cardId);
+    const root = this.db.getProject(card.projectId)!.path;
+    const worktree = card.worktreePath!;
+    const branch = card.branch!;
+    const note = (text: string) => this.addNote(cardId, "ship", text);
+    // A landing left from a cut-off run may have left the worktree detached on its commit: put it back on any way out.
+    let switched = card.landing !== null;
+    // Every way out that isn't a landing puts the worktree back on the card's branch and forgets the commit.
+    const stop = async (message: string, actions: ErrorAction[] = ["retry"]) => {
+      if (switched) await this.deps.git.switchWorktree(worktree, { branch }).catch(() => undefined);
+      this.db.updateCard(cardId, { landing: null });
+      this.addError(cardId, "ship", message, actions);
+    };
+    try {
+      if (opts.discard) {
+        await this.deps.git.discardChanges(worktree);
+        note("Discarded the uncommitted work in the card's worktree.");
+      }
+      let message: string | null = null;
+      for (let attempt = 1; ; attempt++) {
+        const base = await this.deps.git.mainBase(root);
+        if (opts.origin && base.fetchFailed) {
+          return await stop(`Couldn't fetch origin: ${sentence(base.fetchFailed)} Nothing reached main.`);
+        }
+        const squash = await this.deps.git.squashTree(root, base.ref, branch);
+        if (squash.kind === "conflict") {
+          if (switched) await this.deps.git.switchWorktree(worktree, { branch });
+          return this.shipToBuild(cardId,
+            `Landing on main stopped on conflicts with ${base.ref} in ${squash.files.join(", ")}. Bring ${base.ref} in and resolve them.`);
+        }
+        if (squash.kind === "same") {
+          note(`The card's changes are already on ${base.ref}.`);
+          const checkout = opts.origin ? await this.deps.git.moveLocalMain(root, squash.base) : "updated";
+          return await this.finishLanding(cardId, {
+            commit: squash.base, subject: "(already on main)", base: base.ref, remote: opts.origin, checkout,
+          });
+        }
+        message ??= await this.commitMessage(this.requireCard(cardId), root, base.ref, squash.tree);
+        const commit = await this.deps.git.commitTree(root, squash.tree, squash.base, message);
+        this.db.updateCard(cardId, { landing: { base: base.ref, commit, pushed: false } });
+        note(`Squashed onto ${base.ref} as ${commit.slice(0, 7)}.`);
+
+        const test = this.landingTests(this.requireCard(cardId));
+        if (test.command) {
+          await this.deps.git.switchWorktree(worktree, { commit });
+          switched = true;
+          note(`Running the tests on it: ${test.command}`);
+          const result = await runToEnd(test.command, worktree, 10 * 60_000);
+          if (!result.ok) {
+            const tail = result.output.slice(-30).join("\n");
+            return await stop(`The tests failed on the squash. ${result.reason}${tail ? `\n\n${tail}` : ""}`, ["retry", "back-to-build"]);
+          }
+          note("The tests passed.");
+        } else {
+          note(`No tests ran: ${test.why}.`);
+        }
+
+        if (opts.origin) {
+          const push = await this.deps.git.pushMain(root, commit);
+          if (push.kind === "moved") {
+            if (attempt >= 3) return await stop("Main kept moving: the push was refused 3 times. Nothing reached main.");
+            note("Main moved on meanwhile. Squashing again.");
+            continue;
+          }
+          if (push.kind === "failed") return await stop(`The push was refused: ${sentence(push.reason)} Nothing reached main.`);
+          note(`Pushed to origin/main as ${commit.slice(0, 7)}.`);
+        } else {
+          const moved = await this.deps.git.moveLocalMain(root, commit);
+          if (moved !== "updated") {
+            return await stop(`Your main couldn't move: ${moved}. Commit or stash your changes, then press Land on main again.`);
+          }
+          note(`Moved main to ${commit.slice(0, 7)}.`);
+        }
+        this.db.updateCard(cardId, { landing: { base: base.ref, commit, pushed: true } });
+        const checkout = opts.origin ? await this.deps.git.moveLocalMain(root, commit) : "updated";
+        return await this.finishLanding(cardId, {
+          commit, subject: message.split("\n")[0]!, base: base.ref, remote: opts.origin, checkout,
+        });
+      }
+    } catch (error) {
+      if (this.requireCard(cardId).landing?.pushed) {
+        this.log(`Finishing the landing of card ${cardId} failed: ${String(error)}`);
+        return;
+      }
+      await stop(`Landing stopped: ${sentence((error as Error).message)} Nothing reached main.`);
+    }
+  }
+
+  /**
+   * The commit message, in the repo's style, from a short one-off session; the hive adds the Spec and Hive-Card lines.
+   * A session that fails, reports nothing, or runs past 3 minutes gives way to a message from the card.
+   */
+  private async commitMessage(card: CardRow, root: string, baseRef: string, tree: string): Promise<string> {
+    const trailers = `${card.specPath ? `Spec: ${card.specPath}\n` : ""}Hive-Card: ${card.id}`;
+    const fallback = (why: string) => {
+      this.addNote(card.id, "ship", `The commit message was written from the card: ${why}`);
+      const spec = card.specPath && card.worktreePath ? readSpec(card.worktreePath, card.specPath).text : null;
+      const bullet = spec?.split("**What you get:**")[1]?.split("\n").find((l) => l.trim().startsWith("- "));
+      const line = bullet?.trim().replace(/^- /, "").replace(/\*\*/g, "");
+      return [card.title, ...(line ? ["", line] : []), "", trailers].join("\n");
+    };
+    let role: Role;
+    try {
+      role = this.deps.role("committer");
+    } catch (error) {
+      return fallback(sentence((error as Error).message));
+    }
+    const [stat, recent] = await Promise.all([
+      this.deps.git.diffStat(root, baseRef, tree),
+      this.deps.git.recentMessages(root, baseRef, 15),
+    ]);
+    const message = [
+      "Write the commit message for this card. It lands on main as one commit.",
+      "",
+      `The card: ${card.title}`,
+      `Its spec: ${card.specPath ?? "(none)"}. Read its Outcome.`,
+      "",
+      "The changes:",
+      stat || "(none listed)",
+      "",
+      "The last commit messages on main, for the repo's style:",
+      ...recent.flatMap((m) => ["---", m]),
+      "---",
+      "",
+      "Return the subject and the body in that style. Don't add Spec: or Hive-Card: lines; the hive adds them.",
+    ].join("\n");
+    const turn = this.deps.runner.start(
+      {
+        sessionId: randomUUID(), resume: false, cwd: card.worktreePath!, role, message,
+        outputFormat: COMMIT_SCHEMA, persist: false,
+      },
+      {
+        onTextDelta: () => {}, onTextBlock: () => {}, onActivity: () => {}, onSessionCreated: () => {},
+        canUseTool: async (toolName, input) => toolName === "AskUserQuestion"
+          ? { behavior: "deny", message: "Nobody is there to answer. Decide, and write the message." }
+          : { behavior: "allow", updatedInput: input },
+      },
+    );
+    const timer = setTimeout(() => void turn.interrupt(), 3 * 60_000);
+    timer.unref?.();
+    let outcome: TurnOutcome;
+    try {
+      outcome = await turn.done;
+    } catch (error) {
+      outcome = { kind: "error", message: (error as Error).message };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (outcome.kind === "error") return fallback(sentence(outcome.message));
+    const report = parseCommitReport(outcome.report);
+    if (!report) return fallback(outcome.interrupted ? "the session took longer than 3 minutes." : "the session returned no message.");
+    return [report.subject, ...(report.body ? ["", report.body] : []), "", trailers].join("\n");
+  }
+
+  /** The card is on main: its app stopped, its worktree and branch removed, its ports freed, and on to Done. */
+  private async finishLanding(cardId: string, landed: Landed): Promise<void> {
+    const card = this.requireCard(cardId);
+    const root = this.db.getProject(card.projectId)!.path;
+    // The commit is on main: a failed clean-up is a note, and the card still goes to Done.
+    try {
+      await this.apps.clear(cardId);
+      await this.stopCardServers(cardId, "ship");
+    } catch (error) {
+      this.addNote(cardId, "ship", `The card's app couldn't be stopped: ${sentence((error as Error).message)}`);
+    }
+    if (card.worktreePath && card.branch) {
+      try {
+        await this.deps.git.removeCardWorktree(root, card.worktreePath, card.branch);
+      } catch (error) {
+        this.addNote(cardId, "ship", `The card's worktree and branch couldn't be removed: ${sentence((error as Error).message)}`);
+      }
+    }
+    const checkout = landed.checkout === "updated"
+      ? "updated"
+      : `behind ${landed.base}: ${landed.checkout}. Bring it up to date when you're ready`;
+    this.addNote(cardId, "ship", `Landed on ${landed.base} as ${landed.commit.slice(0, 7)}.`);
+    this.db.transaction(() => {
+      this.db.updateCard(cardId, {
+        lane: laneAfterLanding("landed"), landed: { ...landed, checkout }, landing: null, port: null, worktreePath: null,
+        shipAfterCheck: false,
+      });
+      this.db.addEvent(cardId, "landed", { ...landed, checkout }, randomUUID());
+    });
+    this.emitCard(cardId);
+  }
+
+  /** Ship sends the card back to Build: the developer gets why, and after Check the card returns to Ship. */
+  private shipToBuild(cardId: string, text: string): void {
+    const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+    this.addNote(cardId, "ship", `Back to Build: ${text}`);
+    this.db.transaction(() => {
+      this.db.updateCard(cardId, {
+        lane: laneAfterLanding("conflict"), build: null, check: null, feedback: text, shipAfterCheck: true, landing: null,
+      });
+      if (developer) this.db.updateSession(developer.id, { lastMessage: null });
+    });
+    this.emitCard(cardId);
+    void this.startDeveloper(cardId)
+      .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+  }
+
+  /** After a restart: a landing that reached main is finished; any other is undone; without origin, nothing is said. */
+  private async recoverLanding(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    const landing = card.landing!;
+    const root = this.db.getProject(card.projectId)!.path;
+    const origin = await this.deps.git.hasOrigin(root);
+    if (origin && (await this.deps.git.mainBase(root)).fetchFailed) {
+      this.addError(cardId, "ship", "Landing was cut off, and the hive couldn't reach origin to see how far it got.", ["retry"]);
+      return;
+    }
+    if (await this.deps.git.isOn(root, landing.commit, landing.base)) {
+      const checkout = origin ? await this.deps.git.moveLocalMain(root, landing.commit) : "updated";
+      return this.finishLanding(cardId, {
+        commit: landing.commit, subject: "(landed before the hive restarted)", base: landing.base, remote: origin, checkout,
+      });
+    }
+    if (card.worktreePath && card.branch) {
+      await this.deps.git.switchWorktree(card.worktreePath, { branch: card.branch }).catch(() => undefined);
+    }
+    this.db.updateCard(cardId, { landing: null });
+    this.addError(cardId, "ship", "Landing was cut off. Nothing reached main.", ["retry"]);
   }
 
   // ---------- the developer ----------
@@ -1128,7 +1495,9 @@ export class Hive {
       const entering = this.requireCard(cardId);
       const feedback = entering.feedback;
       const fromCheck = !feedback && entering.check && entering.check.bugs.length > 0 ? entering.check : null;
-      if (feedback || fromCheck) await this.stopCardServers(cardId, feedback ? "tryit" : "check");
+      if (feedback || fromCheck) {
+        await this.stopCardServers(cardId, feedback ? (entering.shipAfterCheck ? "ship" : "tryit") : "check");
+      }
 
       // A new visit starts without a report (Card.build is set only between a done report and the move to Check),
       // and without a last message: until this visit's first turn starts, Retry starts the developer afresh,
@@ -1151,13 +1520,15 @@ export class Hive {
 
       const role = this.deps.role(roleName); // a broken role file fails here, before the merge
       const card = this.requireCard(cardId);
-      if (feedback) this.addNote(cardId, "build", `Sent back from Try it: ${feedback}`);
+      if (feedback) this.addNote(cardId, "build", `Sent back from ${card.shipAfterCheck ? "Ship" : "Try it"}: ${feedback}`);
       if (fromCheck) {
         this.addNote(cardId, "build",
           `Check round ${fromCheck.round} found ${count(fromCheck.bugs.length, "bug", "bugs")}. The developer is fixing them.`);
       }
-      const merge = await this.deps.git.mergeMain(card.worktreePath!);
-      this.addNote(cardId, "build", mergeNote(merge));
+      const base = await this.deps.git.mainBase(this.db.getProject(card.projectId)!.path);
+      if (base.fetchFailed) this.addNote(cardId, "build", `Couldn't fetch origin: ${sentence(base.fetchFailed)} Using the last fetched ${base.ref}.`);
+      const merge = await this.deps.git.mergeMain(card.worktreePath!, base.ref);
+      this.addNote(cardId, "build", mergeNote(merge, base.ref));
       let developer = this.db.getSessionFor(cardId, "build", roleName);
       const again = !!developer?.existsYet;
       if (!developer) {
@@ -1168,7 +1539,19 @@ export class Hive {
       // Said in the fix messages as well as in the role, since a session keeps the instructions of its first turn.
       const wholeBuild = "Your report replaces the card's build report, so its summary and departures describe the " +
         "whole build as it stands now. List only the issues and decisions that are new since your last report.";
-      const message = feedback
+      const message = feedback && entering.shipAfterCheck
+        ? [
+            "Landing the card on main stopped:",
+            "",
+            feedback,
+            "",
+            "Fix it, then end with your report. After Check, the card goes back to Ship.",
+            "",
+            `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
+            "",
+            wholeBuild,
+          ]
+        : feedback
         ? [
             "The person tried the card's build and found this:",
             "",
@@ -1176,7 +1559,7 @@ export class Hive {
             "",
             "Fix it, then end with your report.",
             "",
-            `Bringing in main: ${mergeInstruction(merge)}`,
+            `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
             "",
             "`git status` may show files left from trying the app. Remove what doesn't belong before you report.",
             "",
@@ -1186,7 +1569,7 @@ export class Hive {
           ? [
               `Check round ${fromCheck.round} found bugs in the branch. Fix them, then end with your report.`,
               "",
-              `Bringing in main: ${mergeInstruction(merge)}`,
+              `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
               "",
               "The bugs:",
               bugList(fromCheck.bugs),
@@ -1203,7 +1586,7 @@ export class Hive {
                 : `The spec for this card is signed off: ${card.specPath}. Read it, then build to the planner's plan ` +
                   "below, and end with your report.",
               "",
-              `Bringing in main: ${mergeInstruction(merge)}`,
+              `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
               "",
               "The plan:",
               "",
@@ -1333,7 +1716,7 @@ export class Hive {
 
     const card = this.requireCard(cardId);
     const check: CheckRound = { round: (card.check?.round ?? 0) + 1, summary: report.summary, bugs: report.bugs };
-    const to = laneAfterCheck("done", check.bugs.length, check.round);
+    const to = laneAfterCheck("done", check.bugs.length, check.round, card.shipAfterCheck);
     const bugs = count(check.bugs.length, "bug", "bugs");
     const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
     // The round and the move land together, so a restart can't fall between them. Going back to Build clears the
@@ -1342,9 +1725,9 @@ export class Hive {
     this.db.transaction(() => {
       for (const issue of report.issues) this.db.addIssue(cardId, { foundIn: "check", ...issue });
       this.db.addEvent(cardId, "check", { ...check, issues: report.issues }, randomUUID());
-      if (to === "tryit") {
-        this.addNote(cardId, "check", `Round ${check.round}: no bugs.`);
-        this.db.updateCard(cardId, { check, lane: to });
+      if (to === "tryit" || to === "ship") {
+        this.addNote(cardId, "check", to === "ship" ? `Round ${check.round}: no bugs. Back to Ship.` : `Round ${check.round}: no bugs.`);
+        this.db.updateCard(cardId, { check, lane: to, shipAfterCheck: false });
       } else if (to === "build") {
         this.addNote(cardId, "check", `Round ${check.round} found ${bugs}. Back to the developer.`);
         this.db.updateCard(cardId, { check, lane: to, build: null });
@@ -1359,6 +1742,7 @@ export class Hive {
     // A round that stops the card leaves it in Check, so the page wouldn't refetch the round or its issues.
     this.deps.hub.emit({ type: "check.updated", cardId, check, issues: this.db.issuesFor(cardId) });
     this.emitCard(cardId);
+    if (to === "ship") void this.stopCardServers(cardId, "check");
     if (to === "tryit") {
       void this.stopCardServers(cardId, "check")
         .then(() => this.startApp(cardId))
@@ -1417,6 +1801,11 @@ export class Hive {
       }
       if (card.lane === "spec" && card.specPath) this.watchSpec(card.id);
       if (card.lane === "build") this.offerBuildWayOn(this.requireCard(card.id));
+      // A landing runs in this process only: a card left marked working in Ship has nothing running any more.
+      if (card.lane === "ship" && card.state === "working") this.setState(card.id, "needs-you");
+      if (card.lane === "ship" && card.landing) {
+        void this.recoverLanding(card.id).catch((error: unknown) => this.log(`Recovering the landing of card ${card.id} failed: ${String(error)}`));
+      }
       // The hive's children ended with it: a card in Try it gets its app again, unless you stopped it.
       if (card.lane === "tryit" && !card.appStopped) {
         void this.startApp(card.id).catch((error: unknown) => this.log(`Starting the app of card ${card.id} failed: ${String(error)}`));

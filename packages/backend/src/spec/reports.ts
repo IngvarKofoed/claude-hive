@@ -162,6 +162,24 @@ export const SETUP_SCHEMA = {
   },
 } as const;
 
+/** The committer's report: the commit message for a card landing on main (docs/specs/2026-11-27-ship-lane.md). */
+export const COMMIT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "subject", "body"],
+  properties: {
+    ...blockable,
+    subject: { type: "string", description: "The commit's first line, in the repo's style" },
+    body: { type: "string", description: "The rest of the message in the repo's style; empty if the style has none" },
+  },
+} as const;
+
+/** The committer's subject and body, or null when there's no usable report. */
+export function parseCommitReport(raw: unknown): { subject: string; body: string } | null {
+  if (!isObject(raw) || raw.status !== "done" || typeof raw.subject !== "string" || !raw.subject.trim()) return null;
+  return { subject: raw.subject.trim(), body: typeof raw.body === "string" ? raw.body.trim() : "" };
+}
+
 export interface Finding {
   kind: "decision" | "fix";
   category: string;

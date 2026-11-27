@@ -22,8 +22,9 @@ export function laneAfter(from: Lane, action: CardAction): Lane | null {
       // A blocked plan, or a blocked build until the spec keeper exists (docs/specs/2026-11-26-build-lane-developer.md)
       return from === "plan" || from === "build" ? "spec" : null;
     case "back-to-build":
-      // One more round for a card that Check stopped (docs/specs/2026-11-27-check-lane-reviewer.md)
-      return from === "check" ? "build" : null;
+      // One more round for a card that Check stopped (docs/specs/2026-11-27-check-lane-reviewer.md), or a landing whose
+      // tests failed on the squash (docs/specs/2026-11-27-ship-lane.md)
+      return from === "check" || from === "ship" ? "build" : null;
     case "move-on":
       // Try it as built, for a card that Check stopped or couldn't review
       return from === "check" ? "tryit" : null;
@@ -55,12 +56,23 @@ export function laneAfterBuild(report: "done" | "blocked" | "missing", mergeUnfi
 export const CHECK_ROUNDS = 2;
 
 /**
+ * Where the landing leaves the card: Done once the commit is on main, Build on a conflict with main, Ship otherwise
+ * (a failing test, a refused push, a cut-off landing), waiting for Retry.
+ */
+export function laneAfterLanding(result: "landed" | "conflict" | "stopped"): Lane {
+  return result === "landed" ? "done" : result === "conflict" ? "build" : "ship";
+}
+
+/**
  * Where the reviewer's report leaves the card. A `done` report without bugs moves it to Try it; with bugs, it goes
  * back to Build while the round is under the limit, and otherwise stays in Check for you. A `blocked` or missing
  * report keeps it in Check.
  */
-export function laneAfterCheck(report: "done" | "blocked" | "missing", bugs: number, round: number): Lane {
+export function laneAfterCheck(
+  report: "done" | "blocked" | "missing", bugs: number, round: number, shipAfterCheck = false,
+): Lane {
   if (report !== "done") return "check";
-  if (bugs === 0) return "tryit";
+  // A card Ship sent back goes straight back to Ship, with no second Try it (docs/specs/2026-11-27-ship-lane.md).
+  if (bugs === 0) return shipAfterCheck ? "ship" : "tryit";
   return round < CHECK_ROUNDS ? "build" : "check";
 }

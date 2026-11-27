@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
 import { laneImplemented, type CardDetail } from "@hive/shared";
@@ -9,6 +8,7 @@ import { Chat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
 import { LaneSteps } from "../components/LaneSteps";
+import { DonePanel, ShipPanel } from "../components/ShipPanel";
 import { TryItPanel } from "../components/TryItPanel";
 import { PlanView } from "../components/PlanView";
 import { ReviewBar } from "../components/ReviewBar";
@@ -46,31 +46,6 @@ function BuildPanel({ detail }: { detail: CardDetail }) {
   );
 }
 
-function BackToTryIt({ id, onMoved }: { id: string; onMoved: () => void }) {
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <div className={styles.stack}>
-      <div>
-        <Button
-          compact
-          onClick={async () => {
-            setError(null);
-            try {
-              await api.backToTryIt(id);
-              onMoved();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Something went wrong.");
-            }
-          }}
-        >
-          Back to Try it
-        </Button>
-      </div>
-      {error ? <p role="alert">{error}</p> : null}
-    </div>
-  );
-}
-
 export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
@@ -79,7 +54,6 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
       <>
         <Panel tone="warning" role="status">
           This lane isn&apos;t implemented yet
-          {detail.lane === "ship" ? <BackToTryIt id={detail.id} onMoved={onMoved} /> : null}
         </Panel>
         <div className={styles.columns}>
           {detail.spec ? (
@@ -99,6 +73,50 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
           </div>
         </div>
       </>
+    );
+  }
+
+  if (detail.lane === "ship") {
+    return (
+      <div className={styles.columns}>
+        <div className={styles.stack}>
+          <ShipPanel detail={detail} onMoved={onMoved} />
+          <Panel title="Landing">
+            <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          </Panel>
+        </div>
+        <div className={styles.stack}>
+          {detail.check ? (
+            <Panel title="Check">
+              <CheckView check={detail.check} />
+            </Panel>
+          ) : null}
+          <BuildPanel detail={detail} />
+          <PlanPanel detail={detail} />
+        </div>
+      </div>
+    );
+  }
+
+  if (detail.lane === "done") {
+    return (
+      <div className={styles.columns}>
+        <DonePanel landed={detail.landed} />
+        <div className={styles.stack}>
+          {detail.spec ? (
+            <Panel title="Spec">
+              <SpecView spec={detail.spec} brief={detail.brief} />
+            </Panel>
+          ) : null}
+          {detail.check ? (
+            <Panel title="Check">
+              <CheckView check={detail.check} />
+            </Panel>
+          ) : null}
+          <BuildPanel detail={detail} />
+          {detail.plan ? <PlanPanel detail={detail} /> : null}
+        </div>
+      </div>
     );
   }
 
@@ -225,7 +243,8 @@ export function Card() {
               </p>
               <div className={styles.titleRow}>
                 <h1 className={styles.title}>{live.detail.title}</h1>
-                {live.detail.state === "working" ? (
+                {/* A landed card needs nothing from you. */}
+                {live.detail.lane === "done" ? null : live.detail.state === "working" ? (
                   <Badge tone="working">▶ working</Badge>
                 ) : (
                   <Badge tone="needs-you">● needs you</Badge>

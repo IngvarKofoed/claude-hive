@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CardDetail } from "@hive/shared";
@@ -12,7 +11,7 @@ const detail: CardDetail = {
   projectName: "m",
   title: "T",
   ideaText: "i",
-  lane: "ship",
+  lane: "mockup",
   state: "needs-you",
   moveError: null,
   branch: null,
@@ -32,22 +31,43 @@ const detail: CardDetail = {
   chat: [],
   pending: null,
   turnRunning: false,
+  landed: null,
+  landing: false,
 };
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("Ship page", () => {
-  it("offers Back to Try it beside the not-implemented notice", async () => {
-    const back = vi.spyOn(api, "backToTryIt").mockResolvedValue({} as never);
-    const onMoved = vi.fn();
-    render(
-      <MemoryRouter>
-        <LaneView live={{ detail, streaming: "", activity: null }} onMoved={onMoved} />
-      </MemoryRouter>,
-    );
+function show(over: Partial<CardDetail>) {
+  render(
+    <MemoryRouter>
+      <LaneView live={{ detail: { ...detail, ...over }, streaming: "", activity: null }} onMoved={() => {}} />
+    </MemoryRouter>,
+  );
+}
+
+describe("LaneView", () => {
+  it("says a lane that isn't built yet isn't implemented", () => {
+    show({});
     expect(screen.getByText(/This lane isn't implemented yet/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Back to Try it" }));
-    expect(back).toHaveBeenCalledWith("c1");
-    expect(onMoved).toHaveBeenCalled();
+  });
+
+  it("gives Ship its panel and a Landing chat", async () => {
+    vi.spyOn(api, "shipPlan").mockResolvedValue({
+      base: "origin/main",
+      uncommitted: [],
+      unpushed: 0,
+      tests: "npm test",
+      noTestsReason: null,
+      checkoutBlocks: false,
+      busy: false,
+    });
+    show({ lane: "ship" });
+    expect(await screen.findByRole("button", { name: "Land on main" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Landing" })).toBeInTheDocument();
+  });
+
+  it("shows the Done panel", () => {
+    show({ lane: "done", landed: { commit: "abcdef1234", subject: "Add it", base: "origin/main", remote: true, checkout: "updated" } });
+    expect(screen.getByText("abcdef1")).toBeInTheDocument();
   });
 });

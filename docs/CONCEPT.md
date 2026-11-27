@@ -178,9 +178,9 @@ It works down a ladder:
 
 Clean history: one commit per card, no merge commits, no branches left behind.
 
-1. Squash the card into one commit on top of the latest main, in the card's worktree and the repo's commit style. The message has the card's title, a line or two from the spec's "What you get", the spec's path, and a `Hive-Card:` trailer that links back to the card.
-2. Re-run the checks: the project's test command.
-3. **Approve:** *"Land printer font size on main and push?"* A rule can turn this step off for a project.
+1. **Approve:** you press **Land on main**, and the rest runs without stopping. A rule can turn this step off for a project.
+2. Squash the card into one commit on top of the latest main, without touching any working folder. A short session writes the message in the repo's commit style, and the hive ends it with the spec's path and a `Hive-Card:` trailer that links back to the card.
+3. Re-run the checks: the tests the worktree's setup found, run on the squash.
 4. Push that commit to main. If main has moved since step 1, start again from step 1.
 5. Bring your checkout's main up to date, when that's safe.
 6. Remove the worktree and the branch.
@@ -189,7 +189,8 @@ Clean history: one commit per card, no merge commits, no branches left behind.
 - **Squashing first** means a conflict is met once, against the finished change, and not again in every checkpoint commit.
 - **Conflicts go back to Build,** because resolving one means writing code. The card then passes through Check again and comes straight back to Ship, with no second Try it.
 - **Ship never touches your uncommitted work.** Main is pushed without going through your checkout. Your checkout's main is updated only when main isn't checked out there, or it is and you have no uncommitted changes. Otherwise Ship tells you, and in a project with no remote it waits.
-- **Nothing is lost by squashing.** Before it squashes, Ship saves each lane's changes into the card's history.
+- **One base for the whole hive.** With a remote, worktrees, Build's merge and Ship all work from a freshly fetched `origin/main`. Ship refuses while your local main has commits origin lacks: you push them first.
+- **Uncommitted work in the card's worktree doesn't land.** Land on main is refused while there is any, and offers to discard it.
 
 ## History and Done
 

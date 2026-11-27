@@ -231,3 +231,53 @@ export function fakeApps(): AppRunner & {
     },
   };
 }
+
+/**
+ * Runs a command to its end in a folder, as Ship runs the tests on the squash: whether it passed, why not, and its last
+ * lines of output. Past the time limit its whole process group is killed, and that counts as a failure.
+ */
+export function runToEnd(
+  command: string, cwd: string, timeoutMs: number,
+): Promise<{ ok: boolean; reason: string | null; output: string[] }> {
+  return new Promise((resolve) => {
+    const output: string[] = [];
+    let partial = "";
+    let timedOut = false;
+    let child: ChildProcess;
+    try {
+      child = spawn("sh", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    } catch (error) {
+      resolve({ ok: false, reason: `It couldn't start: ${(error as Error).message}`, output });
+      return;
+    }
+    const take = (chunk: Buffer) => {
+      const lines = (partial + chunk.toString()).replace(ANSI, "").split(/\r?\n/);
+      partial = lines.pop() ?? "";
+      output.push(...lines);
+      if (output.length > OUTPUT_LINES) output.splice(0, output.length - OUTPUT_LINES);
+    };
+    child.stdout?.on("data", take);
+    child.stderr?.on("data", take);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        // gone already
+      }
+    }, timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ ok: false, reason: `It couldn't start: ${error.message}`, output });
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (partial) output.push(partial);
+      if (timedOut) {
+        const minutes = Math.round(timeoutMs / 60_000) || 1;
+        resolve({ ok: false, reason: `It ran longer than ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`, output });
+      } else if (code === 0) resolve({ ok: true, reason: null, output });
+      else resolve({ ok: false, reason: code !== null ? `It exited with ${code}.` : `It was stopped by ${signal}.`, output });
+    });
+  });
+}

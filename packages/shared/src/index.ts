@@ -43,8 +43,8 @@ export const LANES: readonly LaneInfo[] = [
   { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: true },
   { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: true },
   { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: true },
-  { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: false },
-  { id: "done", name: "Done", who: "", limit: null, withYou: false, implemented: false },
+  { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: true },
+  { id: "done", name: "Done", who: "", limit: null, withYou: false, implemented: true },
 ];
 
 /** Whether a lane's slice is built yet (temporary, see LaneInfo.implemented). */
@@ -226,6 +226,37 @@ export interface SetupReport {
 /** How many ports each card gets, starting at `CardDetail.port`. */
 export const CARD_PORTS = 10;
 
+// ---------- Ship ----------
+
+/** The one commit a card landed as (docs/specs/2026-11-27-ship-lane.md). */
+export interface Landed {
+  commit: string;
+  subject: string;
+  /** What it landed on: "origin/main", or "main" in a project without a remote. */
+  base: string;
+  /** Pushed to origin. */
+  remote: boolean;
+  /** "updated", or why your checkout's main wasn't brought up to date. */
+  checkout: string;
+}
+
+/** What Land on main would do now, for the Ship page (GET /api/cards/:id/ship). */
+export interface ShipPlan {
+  base: "origin/main" | "main";
+  /** Uncommitted work in the card's worktree, as `git status --porcelain` lines. Blocks Land on main. */
+  uncommitted: string[];
+  /** Commits on your local main that origin/main lacks. Blocks Land on main. */
+  unpushed: number;
+  /** The test command that will run on the squash, or null. */
+  tests: string | null;
+  /** Why no tests will run, when `tests` is null. */
+  noTestsReason: string | null;
+  /** Without a remote: your checkout has main checked out with uncommitted changes, so main can't move yet. */
+  checkoutBlocks: boolean;
+  /** Another card of the project is landing. */
+  busy: boolean;
+}
+
 // ---------- Board ----------
 
 /** working: a turn is running. needs-you: it's your turn, or a question waits. */
@@ -311,6 +342,10 @@ export interface CardDetail extends CardSummary {
   apps: AppProcess[];
   /** You stopped the app: a hive restart or a finished setup leaves it stopped. */
   appStopped: boolean;
+  /** Where the card landed, once it has. */
+  landed: Landed | null;
+  /** Land on main is running for this card. */
+  landing: boolean;
   /** Spec issues found so far, waiting for the spec keeper. */
   issues: SpecIssue[];
   /** Decisions made without you. */
@@ -334,6 +369,11 @@ export interface NewCardBody {
 
 export interface MoveBody {
   lane: Lane;
+}
+
+/** Land on main (POST /api/cards/:id/land). `discard` throws away the worktree's uncommitted work first. */
+export interface LandBody {
+  discard?: boolean;
 }
 
 /** Try it feedback (POST /api/cards/:id/feedback). Only `build` is accepted as the lane for now. */

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { processApps, type AppEntry, type AppRunner } from "./apps";
+import { processApps, runToEnd, type AppEntry, type AppRunner } from "./apps";
 import { waitFor } from "../testing";
 
 const listening = (port: number) =>
@@ -81,4 +81,12 @@ describe("the app runner", () => {
     runner.start("card", [server(5975)], worktree, () => {});
     expect(runner.status("card")[0]).toMatchObject({ state: "running", output });
   }, 20000);
+
+  it("runs a command to its end, and kills one past its time limit", async () => {
+    make();
+    expect(await runToEnd("echo ok; echo done", worktree, 5000)).toEqual({ ok: true, reason: null, output: ["ok", "done"] });
+    expect(await runToEnd("echo bad; exit 2", worktree, 5000)).toMatchObject({ ok: false, reason: "It exited with 2.", output: ["bad"] });
+    const slow = await runToEnd("echo start; sleep 30", worktree, 300);
+    expect(slow).toMatchObject({ ok: false, reason: expect.stringMatching(/^It ran longer than/) });
+  }, 15000);
 });

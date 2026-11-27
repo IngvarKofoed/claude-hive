@@ -6,6 +6,7 @@ import type {
   CardDetail,
   CardSummary,
   FeedbackBody,
+  ShipPlan,
   MessageBody,
   MoveBody,
   NewCardBody,
@@ -56,6 +57,9 @@ export const api = {
     request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/feedback`, { text } satisfies FeedbackBody),
   accept: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/accept`),
   backToTryIt: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-tryit`),
+  shipPlan: (id: string) => request<ShipPlan>("GET", `/cards/${encodeURIComponent(id)}/ship`),
+  land: (id: string, discard?: boolean) =>
+    request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/land`, discard ? { discard: true } : undefined),
   setup: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/setup`),
   appStart: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/start`),
   appStop: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/stop`),

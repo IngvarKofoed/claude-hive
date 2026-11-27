@@ -32,6 +32,8 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     chat: [],
     pending: null,
     turnRunning: false,
+    landed: null,
+    landing: false,
     ...over,
   };
 }

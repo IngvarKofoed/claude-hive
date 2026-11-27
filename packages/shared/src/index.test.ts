@@ -9,8 +9,8 @@ describe("lanes", () => {
   });
 
   it("marks the lanes built so far as implemented, and the rest not", () => {
-    expect(LANES.filter((l) => l.implemented).map((l) => l.id)).toEqual(["ideas", "refine", "spec", "plan", "build", "check", "tryit"]);
+    expect(LANES.filter((l) => l.implemented).map((l) => l.id)).toEqual(["ideas", "refine", "spec", "plan", "build", "check", "tryit", "ship", "done"]);
     expect(laneImplemented("build")).toBe(true);
-    expect(laneImplemented("ship")).toBe(false);
+    expect(laneImplemented("mockup")).toBe(false);
   });
 });

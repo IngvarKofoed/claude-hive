@@ -44,6 +44,8 @@ const detail: CardDetail = {
   chat: [{ kind: "message", id: "m1", at: "t", from: "you", text: "first" }],
   pending: null,
   turnRunning: true,
+  landed: null,
+  landing: false,
 };
 
 const emit = (event: HiveEvent) => listeners.forEach((l) => l(event));

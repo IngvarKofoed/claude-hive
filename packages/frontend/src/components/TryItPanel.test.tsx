@@ -44,6 +44,8 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
     chat: [],
     pending: null,
     turnRunning: false,
+    landed: null,
+    landing: false,
     ...over,
   };
 }

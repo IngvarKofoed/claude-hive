@@ -19,7 +19,13 @@ describe("CardTile", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("shows ▶ working", () => {
+  it("shows no badge for a landed card", () => {
+    render(<CardTile card={{ ...base, lane: "done" }} />);
+    expect(screen.queryByText("● needs you")).toBeNull();
+    expect(screen.queryByText("Not implemented yet")).toBeNull();
+  });
+
+    it("shows ▶ working", () => {
     render(<CardTile card={{ ...base, lane: "refine", state: "working" }} />);
     expect(screen.getByText("▶ working")).toBeInTheDocument();
   });
@@ -46,7 +52,7 @@ describe("CardTile", () => {
   });
 
   it("shows Not implemented yet instead of a badge in a lane that isn't built", () => {
-    render(<CardTile card={{ ...base, lane: "ship", state: "working" }} />);
+    render(<CardTile card={{ ...base, lane: "mockup", state: "working" }} />);
     expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
     expect(screen.queryByText("▶ working")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();

@@ -37,7 +37,7 @@ interface Props {
 }
 
 export function Chat({ detail, streaming, activity }: Props) {
-  const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check";
+  const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
   const [text, setText] = useState("");
