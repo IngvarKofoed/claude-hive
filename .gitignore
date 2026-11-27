@@ -7,3 +7,6 @@ packages/frontend/dist/
 
 # Snapshots and logs the Playwright MCP writes while verifying the page
 .playwright-mcp/
+
+# Claude Code session worktrees (each a checkout of its own, never part of this repo)
+.claude/worktrees/
