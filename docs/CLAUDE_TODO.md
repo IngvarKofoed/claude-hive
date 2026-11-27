@@ -19,3 +19,12 @@ is not a record of anything; `docs/changelog/` is. A line you add here is read a
 - **Ship's Approve item isn't built** — the docs make the push at Ship an Approve item (`PendingItem` kind `approve`),
   which For you would list. The code's Land on main button on the card page stands in for it, so For you lists a Ship
   card by its lane and opens the card. Surfaced by `2026-11-27-for-you`.
+- **A question cut off by a restart is never closed** — a pending item whose turn the hive cut off keeps
+  `answer IS NULL`. `dropOpenPending` only withdraws items that still have a waiter, and nothing closes them when the
+  card leaves the lane. So after the resumed session carries on, the card page and For you, which lists a question
+  first, can show an old Build question on a card in Try it, and answering it starts a new turn there. Surfaced by
+  the commit-time review of `2026-11-27-for-you`.
+- **The hive can't serve its built page from a folder under `.claude/`** — `res.sendFile` and `express.static` in
+  `packages/backend/src/app.ts` refuse paths with a dot-folder in them, so every page route returns 500 when the hive
+  runs from a worktree at `.claude/worktrees/<name>`. The API still works, and the dev page on Vite is unaffected.
+  Surfaced while verifying `2026-11-27-for-you`.
