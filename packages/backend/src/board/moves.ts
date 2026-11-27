@@ -8,7 +8,8 @@ export function canMove(from: Lane, to: Lane): boolean {
 }
 
 /** What you did on the card page that moves a card. */
-export type CardAction = "good" | "signoff" | "back-to-spec" | "back-to-build" | "move-on";
+export type CardAction =
+  | "good" | "signoff" | "back-to-spec" | "back-to-build" | "move-on" | "feedback" | "accept" | "back-to-tryit";
 
 /** The lane a card goes to when you act on it, or null when that action doesn't move a card from this lane. */
 export function laneAfter(from: Lane, action: CardAction): Lane | null {
@@ -26,6 +27,14 @@ export function laneAfter(from: Lane, action: CardAction): Lane | null {
     case "move-on":
       // Try it as built, for a card that Check stopped or couldn't review
       return from === "check" ? "tryit" : null;
+    case "feedback":
+      // Your words from Try it go to the same developer (docs/specs/2026-11-27-worktree-setup-and-try-it.md)
+      return from === "tryit" ? "build" : null;
+    case "accept":
+      return from === "tryit" ? "ship" : null;
+    case "back-to-tryit":
+      // Out of Ship, until Ship is built
+      return from === "ship" ? "tryit" : null;
   }
 }
 

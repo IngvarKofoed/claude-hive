@@ -5,6 +5,7 @@ import type {
   BoardResponse,
   CardDetail,
   CardSummary,
+  FeedbackBody,
   MessageBody,
   MoveBody,
   NewCardBody,
@@ -50,6 +51,15 @@ export const api = {
   backToSpec: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-spec`),
   backToBuild: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-build`),
   moveOn: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/move-on`),
+  // Try it: send your words to Build, accept into Ship, bring a Ship card back, and run the worktree setup.
+  feedback: (id: string, text: string) =>
+    request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/feedback`, { text } satisfies FeedbackBody),
+  accept: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/accept`),
+  backToTryIt: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-tryit`),
+  setup: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/setup`),
+  appStart: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/start`),
+  appStop: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/stop`),
+  appRestart: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/restart`),
   answer: (itemId: string, body: AnswerBody) =>
     request<unknown>("POST", `/for-you/${encodeURIComponent(itemId)}`, body),
 };

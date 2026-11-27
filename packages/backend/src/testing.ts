@@ -37,11 +37,27 @@ export class FakeTurn implements RunningTurn {
   }
 }
 
+/** A setup report that sets nothing up, for the fake runner's default setup turns. */
+export const EMPTY_SETUP_REPORT = {
+  status: "done", blockedReason: null, installed: "Nothing to install.", start: [], test: "", shared: [], notes: "",
+};
+
 export class FakeRunner implements SessionRunner {
   turns: FakeTurn[] = [];
+  /**
+   * The worktree setup's turns, kept apart so a test about other lanes never meets one as `last`. Unless
+   * `holdSetup` is set, each one ends at once with EMPTY_SETUP_REPORT.
+   */
+  setupTurns: FakeTurn[] = [];
+  holdSetup = false;
 
   start(request: TurnRequest, handlers: TurnHandlers): RunningTurn {
     const turn = new FakeTurn(request, handlers);
+    if (request.role.name === "setup") {
+      this.setupTurns.push(turn);
+      if (!this.holdSetup) setTimeout(() => void turn.end({ kind: "ok", report: EMPTY_SETUP_REPORT }), 0);
+      return turn;
+    }
     this.turns.push(turn);
     return turn;
   }

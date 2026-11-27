@@ -105,6 +105,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | Role | Lane | Model | May change (told in its instructions) | Session kind |
 | --- | --- | --- | --- | --- |
 | `product-owner` | Refine | Opus | Nothing in the repo; writes the card's brief | Conversation |
+| `setup` | Refine, in the background | Sonnet | Only git-ignored local files, through the hive's copy tool, and dependencies; never tracked files | Work, new for each run |
 | `designer` | Mockup | Opus | Code, in the card's worktree, if its mockup needs it | Conversation |
 | `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
 | `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
@@ -137,7 +138,7 @@ query({
     settingSources: ["user", "project", "local"],
     outputFormat: role.report,       // hands-off roles: a fixed-format report the board engine routes on
     includePartialMessages: true,    // text streams to the page as it's written
-    mcpServers: { hive },            // the hive's own tools, e.g. write_brief, in-process
+    mcpServers: { hive },            // the hive's own tools, in-process: write_brief, copy_local_files
     allowedTools: hiveToolNames,     // the hive's own tools never wait on a permission check
     canUseTool,                      // questions, and anything auto mode passes on
   },
@@ -167,10 +168,10 @@ query({
 
 | From | Event | To |
 | --- | --- | --- |
-| Ideas | You drag the card | Refine, and the worktree is created |
+| Ideas | You drag the card | Refine, and the worktree is created. The card gets its ports, and the worktree's setup starts in the background. |
 | Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
 | Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
-| Plan | The planner's report is `done` | Build. Its plan is stored on the card, Check's rounds start over, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. |
+| Plan | The planner's report is `done` | Build. Its plan is stored on the card, Check's rounds start over, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. Build first waits for a setup that's running, or runs one for a worktree that never had one. |
 | Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
 | Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
 | Build | The developer's report is `done` | Check, with the issues found so far still on the card. The report is stored first, then the hive commits a checkpoint, and a new reviewer starts the next round. |
@@ -183,9 +184,11 @@ query({
 | Check | You press **Back to Build** or **Move on** | Build, with the last round's bugs, or Try it |
 | Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. Until the spec keeper exists, a round without bugs goes straight to Try it, with its issues unjudged. |
 | Check | Everything passes, but the batch has a `code-wrong` verdict | Plan, for one amendment plan covering every `code-wrong` issue |
-| Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. |
+| Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. Until the hive picks the lane, only Build is offered: your words go to the same developer, and Check starts again from round 1. |
 | Try it | You answer a `changes-signoff` question with "change the code" | Plan, for an amendment plan |
 | Try it | You accept | Ship |
+| Ship | You press **Back to Try it** (until Ship is built) | Try it |
+| Build, Check, Try it | The card moves to another lane | That lane, after stopping what listens on the card's ports from inside its worktree |
 | Ship | A conflict with the latest main | Build. After Check passes, it comes straight back to Ship. |
 | Ship | It's on main | Done |
 | any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you |
@@ -196,7 +199,7 @@ query({
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
-- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's.
+- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's. The setup's questions are refused: it runs in the background with nobody to ask.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -246,7 +249,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 - **One turn at a time per session.** A turn the hive starts for a session that is already busy waits in a queue for that session. An example is two spec questions for the spec keeper, one from the reviewer and one from the tester. A message you type still joins the running turn.
 - **A cut-off turn is resumed once in a hands-off lane.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops. A chat lane's cut-off turn is not resumed: the chat says the reply was cut off and waits for your next message, since a retry would only talk over you.
 - **Answers outlive the turn that asked.** A question or Approve item waiting for you is a `PendingItem` row. If the turn that asked is gone when you answer, the answer goes to that session as a new turn, together with the question and options it asked.
-- **Preview apps are tracked in the database,** with their process ids and ports, so after a restart the preview service can still stop the ones it started.
+- **The card apps the hive runs end with it.** At startup it sweeps a Try it card's ports and starts its app again, unless you stopped it: your Stop is stored on the card.
 - **Ship can start over.** Nothing reaches main before the push, so a Ship that was cut off starts again from the squash.
 
 ## Spec Keeper and Review Gate
@@ -280,7 +283,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | When | What the git service does |
 | --- | --- |
 | Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
-| Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the project's setup: copy the listed local files, run the install command |
+| Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> main`, then the worktree's setup in the background. A setup session picks the git-ignored local files the app needs, and the hive copies them: never over an existing file, as copy-on-write clones, never from outside the checkout. The session installs dependencies and works out how to start the app and its tests on the card's ports. |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
 | Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. Check, which changes nothing, makes none. |
 | Build starts | Merge the local main into `hive/<card>` (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
@@ -292,23 +295,23 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 ## Preview Service
 
 - **Each project sets a run command** that takes its port from an environment variable.
-- **The service gives each card a port** and starts the card's app from its worktree for Mockup and Try it.
-- **It keeps a list of what it started** and only ever stops those processes.
+- **Each card has a block of 10 ports** from 5200–5999, assigned when its setup starts and checked free. The setup works out how to start the app on them: each process's command, folder and port.
+- **In Try it the hive runs the app** from those commands, as its own child processes, each in its own process group: it starts when the card enters Try it, and stops on Stop, when the card leaves Try it, and when the hive exits. Each command is checked first: its port must be the card's, its folder inside the worktree. The page shows each process's state, link and last output lines. Mockup will use the same runner.
+- **It keeps a list of what it started** and only ever stops those processes. Besides those, when a card leaves Build, Check or Try it, the hive stops what listens on the card's ports from inside its worktree, whoever started it.
 - **Screenshots** are taken with Playwright: of the approved mockup at Good, and of the built screens in Check for the tester to compare.
 
 ## Data Model
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, trustWarning, runCommand, setupCommand, testCommand, localFiles, laneLimits |
-| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port, specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done) |
+| **Project** | name, path, trustWarning, runCommand, testCommand, laneLimits. The setup session decides each card's local files and install; `runCommand` and `testCommand` wait for the preview service and Ship. |
+| **Card** | project, title, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
 | **Issue** | card, foundIn, where (the spec's section), problem, guess (what was built instead), verdict, level, reason, flips |
 | **Decision** | card, lane, what, alternative, sessionId, source |
 | **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
-| **Process** | card, port, pid, command, startedAt. What the preview service started. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
 | **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn) and `brief` (every version of the brief) so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while. |
 
@@ -332,6 +335,9 @@ POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
 POST   /api/cards/:id/stop                Stop the running turn
 POST   /api/cards/:id/retry               Send a failed turn's message again
 POST   /api/cards/:id/accept              Accept in Try it
+POST   /api/cards/:id/back-to-tryit       Out of Ship, until Ship is built
+POST   /api/cards/:id/setup               Set up the worktree (again)
+POST   /api/cards/:id/app/start           Start the card's app in Try it · /app/stop · /app/restart
 GET    /api/for-you                       Everything waiting for you
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards
@@ -384,7 +390,7 @@ The page can start sessions that run commands on your machine, so it must never 
 ## Risks to Check First
 
 1. **Subscription limits** with several sessions running at once. The SDK reports plan usage, but how the hive should pace itself near the limits is still open.
-2. **Several copies of one app running side by side:** ports, local databases, and file watchers that also see `.claude/worktrees`.
+2. **Several copies of one app running side by side:** ports, local databases, and file watchers that also see `.claude/worktrees`. Each card's own ports and copied local files cover the first two for apps whose ports can be set from outside; a port fixed in a tracked file, a server database and file watchers remain.
 3. **Comparing screens with the mockup:** whether screenshots plus the tester's judgment are reliable enough, or a pixel diff is needed.
 4. **Session archive:** Claude Code deletes old session files after a while, so the archive at Done must run before that happens.
 5. **Projects in folders nobody has trusted.** Sessions there run without the project's CLAUDE.md. Adding a project runs a trust probe, a throwaway Haiku session that reports which CLAUDE.md files load, and the project's row warns when the repo has one that doesn't load.

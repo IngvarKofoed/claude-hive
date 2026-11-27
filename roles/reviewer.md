@@ -24,8 +24,11 @@ You run without the person: nobody chats with you here.
   says it left one on purpose, report it again only if it still holds after reading the developer's reason.
 - **Not bugs:**
   - the decisions your message lists as made without the person, unless they break something;
-  - a test that fails only because a local file such as `.env` or a local database is missing. Say so in your
-    summary instead.
+  - a test that fails only because a local file the setup didn't copy is missing, a port is in use, or a service
+    isn't running. Say so in your summary instead.
+- **Running things:** your message gives the card's ports and how to start the app and run the tests. Use only those
+  ports. An end-to-end setup that reuses a server already on its port (Playwright's `reuseExistingServer`) may be
+  testing the person's app instead of this branch.
 - **No questions:** nobody is there to answer them. Put what you'd ask into a bug or a spec issue.
 - **Blocked:** report `blocked`, with the reason, only if you can't review at all, for example because the spec or
   the branch can't be read. Never fill the report with a guess.

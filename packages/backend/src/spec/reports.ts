@@ -124,6 +124,44 @@ export const CHECK_SCHEMA = {
   },
 } as const;
 
+/** The setup session's report (docs/specs/2026-11-27-worktree-setup-and-try-it.md, Key decisions: the setup's report). */
+export const SETUP_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "installed", "start", "test", "shared", "notes"],
+  properties: {
+    ...blockable,
+    installed: { type: "string", description: "What you ran to install dependencies, or that none were needed" },
+    start: {
+      type: "array",
+      description: "The app's long-running servers, one entry per process: the hive runs each with `sh -c` in its " +
+        "folder and keeps it running for Try it",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["what", "command", "dir", "port", "url"],
+        properties: {
+          what: { type: "string", description: "What it starts, e.g. backend" },
+          command: { type: "string", description: "The command, with its port settings, run with sh -c in dir" },
+          dir: { type: "string", description: "The folder to run it in, relative to the worktree; . for the root" },
+          port: { type: "integer", description: "The one port of the card's block this process listens on" },
+          url: { type: ["string", "null"], description: "The address to open, or null" },
+        },
+      },
+    },
+    test: {
+      type: "string",
+      description: "The command that runs the tests in the worktree, and nothing else; empty if there are none. " +
+        "Explanations go in notes.",
+    },
+    shared: {
+      type: "array", items: { type: "string" },
+      description: "What the worktree still shares with the checkout: a server database, a port you couldn't move, a container",
+    },
+    notes: { type: "string", description: "Anything else the person or the developer should know" },
+  },
+} as const;
+
 export interface Finding {
   kind: "decision" | "fix";
   category: string;
@@ -138,6 +176,17 @@ export type ReviewReport =
 
 export type CheckReport =
   | { status: "done"; summary: string; bugs: Bug[]; issues: ReportedIssue[] }
+  | { status: "blocked"; reason: string };
+
+export type SetupResult =
+  | {
+      status: "done";
+      installed: string;
+      start: { what: string; command: string; dir?: string; port?: number; url: string | null }[];
+      test: string;
+      shared: string[];
+      notes: string;
+    }
   | { status: "blocked"; reason: string };
 
 export type PlanReport = { status: "done"; plan: Plan } | { status: "blocked"; reason: string };
@@ -245,6 +294,32 @@ export function parseCheckReport(raw: unknown): CheckReport | null {
     summary: raw.summary,
     bugs: raw.bugs.map(({ where, problem }) => ({ where, problem })),
     issues: raw.issues.map(({ where, problem, guess }) => ({ where, problem, guess })),
+  };
+}
+
+/** The setup session's report, or null when there is none or it doesn't have the expected shape. */
+export function parseSetupReport(raw: unknown): SetupResult | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done") return null;
+  if (typeof raw.installed !== "string" || typeof raw.test !== "string" || typeof raw.notes !== "string") return null;
+  if (!strings(raw.shared) || !Array.isArray(raw.start)) return null;
+  const startOk = raw.start.every(
+    (s: unknown) => isObject(s) && typeof s.what === "string" && typeof s.command === "string" &&
+      (s.url === null || typeof s.url === "string") && (s.dir === undefined || typeof s.dir === "string") &&
+      (s.port === undefined || Number.isInteger(s.port)),
+  );
+  if (!startOk) return null;
+  return {
+    status: "done",
+    installed: raw.installed,
+    start: raw.start.map((s: any) => ({
+      what: s.what, command: s.command, url: s.url,
+      ...(s.dir !== undefined ? { dir: s.dir } : {}), ...(s.port !== undefined ? { port: s.port } : {}),
+    })),
+    test: raw.test,
+    shared: raw.shared,
+    notes: raw.notes,
   };
 }
 

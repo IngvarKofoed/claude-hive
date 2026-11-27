@@ -62,19 +62,45 @@ const briefShape = {
   openPoints: z.array(z.string()).describe("What is still open; empty when nothing is"),
 };
 
+const copyShape = {
+  paths: z.array(z.string()).describe("Paths relative to the checkout, as the list gave them; a folder ends with /"),
+};
+
+/** The hive's tools a session is offered: only those its role was given. */
+function hiveToolList(tools: HiveTools) {
+  const list = [];
+  if (tools.writeBrief) {
+    const writeBrief = tools.writeBrief;
+    list.push(tool(
+      "write_brief",
+      "Replace the card's brief with this one. Send every section each time; lists may be empty.",
+      briefShape,
+      async (args) => ({ content: [{ type: "text" as const, text: await writeBrief(args) }] }),
+    ));
+  }
+  if (tools.copyLocalFiles) {
+    const copy = tools.copyLocalFiles;
+    list.push(tool(
+      "copy_local_files",
+      "Copy git-ignored files or folders from the person's checkout into this worktree. Existing files are kept; " +
+        "folders are copied file by file. Returns one line per path: copied, kept, or refused with the reason.",
+      copyShape,
+      async (args) => ({ content: [{ type: "text" as const, text: await copy(args.paths) }] }),
+    ));
+  }
+  return list;
+}
+
+/** The allowed tool names for a set of hive tools, so they never wait on a permission check. */
+export function hiveToolNames(tools: HiveTools): string[] {
+  return [
+    ...(tools.writeBrief ? ["mcp__hive__write_brief"] : []),
+    ...(tools.copyLocalFiles ? ["mcp__hive__copy_local_files"] : []),
+  ];
+}
+
 export function hiveServer(tools: HiveTools) {
-  return createSdkMcpServer({
-    name: "hive",
-    version: "0.1.0",
-    tools: [
-      tool(
-        "write_brief",
-        "Replace the card's brief with this one. Send every section each time; lists may be empty.",
-        briefShape,
-        async (args) => ({ content: [{ type: "text", text: await tools.writeBrief(args) }] }),
-      ),
-    ],
-  });
+  return createSdkMcpServer({ name: "hive", version: "0.1.0", tools: hiveToolList(tools) });
 }
 
 /** The passing activity line for a tool call, or null for calls that show up some other way. */
@@ -85,6 +111,8 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
       return null;
     case "mcp__hive__write_brief":
       return "updating the brief…";
+    case "mcp__hive__copy_local_files":
+      return "copying local files…";
     case "Read":
       return `reading ${path(input.file_path)}…`;
     case "Glob":
@@ -130,7 +158,7 @@ export class SdkRunner implements SessionRunner {
           settingSources: [...SETTING_SOURCES],
           includePartialMessages: true,
           ...(request.hiveTools
-            ? { mcpServers: { hive: hiveServer(request.hiveTools) }, allowedTools: ["mcp__hive__write_brief"] }
+            ? { mcpServers: { hive: hiveServer(request.hiveTools) }, allowedTools: hiveToolNames(request.hiveTools) }
             : {}),
           ...(request.outputFormat ? { outputFormat: { type: "json_schema", schema: request.outputFormat } } : {}),
           ...(kept ? {} : { persistSession: false }),

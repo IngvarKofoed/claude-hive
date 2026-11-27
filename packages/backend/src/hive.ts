@@ -1,14 +1,16 @@
 // The hive's orchestration: projects, cards and their moves, and every session's turns, from Ideas through Refine,
-// Spec, Plan, Build and Check (docs/specs/2026-11-26-board-refine-chat.md, docs/specs/2026-11-26-spec-lane-review-gate.md,
-// docs/specs/2026-11-26-build-lane-developer.md, docs/specs/2026-11-27-check-lane-reviewer.md).
+// Spec, Plan, Build, Check and Try it, with each card's worktree setup (docs/specs/2026-11-26-board-refine-chat.md,
+// docs/specs/2026-11-26-spec-lane-review-gate.md, docs/specs/2026-11-26-build-lane-developer.md,
+// docs/specs/2026-11-27-check-lane-reviewer.md, docs/specs/2026-11-27-worktree-setup-and-try-it.md).
 // Plain code decides; Claude sessions only do the work (packages/backend/CLAUDE.md, Rules).
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
-  FileChange, Lane, PendingItem, Plan, Question, SpecInfo,
+  FeedbackBody, FileChange, Lane, PendingItem, Plan, Question, SetupReport, SpecInfo,
 } from "@hive/shared";
+import { CARD_PORTS } from "@hive/shared";
 import { CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterPlan } from "./board/moves";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
@@ -16,9 +18,11 @@ import type { Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOu
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
   CHECK_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, parseCheckReport, parseDeveloperReport, parsePlanReport,
-  parseReviewReport, PLAN_SCHEMA, REVIEW_SCHEMA,
+  parseReviewReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
-import type { MergeResult } from "./git";
+import type { CopyOutcome, LocalFileList, MergeResult } from "./git";
+import { fakeApps, type AppEntry, type AppRunner } from "./preview/apps";
+import { cardPorts, fakePorts, type PortService } from "./preview/ports";
 
 /** The git service's API (packages/backend/src/git). */
 export interface GitService {
@@ -32,6 +36,8 @@ export interface GitService {
   abortMerge(worktree: string): Promise<void>;
   commitAll(worktree: string, message: string): Promise<boolean>;
   changedFiles(worktree: string): Promise<FileChange[]>;
+  listLocalFiles(root: string): Promise<LocalFileList>;
+  copyLocalFiles(root: string, worktree: string, paths: string[]): Promise<CopyOutcome[]>;
   cardSlug(title: string, id: string): string;
 }
 
@@ -54,6 +60,12 @@ export interface HiveDeps {
   specFormatDir: string;
   /** Today's date as YYYY-MM-DD, for spec file names. */
   today?: () => string;
+  /** Each card's ports. server.ts passes the real one; without it, blocks are handed out without checking the machine. */
+  ports?: PortService;
+  /** How long a setup turn may run before it's stopped. Ten minutes unless a test says otherwise. */
+  setupLimitMs?: number;
+  /** Runs the card's app in Try it. server.ts passes the real one; without it, every app runs at once on paper. */
+  apps?: AppRunner;
   log?: (message: string) => void;
 }
 
@@ -67,6 +79,8 @@ const LANE_ROLE: Partial<Record<Lane, string>> = {
 };
 /** The blind spec reviewer of the review gate; Check's reviewer is LANE_ROLE.check. */
 const SPEC_REVIEWER = "spec-reviewer";
+/** The worktree's setup session: in the background, its sessions are filed under Refine, where the worktree is made. */
+const SETUP = "setup";
 const CHAT_LANES: Lane[] = ["refine", "spec"];
 
 const AUTHOR: Record<string, ChatAuthor> = {
@@ -124,6 +138,84 @@ function planText(plan: Plan | null): string {
 /** Bugs as a list, for the developer's and the next reviewer's messages. */
 const bugList = (bugs: Bug[]) => list(bugs.map((b) => `${b.where}: ${b.problem}`));
 
+const portRange = (first: number) => `${first}–${first + CARD_PORTS - 1}`;
+
+/**
+ * The card's ports and how to run things in its worktree, for the developer's and the reviewer's messages: the ports
+ * always, so nothing runs on the project's defaults beside the person's own copy, and the setup's commands once done.
+ */
+function runningText(card: CardRow): string | null {
+  if (card.port === null) return null;
+  const lines = [
+    `Running things in this worktree: use only the card's ports, ${portRange(card.port)}, so nothing clashes with the ` +
+      "person's own copy of the app.",
+  ];
+  const s = card.setup;
+  if (s?.status === "done") {
+    for (const c of s.start) lines.push(`- Start ${c.what}: \`${c.command}\`${c.url ? ` (${c.url})` : ""}`);
+    if (s.test) lines.push(`- Tests: ${s.test}`);
+    if (s.shared.length) lines.push(`- Still shared with the person's checkout: ${s.shared.join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
+const withRunning = (card: CardRow, parts: string[]) => {
+  const running = runningText(card);
+  return running ? [...parts, "", running] : parts;
+};
+
+const noSetup = (): SetupReport => ({
+  status: "running", reason: null, copied: [], leftOut: [], installed: "", start: [], test: "", shared: [], notes: "",
+});
+
+const portFromUrl = (url: string | null): number | null => {
+  try {
+    const port = Number(new URL(url ?? "").port);
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The setup's start entries as the hive will run them, each checked: its port is one of the card's, its folder is
+ * inside the worktree, and no two share a port. A setup made before entries had a port gives it through its URL
+ * (docs/specs/2026-11-27-try-it-runs-the-app.md, The setup's report).
+ */
+function appEntries(card: CardRow): AppEntry[] {
+  const worktree = card.worktreePath!;
+  const seen = new Set<number>();
+  return (card.setup?.start ?? []).map((s): AppEntry => {
+    const dir = s.dir ?? ".";
+    const port = s.port ?? portFromUrl(s.url);
+    const entry: AppEntry = { what: s.what, command: s.command, dir, port, url: s.url };
+    const folder = resolve(worktree, dir);
+    if (port === null) return { ...entry, refused: "It has no port. Prepare it again." };
+    if (card.port === null || port < card.port || port >= card.port + CARD_PORTS) {
+      return { ...entry, refused: `Its port ${port} is outside the card's ports. Prepare it again.` };
+    }
+    if (folder !== worktree && !folder.startsWith(worktree + sep)) {
+      return { ...entry, refused: "Its folder is outside the worktree. Prepare it again." };
+    }
+    if (seen.has(port)) return { ...entry, refused: `Another process already uses port ${port}. Prepare it again.` };
+    seen.add(port);
+    return entry;
+  });
+}
+
+/** A path as the listing and the copy tool give it, without a folder's trailing slash, for comparing. */
+const bare = (path: string) => path.replace(/\/+$/, "");
+
+const human = (bytes: number) =>
+  bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1024 ** 3
+    ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+
+/** Up to three names, then "and N more". */
+function some(names: string[]): string {
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+}
+
 /** What bringing in main did, as the hive's note in Build's chat. */
 export function mergeNote(merge: MergeResult): string {
   switch (merge.kind) {
@@ -151,12 +243,21 @@ function mergeInstruction(merge: MergeResult): string {
   }
 }
 
+/** What a role's turns need beyond the basics. A background turn leaves the card's state and the chat alone. */
+interface TurnOptions {
+  extraInstructions?: string;
+  outputFormat?: Record<string, unknown>;
+  persist?: boolean;
+  background?: boolean;
+}
+
 /** Hands-off roles whose turn cut off by a restart is resumed once, and what they're told. */
 const RESUMED: Record<string, { who: string; message: string }> = {
   planner: { who: "planner", message: "Finish the build plan and report it." },
   // Not "build to the plan": a developer may have been fixing the bugs Check found.
   developer: { who: "developer", message: "Carry on with what you were doing, then end with your report." },
   reviewer: { who: "reviewer", message: "Finish the review and report." },
+  setup: { who: "setup", message: "Finish setting up the worktree and report." },
 };
 
 /** A question waiting for an answer that a live turn is blocked on. */
@@ -175,10 +276,20 @@ export class Hive {
   private moving = new Set<string>(); // card ids with a move in flight
   private starting = new Set<string>(); // card ids whose developer is being started (bringing in main)
   private reviews = new Map<string, { sessionId: string; hash: string }>(); // card id → running review and H0
+  private setupTimers = new Map<string, ReturnType<typeof setTimeout>>(); // setup session id → its time limit
+  private timedOut = new Set<string>(); // setup session ids stopped by their time limit
+  private appTimers = new Map<string, ReturnType<typeof setTimeout>>(); // card id → a pending app.updated for output
+  private portQueue: Promise<unknown> = Promise.resolve(); // port blocks are handed out one card at a time
+  private setupStopped = new Set<string>(); // card ids whose setup you stopped in Build before its turn started
+  private readonly ports: PortService;
+  private readonly apps: AppRunner;
   private lastSpec = new Map<string, string>(); // card id → the spec.updated last sent, to send only changes
   private watch = new SpecWatch();
 
-  constructor(private deps: HiveDeps) {}
+  constructor(private deps: HiveDeps) {
+    this.ports = deps.ports ?? fakePorts();
+    this.apps = deps.apps ?? fakeApps();
+  }
 
   private get db() {
     return this.deps.db;
@@ -191,6 +302,7 @@ export class Hive {
   /** Stops watching spec folders. */
   close(): void {
     this.watch.closeAll();
+    for (const timer of [...this.appTimers.values(), ...this.setupTimers.values()]) clearTimeout(timer);
   }
 
   // ---------- reads ----------
@@ -216,6 +328,11 @@ export class Hive {
       plan: card.plan,
       build: card.build,
       check: card.check,
+      setup: card.setup,
+      port: card.port,
+      feedback: card.feedback,
+      apps: card.lane === "tryit" ? this.apps.status(card.id) : [],
+      appStopped: card.appStopped,
       issues: this.db.issuesFor(card.id),
       decisions: this.db.decisionsFor(card.id),
       chat: this.db.chatFor(card.id, card.lane),
@@ -271,6 +388,7 @@ export class Hive {
       id: randomUUID(), projectId, title: titleFromIdea(text), ideaText: text.trim(), lane: "ideas",
       state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
       specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
+      setup: null, port: null, feedback: null, appStopped: false,
     };
     this.db.insertCard(card);
     this.emitCard(card.id);
@@ -323,6 +441,8 @@ export class Hive {
     const sessionId = randomUUID();
     this.db.insertSession({ id: sessionId, cardId: id, lane, role: LANE_ROLE.refine!, kind: role.kind });
     this.startTurn(id, sessionId, refineFirstMessage(project.name, card.ideaText));
+    // The worktree is set up in the background while you chat (docs/specs/2026-11-27-worktree-setup-and-try-it.md).
+    void this.startSetup(id).catch((error: unknown) => this.log(`Setting up card ${id} failed: ${String(error)}`));
     return cardSummary(this.requireCard(id));
   }
 
@@ -395,13 +515,16 @@ export class Hive {
       if (from === "build") {
         const worktree = card.worktreePath!;
         try {
+          await this.stopCardServers(cardId, "build");
           if (await this.deps.git.mergeInProgress(worktree)) await this.deps.git.abortMerge(worktree);
           await this.deps.git.commitAll(worktree, `Build (unfinished): ${card.title}`);
         } catch (error) {
           throw new HttpError(409, `The build's partial work couldn't be committed: ${(error as Error).message}`);
         }
       }
-      this.db.updateCard(cardId, { lane: to, reviewedSpecHash: null, reviewApplying: false });
+      // Stored Try it feedback goes with it: the developer's reason carries it to the spec writer, and after the new
+      // sign-off the developer must get the new plan.
+      this.db.updateCard(cardId, { lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null });
       this.watchSpec(cardId);
       this.startTurn(cardId, writer.id, [
         `The ${who} couldn't ${from === "build" ? "build" : "plan"} from the signed-off spec. What it reported:`,
@@ -441,8 +564,10 @@ export class Hive {
     this.requireOffered(cardId, card.lane, "move-on");
     return this.oneMoveAtATime(cardId, async () => {
       this.addNote(cardId, "check", "You moved the card on to Try it as built.");
+      await this.stopCardServers(cardId, "check");
       this.db.updateCard(cardId, { lane: to });
       this.emitCard(cardId);
+      void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
       return cardSummary(this.requireCard(cardId));
     });
   }
@@ -522,8 +647,13 @@ export class Hive {
   }
 
   async stop(cardId: string): Promise<void> {
-    this.requireCard(cardId);
+    const card = this.requireCard(cardId);
     if (this.starting.has(cardId)) throw new HttpError(409, "Build is bringing in main. Stop once the developer runs.");
+    // Build waits for a setup that is still listing files, before its turn starts: it ends as soon as it gets there.
+    if (card.lane === "build" && card.setup?.status === "running") {
+      const setup = this.db.getSessionFor(cardId, "refine", SETUP);
+      if (!setup || !this.turns.has(setup.id)) this.setupStopped.add(cardId);
+    }
     for (const session of this.cardSessions(cardId)) {
       const running = this.turns.get(session.id);
       if (!running) continue;
@@ -680,13 +810,314 @@ export class Hive {
       .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
   }
 
+  // ---------- the worktree's setup ----------
+
+  /**
+   * A setup run for the card's worktree, in the background: the card's ports, the checkout's local files to choose
+   * from, and a new setup session (docs/specs/2026-11-27-worktree-setup-and-try-it.md, Setup).
+   */
+  private async startSetup(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (!card.worktreePath || card.setup?.status === "running") return;
+    const project = this.db.getProject(card.projectId)!;
+    // Marked running at once, so a second start (Build entry, a button) waits for this one instead of racing it.
+    this.setSetup(cardId, noSetup());
+    this.setupStopped.delete(cardId);
+    try {
+      // The setup checks its commands on the card's ports, where the app would be running.
+      if (card.lane === "tryit") await this.apps.stop(cardId);
+      const role = this.deps.role(SETUP);
+      if (card.port === null && (await this.assignPort(cardId)) === null) {
+        return this.endSetup(cardId, { reason: "No free ports: every block of 10 in 5200–5999 is taken by a card." });
+      }
+      const local = await this.deps.git.listLocalFiles(project.path);
+      // What wasn't copied: the candidates first, as the ones worth a look, then the junk. `.claude/` holds the hive's
+      // own worktrees and your Claude settings, and is never worth naming.
+      const junk = local.junk.filter((j) => j !== ".claude/" && !j.startsWith(".claude/"));
+      this.setSetup(cardId, { ...noSetup(), leftOut: [...local.candidates.map((c) => c.path), ...junk] });
+      // Stop was pressed while Build waited and the files were still being listed: no turn to interrupt yet.
+      if (this.setupStopped.delete(cardId)) return this.endSetup(cardId, { reason: "It was stopped." });
+      const id = randomUUID();
+      this.db.insertSession({ id, cardId, lane: "refine", role: SETUP, kind: role.kind });
+      const port = this.requireCard(cardId).port!;
+      this.startTurn(cardId, id, [
+        "Set up this card's worktree so it runs like the person's checkout, without stepping on it.",
+        "",
+        `The checkout: ${project.path}`,
+        `This worktree: ${card.worktreePath}`,
+        `The card's ports: ${portRange(port)}`,
+        "",
+        "Git-ignored entries in the checkout you may copy, with their sizes:",
+        list(local.candidates.map((c) => `${c.path} (${human(c.bytes)})`)),
+        "",
+        junk.length ? `Left out already as junk: ${some(junk)}.` : "Nothing was left out as junk.",
+        "",
+        "End with your report.",
+      ].join("\n"), this.turnOptions(SETUP));
+    } catch (error) {
+      this.endSetup(cardId, { reason: sentence((error as Error).message) });
+    }
+  }
+
+  /**
+   * Gives the card a free block of ports, one card at a time: two setups starting together would otherwise both read
+   * the same blocks as free while the other's lsof checks were still running.
+   */
+  private assignPort(cardId: string): Promise<number | null> {
+    const next = this.portQueue.then(async () => {
+      const card = this.requireCard(cardId);
+      if (card.port !== null) return card.port;
+      const taken = this.db.listCards().map((c) => c.port).filter((p): p is number => p !== null);
+      const port = await this.ports.assign(taken);
+      if (port !== null) this.db.updateCard(cardId, { port });
+      return port;
+    });
+    this.portQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  /** The copy tool's work: the hive's code copies, under the guards, and keeps track of what's in the worktree. */
+  private async copyLocalFiles(cardId: string, paths: string[]): Promise<string> {
+    const card = this.requireCard(cardId);
+    const project = this.db.getProject(card.projectId)!;
+    const outcomes = await this.deps.git.copyLocalFiles(project.path, card.worktreePath!, paths);
+    const present = new Set(outcomes.filter((o) => o.result !== "refused").map((o) => bare(o.path)));
+    const setup = this.requireCard(cardId).setup ?? noSetup();
+    const copied = [...setup.copied, ...setup.leftOut.filter((p) => present.has(bare(p)))];
+    // A path inside a listed folder (data/dev.db out of data/) isn't in the list, but it is in the worktree now.
+    for (const o of outcomes) {
+      if (o.result !== "refused" && !copied.some((c) => bare(c) === bare(o.path))) copied.push(o.path);
+    }
+    this.setSetup(cardId, { ...setup, copied, leftOut: setup.leftOut.filter((p) => !present.has(bare(p))) });
+    return outcomes
+      .map((o) => o.result === "copied" ? `${o.path}: copied (${count(o.files, "file", "files")})`
+        : o.result === "kept" ? `${o.path}: kept (already in the worktree)`
+          : `${o.path}: refused (${o.reason ?? "no reason given"})`)
+      .join("\n");
+  }
+
+  private onSetupEnded(cardId: string, sessionId: string, outcome: TurnOutcome, stopped: boolean): void {
+    clearTimeout(this.setupTimers.get(sessionId));
+    this.setupTimers.delete(sessionId);
+    const timedOut = this.timedOut.delete(sessionId);
+    if (timedOut) return this.endSetup(cardId, { reason: "It ran longer than 10 minutes and was stopped." });
+    if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return this.endSetup(cardId, { reason: "It was stopped." });
+    if (outcome.kind === "error") return this.endSetup(cardId, { reason: `It failed: ${sentence(outcome.message)}` });
+    const report = parseSetupReport(outcome.report);
+    if (!report) return this.endSetup(cardId, { reason: "It didn't return a report." });
+    if (report.status === "blocked") return this.endSetup(cardId, { reason: sentence(report.reason) });
+    this.endSetup(cardId, { done: report });
+  }
+
+  /** A setup ends done or failed: stored, noted in the card's current lane, and Build goes on if it was waiting. */
+  private endSetup(
+    cardId: string,
+    end: { reason: string } | { done: Extract<ReturnType<typeof parseSetupReport>, { status: "done" }> },
+    { continueBuild = true } = {},
+  ): void {
+    const card = this.requireCard(cardId);
+    const was = card.setup ?? noSetup();
+    const setup: SetupReport = "done" in end
+      ? { ...was, ...end.done, status: "done", reason: null }
+      : { ...was, status: "failed", reason: end.reason };
+    this.setSetup(cardId, setup);
+    this.db.addEvent(cardId, "setup", setup, randomUUID());
+    const note = setup.status === "done"
+      ? [
+          "The worktree is set up.",
+          setup.copied.length ? `Copied: ${some(setup.copied)}.` : "No local files were copied.",
+          setup.leftOut.length ? `Left out: ${some(setup.leftOut)}.` : "",
+          setup.shared.length ? `Shared with your checkout: ${setup.shared.join("; ")}.` : "",
+        ].filter(Boolean).join(" ")
+      : `The worktree's setup didn't finish: ${setup.reason} The developer installs what it needs itself.`;
+    this.addNote(cardId, card.lane, note);
+    // In Try it, the app starts again with the new commands, unless you stopped it.
+    if (setup.status === "done" && card.lane === "tryit" && !card.appStopped) {
+      void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
+    }
+    // Build waited for this setup: the developer starts now, whether it finished or not.
+    const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+    if (continueBuild && card.lane === "build" && !developer?.lastMessage && !this.starting.has(cardId)) {
+      void this.startDeveloper(cardId)
+        .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+    }
+  }
+
+  private setSetup(cardId: string, setup: SetupReport): void {
+    this.db.updateCard(cardId, { setup });
+    this.deps.hub.emit({ type: "setup.updated", cardId, setup, port: this.requireCard(cardId).port });
+  }
+
+  /** Set up the worktree again, from Try it's button: new files are copied, existing ones kept. */
+  setupAgain(cardId: string): void {
+    const card = this.requireCard(cardId);
+    if (!card.worktreePath) throw new HttpError(409, "This card has no worktree yet.");
+    if (card.setup?.status === "running") throw new HttpError(409, "The worktree is being set up already.");
+    void this.startSetup(cardId).catch((error: unknown) => this.log(`Setting up card ${cardId} failed: ${String(error)}`));
+  }
+
+  /**
+   * Stops what still listens on the card's ports from inside its worktree, as the card leaves Build, Check or Try it,
+   * before the next lane's work starts. A failure is logged; it never holds up the move.
+   */
+  private async stopCardServers(cardId: string, leaving: Lane): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (card.port === null || !card.worktreePath) return;
+    try {
+      const stopped = await this.ports.stopListeners(cardPorts(card.port), card.worktreePath);
+      const ports = [...new Set(stopped.map((s) => s.port))];
+      if (ports.length) this.addNote(cardId, leaving, `Stopped what was running on ${ports.join(" and ")}.`);
+    } catch (error) {
+      this.log(`Stopping the servers of card ${cardId} failed: ${String(error)}`);
+    }
+  }
+
+  // ---------- the card's app in Try it ----------
+
+  /**
+   * Starts whatever of the card's app isn't running, after sweeping the ports it's about to use, so a copy you
+   * started by hand, or a leftover, can't pass for it (docs/specs/2026-11-27-try-it-runs-the-app.md).
+   */
+  private async startApp(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "tryit" || card.setup?.status !== "done" || !card.worktreePath) return;
+    const entries = appEntries(card);
+    const live = new Set(this.apps.livePorts(cardId));
+    const sweep = entries.filter((e) => !e.refused && e.port !== null && !live.has(e.port)).map((e) => e.port!);
+    if (sweep.length) {
+      try {
+        await this.ports.stopListeners(sweep, card.worktreePath);
+      } catch (error) {
+        this.log(`Clearing the ports of card ${cardId} failed: ${String(error)}`);
+      }
+    }
+    // It moved on, or you pressed Stop, while the ports were cleared.
+    const now = this.requireCard(cardId);
+    if (now.lane !== "tryit" || now.appStopped) return;
+    this.apps.start(cardId, entries, card.worktreePath, (kind) => this.appChanged(cardId, kind));
+  }
+
+  /** A change of state goes to the page at once; output at most once a second. */
+  private appChanged(cardId: string, kind: "state" | "output"): void {
+    if (kind === "output") {
+      if (this.appTimers.has(cardId)) return;
+      const timer = setTimeout(() => {
+        this.appTimers.delete(cardId);
+        this.emitApps(cardId);
+      }, 1000);
+      timer.unref?.();
+      this.appTimers.set(cardId, timer);
+      return;
+    }
+    clearTimeout(this.appTimers.get(cardId));
+    this.appTimers.delete(cardId);
+    this.emitApps(cardId);
+  }
+
+  private emitApps(cardId: string): void {
+    try {
+      const card = this.db.getCard(cardId);
+      if (!card) return;
+      const apps = card.lane === "tryit" ? this.apps.status(cardId) : [];
+      this.deps.hub.emit({ type: "app.updated", cardId, apps, appStopped: card.appStopped });
+    } catch (error) {
+      this.log(`Sending the app status of card ${cardId} failed: ${String(error)}`);
+    }
+  }
+
+  private requireAppLane(cardId: string, needsSetup: boolean): CardRow {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "tryit") throw new HttpError(409, "The card's app runs only in Try it.");
+    if (needsSetup && card.setup?.status !== "done") throw new HttpError(409, "Prepare the worktree first.");
+    return card;
+  }
+
+  /** Start: whatever isn't running, and your Stop is forgotten. */
+  async appStart(cardId: string): Promise<void> {
+    this.requireAppLane(cardId, true);
+    this.db.updateCard(cardId, { appStopped: false });
+    await this.startApp(cardId);
+  }
+
+  /** Stop: everything, and remembered, so a hive restart or a finished setup leaves it stopped. */
+  async appStop(cardId: string): Promise<void> {
+    this.requireAppLane(cardId, false);
+    await this.apps.stop(cardId);
+    this.db.updateCard(cardId, { appStopped: true });
+    this.emitApps(cardId);
+  }
+
+  async appRestart(cardId: string): Promise<void> {
+    this.requireAppLane(cardId, true);
+    this.db.updateCard(cardId, { appStopped: false });
+    await this.apps.stop(cardId);
+    await this.startApp(cardId);
+  }
+
+  // ---------- Try it ----------
+
+  /** Your words from Try it go to the same developer; Check then starts over (spec: Try it, Send to Build). */
+  async feedback(cardId: string, body: FeedbackBody): Promise<CardSummary> {
+    const text = typeof body?.text === "string" ? body.text.trim() : "";
+    if (!text) throw new HttpError(400, "Write what's wrong first.");
+    if (body.lane !== undefined && body.lane !== "build") throw new HttpError(400, "Only Build takes feedback for now.");
+    const card = this.requireCard(cardId);
+    const to = laneAfter(card.lane, "feedback");
+    if (!to) throw new HttpError(409, "Only a card in Try it can be sent back with feedback.");
+    if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    return this.oneMoveAtATime(cardId, async () => {
+      await this.apps.clear(cardId);
+      const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+      this.db.transaction(() => {
+        this.db.updateCard(cardId, { lane: to, build: null, check: null, feedback: text, appStopped: false });
+        if (developer) this.db.updateSession(developer.id, { lastMessage: null });
+        this.db.addEvent(cardId, "feedback", { text }, randomUUID());
+      });
+      this.emitCard(cardId);
+      void this.startDeveloper(cardId)
+        .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+      return cardSummary(this.requireCard(cardId));
+    });
+  }
+
+  /** You accept the card: it goes on to Ship. */
+  async accept(cardId: string): Promise<CardSummary> {
+    const card = this.requireCard(cardId);
+    const to = laneAfter(card.lane, "accept");
+    if (!to) throw new HttpError(409, "Only a card in Try it can be accepted.");
+    if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    return this.oneMoveAtATime(cardId, async () => {
+      await this.apps.clear(cardId);
+      await this.stopCardServers(cardId, "tryit");
+      this.db.updateCard(cardId, { lane: to, appStopped: false });
+      this.db.addEvent(cardId, "accept", {}, randomUUID());
+      this.emitCard(cardId);
+      return cardSummary(this.requireCard(cardId));
+    });
+  }
+
+  /** Out of Ship, until Ship is built, so a misclick or a late bug doesn't strand the card. */
+  async backToTryIt(cardId: string): Promise<CardSummary> {
+    const card = this.requireCard(cardId);
+    const to = laneAfter(card.lane, "back-to-tryit");
+    if (!to) throw new HttpError(409, "Only a card in Ship can go back to Try it.");
+    return this.oneMoveAtATime(cardId, async () => {
+      this.db.updateCard(cardId, { lane: to });
+      this.emitCard(cardId);
+      void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
+      return cardSummary(this.requireCard(cardId));
+    });
+  }
+
   // ---------- the developer ----------
 
   /**
-   * Each entry to Build: bring in main, then start the developer, or resume it with the revised spec and plan, or with
-   * the bugs Check found. Why the card is entering Build is read from what's stored, so Retry and a restart get it
-   * right too: `Card.check` holding bugs only ever means the card came back from Check, since a new plan clears it
-   * and a round without bugs moves the card on. Whatever bringing in main did is told to the developer; there is no
+   * Each entry to Build: stop what the lane being left still runs on the card's ports, wait for the worktree's setup,
+   * bring in main, then start the developer, or resume it with your Try it feedback, the bugs Check found, or the
+   * revised spec and plan. Why the card is entering Build is read from what's stored, so Retry and a restart get it
+   * right too: `Card.feedback` is set only between Send to Build and the developer's next `done` report, and
+   * `Card.check` holding bugs only ever means the card came back from Check, since a new plan and your feedback clear
+   * it and a round without bugs moves the card on. Whatever bringing in main did is told to the developer; there is no
    * separate error path for it.
    */
   private async startDeveloper(cardId: string): Promise<void> {
@@ -694,15 +1125,33 @@ export class Hive {
     this.starting.add(cardId);
     this.setState(cardId, "working");
     try {
+      const entering = this.requireCard(cardId);
+      const feedback = entering.feedback;
+      const fromCheck = !feedback && entering.check && entering.check.bugs.length > 0 ? entering.check : null;
+      if (feedback || fromCheck) await this.stopCardServers(cardId, feedback ? "tryit" : "check");
+
       // A new visit starts without a report (Card.build is set only between a done report and the move to Check),
       // and without a last message: until this visit's first turn starts, Retry starts the developer afresh,
-      // bringing in main again, instead of re-sending an earlier visit's message with its old plan.
+      // bringing in main again, instead of re-sending an earlier visit's message with its old plan. Cleared before
+      // waiting for setup, so the setup's end sees a developer that hasn't started this visit.
       this.db.updateCard(cardId, { build: null });
       const existing = this.db.getSessionFor(cardId, "build", roleName);
       if (existing) this.db.updateSession(existing.id, { lastMessage: null });
+
+      // Build waits for the worktree's setup: one still running, or the first one for a worktree that never had one.
+      // While it waits, the setup counts as the card's running turn, so the badge shows working and Stop ends it.
+      if (entering.worktreePath && (entering.setup === null || entering.setup.status === "running")) {
+        this.addNote(cardId, "build", "Build waits for the worktree's setup. Stop ends it, and Build goes ahead.");
+        this.deps.hub.emit({ type: "turn.started", cardId });
+        if (entering.setup === null) {
+          void this.startSetup(cardId).catch((error: unknown) => this.log(`Setting up card ${cardId} failed: ${String(error)}`));
+        }
+        return;
+      }
+
       const role = this.deps.role(roleName); // a broken role file fails here, before the merge
       const card = this.requireCard(cardId);
-      const fromCheck = card.check && card.check.bugs.length > 0 ? card.check : null;
+      if (feedback) this.addNote(cardId, "build", `Sent back from Try it: ${feedback}`);
       if (fromCheck) {
         this.addNote(cardId, "build",
           `Check round ${fromCheck.round} found ${count(fromCheck.bugs.length, "bug", "bugs")}. The developer is fixing them.`);
@@ -716,36 +1165,51 @@ export class Hive {
         this.db.insertSession({ id, cardId, lane: "build", role: roleName, kind: role.kind });
         developer = this.db.getSession(id)!;
       }
-      const message = fromCheck
+      // Said in the fix messages as well as in the role, since a session keeps the instructions of its first turn.
+      const wholeBuild = "Your report replaces the card's build report, so its summary and departures describe the " +
+        "whole build as it stands now. List only the issues and decisions that are new since your last report.";
+      const message = feedback
         ? [
-            `Check round ${fromCheck.round} found bugs in the branch. Fix them, then end with your report.`,
+            "The person tried the card's build and found this:",
+            "",
+            feedback,
+            "",
+            "Fix it, then end with your report.",
             "",
             `Bringing in main: ${mergeInstruction(merge)}`,
             "",
-            "The bugs:",
-            bugList(fromCheck.bugs),
+            "`git status` may show files left from trying the app. Remove what doesn't belong before you report.",
             "",
-            "If you think one isn't a bug, leave the code as it is, and end your summary with the bugs you left and " +
-              "why. The next round's reviewer reads it.",
-            "",
-            // Said here as well as in the role, since a session keeps the instructions of its first turn.
-            "Your report replaces the card's build report, so its summary and departures describe the whole build as " +
-              "it stands now. List only the issues and decisions that are new since your last report.",
+            wholeBuild,
           ]
-        : [
-            again
-              ? `The spec was revised and signed off again: ${card.specPath}, and the planner re-planned. Bring your ` +
-                "work in line with the spec and the new plan below, then end with your report."
-              : `The spec for this card is signed off: ${card.specPath}. Read it, then build to the planner's plan ` +
-                "below, and end with your report.",
-            "",
-            `Bringing in main: ${mergeInstruction(merge)}`,
-            "",
-            "The plan:",
-            "",
-            planText(card.plan),
-          ];
-      this.startTurn(cardId, developer.id, message.join("\n"), this.turnOptions(roleName));
+        : fromCheck
+          ? [
+              `Check round ${fromCheck.round} found bugs in the branch. Fix them, then end with your report.`,
+              "",
+              `Bringing in main: ${mergeInstruction(merge)}`,
+              "",
+              "The bugs:",
+              bugList(fromCheck.bugs),
+              "",
+              "If you think one isn't a bug, leave the code as it is, and end your summary with the bugs you left and " +
+                "why. The next round's reviewer reads it.",
+              "",
+              wholeBuild,
+            ]
+          : [
+              again
+                ? `The spec was revised and signed off again: ${card.specPath}, and the planner re-planned. Bring your ` +
+                  "work in line with the spec and the new plan below, then end with your report."
+                : `The spec for this card is signed off: ${card.specPath}. Read it, then build to the planner's plan ` +
+                  "below, and end with your report.",
+              "",
+              `Bringing in main: ${mergeInstruction(merge)}`,
+              "",
+              "The plan:",
+              "",
+              planText(card.plan),
+            ];
+      this.startTurn(cardId, developer.id, withRunning(card, message).join("\n"), this.turnOptions(roleName));
     } catch (error) {
       this.addError(cardId, "build", `Build couldn't start: ${(error as Error).message}`, ["retry"]);
     } finally {
@@ -773,7 +1237,10 @@ export class Hive {
     }
     // The report is stored before the checkpoint, so nothing in it is lost if git refuses the commit.
     this.db.transaction(() => {
-      this.db.updateCard(cardId, { build: { summary: report.summary, departures: report.departures, files: [] } });
+      // Your Try it feedback is handled once the developer reports done.
+      this.db.updateCard(cardId, {
+        build: { summary: report.summary, departures: report.departures, files: [] }, feedback: null,
+      });
       for (const issue of report.issues) this.db.addIssue(cardId, { foundIn: "build", ...issue });
       for (const decision of report.decisions) {
         this.db.addDecision(cardId, { lane: "build", source: "developer", ...decision }, session.id);
@@ -797,6 +1264,7 @@ export class Hive {
     }
     this.db.updateCard(cardId, { build: { ...card.build!, files }, lane: laneAfterBuild("done") });
     this.emitCard(cardId);
+    await this.stopCardServers(cardId, "build");
     this.startReviewer(cardId);
   }
 
@@ -849,7 +1317,7 @@ export class Hive {
         bugList(card.check.bugs),
       );
     }
-    return parts.join("\n");
+    return withRunning(card, parts).join("\n");
   }
 
   private onReviewerEnded(cardId: string, outcome: TurnOutcome, stopped: boolean): void {
@@ -891,6 +1359,11 @@ export class Hive {
     // A round that stops the card leaves it in Check, so the page wouldn't refetch the round or its issues.
     this.deps.hub.emit({ type: "check.updated", cardId, check, issues: this.db.issuesFor(cardId) });
     this.emitCard(cardId);
+    if (to === "tryit") {
+      void this.stopCardServers(cardId, "check")
+        .then(() => this.startApp(cardId))
+        .catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
+    }
     if (to === "build") {
       void this.startDeveloper(cardId)
         .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
@@ -936,8 +1409,18 @@ export class Hive {
       }
     }
     for (const card of this.db.listCards()) {
+      // A setup the hive was still starting when it stopped has no turn to resume. It's marked failed, and a Build
+      // waiting for it gets its Retry line below rather than starting by itself.
+      const setup = this.db.getSessionFor(card.id, "refine", SETUP);
+      if (card.setup?.status === "running" && !(setup && this.turns.has(setup.id))) {
+        this.endSetup(card.id, { reason: "The hive stopped before it finished." }, { continueBuild: false });
+      }
       if (card.lane === "spec" && card.specPath) this.watchSpec(card.id);
-      if (card.lane === "build") this.offerBuildWayOn(card);
+      if (card.lane === "build") this.offerBuildWayOn(this.requireCard(card.id));
+      // The hive's children ended with it: a card in Try it gets its app again, unless you stopped it.
+      if (card.lane === "tryit" && !card.appStopped) {
+        void this.startApp(card.id).catch((error: unknown) => this.log(`Starting the app of card ${card.id} failed: ${String(error)}`));
+      }
       if (card.lane === "check") this.offerCheckWayOn(card);
     }
   }
@@ -969,7 +1452,7 @@ export class Hive {
   // ---------- turns ----------
 
   /** What a role's turns need beyond the basics (spec: Session runner). */
-  private turnOptions(roleName: string): { extraInstructions?: string; outputFormat?: Record<string, unknown>; persist?: boolean } {
+  private turnOptions(roleName: string): TurnOptions {
     switch (roleName) {
       case LANE_ROLE.spec:
         return { extraInstructions: this.formatFile("format.md") };
@@ -981,24 +1464,25 @@ export class Hive {
         return { outputFormat: CHECK_SCHEMA };
       case SPEC_REVIEWER:
         return { outputFormat: REVIEW_SCHEMA, persist: false };
+      case SETUP:
+        return { outputFormat: SETUP_SCHEMA, background: true };
       default:
         return {};
     }
   }
 
-  private startTurn(
-    cardId: string,
-    sessionId: string,
-    message: string,
-    options: { extraInstructions?: string; outputFormat?: Record<string, unknown>; persist?: boolean } = {},
-  ): void {
+  private startTurn(cardId: string, sessionId: string, message: string, options: TurnOptions = {}): void {
     const card = this.requireCard(cardId);
     const session = this.db.getSession(sessionId)!;
-    const isSpecReviewer = session.role === SPEC_REVIEWER;
+    const { background, ...turnOptions } = options;
+    // The spec reviewer's report and a background setup's working are for the hive, not for the chat.
+    const quiet = session.role === SPEC_REVIEWER || !!background;
     this.db.updateSession(sessionId, { turnRunning: true, lastMessage: message });
     this.withdrawn.delete(sessionId);
-    this.setState(cardId, "working");
-    this.deps.hub.emit({ type: "turn.started", cardId });
+    if (!background) {
+      this.setState(cardId, "working");
+      this.deps.hub.emit({ type: "turn.started", cardId });
+    }
 
     const turn: RunningTurn = this.deps.runner.start(
       {
@@ -1009,23 +1493,37 @@ export class Hive {
         message,
         ...(session.role === LANE_ROLE.refine
           ? { hiveTools: { writeBrief: (brief: Brief) => Promise.resolve(this.writeBrief(cardId, brief)) } }
-          : {}),
-        ...options,
+          : session.role === SETUP
+            ? { hiveTools: { copyLocalFiles: (paths: string[]) => this.copyLocalFiles(cardId, paths) } }
+            : {}),
+        ...turnOptions,
       },
       {
         onTextDelta: (text) => {
-          if (!isSpecReviewer) this.deps.hub.emit({ type: "chat.delta", cardId, text });
+          if (!quiet) this.deps.hub.emit({ type: "chat.delta", cardId, text });
         },
         onTextBlock: (text) => {
-          if (!isSpecReviewer) this.addChat(cardId, session.lane, AUTHOR[session.role] ?? "hive", text);
+          if (!quiet) this.addChat(cardId, session.lane, AUTHOR[session.role] ?? "hive", text);
         },
-        onActivity: (text) => this.deps.hub.emit({ type: "chat.activity", cardId, text }),
+        onActivity: (text) => {
+          if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
+        },
         onSessionCreated: () => this.db.updateSession(sessionId, { existsYet: true }),
         canUseTool: (toolName, input, signal) => this.canUseTool(cardId, session, toolName, input, signal),
       },
     );
     this.turns.set(sessionId, turn);
     if (session.lane === "spec") this.refreshSpec(cardId);
+    if (session.role === SETUP) {
+      // An install prompt or a server that never returns mustn't hang setup, and Build with it.
+      const timer = setTimeout(() => {
+        if (this.turns.get(sessionId) !== turn) return;
+        this.timedOut.add(sessionId);
+        void turn.interrupt();
+      }, this.deps.setupLimitMs ?? 10 * 60_000);
+      timer.unref?.();
+      this.setupTimers.set(sessionId, timer);
+    }
 
     void turn.done
       .catch((error: unknown): TurnOutcome => ({
@@ -1043,13 +1541,14 @@ export class Hive {
         else if (session.role === LANE_ROLE.plan) this.onPlannerEnded(cardId, outcome, stopped);
         else if (session.role === LANE_ROLE.build) await this.onDeveloperEnded(cardId, session, outcome, stopped);
         else if (session.role === LANE_ROLE.check) this.onReviewerEnded(cardId, outcome, stopped);
+        else if (session.role === SETUP) this.onSetupEnded(cardId, sessionId, outcome, stopped);
         else if (session.role === LANE_ROLE.spec && this.requireCard(cardId).reviewApplying) {
           this.onWriterEnded(cardId, outcome, stopped, withdrew);
         } else if (outcome.kind === "error" && !stopped) {
           this.addError(cardId, session.lane, outcome.message, ["retry"]);
         }
 
-        this.deps.hub.emit({ type: "chat.activity", cardId, text: null });
+        if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text: null });
         // A handler above may have started the next turn (a review's findings go straight to the spec writer);
         // turn.ended then would tell the page nothing runs while the spec writer is applying them.
         if (!this.anyTurnRunning(cardId)) {
@@ -1087,6 +1586,9 @@ export class Hive {
     if (toolName.startsWith("mcp__hive__")) return { behavior: "allow", updatedInput: input };
     if (session.role === SPEC_REVIEWER && toolName === "AskUserQuestion") {
       return { behavior: "deny", message: "A blind reviewer has nobody to ask. Put the question in a finding instead." };
+    }
+    if (session.role === SETUP && toolName === "AskUserQuestion") {
+      return { behavior: "deny", message: "Setup runs in the background with nobody to ask. Decide, and say what you decided in your notes." };
     }
 
     const item: PendingItem =
@@ -1261,12 +1763,17 @@ export class Hive {
     const ids = [...Object.entries(LANE_ROLE).map(([lane, role]) => this.db.getSessionFor(cardId, lane as Lane, role!))];
     const review = this.reviews.get(cardId);
     if (review) ids.push(this.db.getSession(review.sessionId));
+    // Setup runs in the background, except while Build waits for it: then it's the card's running turn, and Stop ends it.
+    if (this.db.getCard(cardId)?.lane === "build") ids.push(this.db.getSessionFor(cardId, "refine", SETUP));
     return ids.filter((s): s is SessionRow => !!s);
   }
 
   /** A turn is running on the card, or its developer is being started (bringing in main comes first). */
   private anyTurnRunning(cardId: string): boolean {
-    return this.starting.has(cardId) || this.cardSessions(cardId).some((s) => this.turns.has(s.id));
+    if (this.starting.has(cardId) || this.cardSessions(cardId).some((s) => this.turns.has(s.id))) return true;
+    // Build waiting for a setup that is still listing files, before its turn starts.
+    const card = this.db.getCard(cardId);
+    return card?.lane === "build" && card.setup?.status === "running";
   }
 
   /** The session of the card's current lane's role. */

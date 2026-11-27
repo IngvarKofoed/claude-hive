@@ -42,7 +42,7 @@ export const LANES: readonly LaneInfo[] = [
   { id: "plan", name: "Plan", who: "planner", limit: 2, withYou: false, implemented: true },
   { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: true },
   { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: true },
-  { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: false },
+  { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: true },
   { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: false },
   { id: "done", name: "Done", who: "", limit: null, withYou: false, implemented: false },
 ];
@@ -173,6 +173,59 @@ export interface CheckRound {
   bugs: Bug[];
 }
 
+// ---------- Worktree setup ----------
+
+/** One process of the card's app, as setup worked it out: a server the hive runs for Try it on the card's ports. */
+export interface StartCommand {
+  /** What it starts, e.g. "backend" or "the app". */
+  what: string;
+  /** Run with `sh -c` in `dir`. */
+  command: string;
+  /** The folder to run it in, relative to the worktree; "." for the root. Missing in setups made before it existed. */
+  dir?: string;
+  /** The one port of the card's block it listens on. Missing in setups made before it existed: read from `url`. */
+  port?: number;
+  /** The address to open, if it serves one. */
+  url: string | null;
+}
+
+/** One process of the card's app as the hive runs it in Try it (docs/specs/2026-11-27-try-it-runs-the-app.md). */
+export interface AppProcess {
+  what: string;
+  port: number | null;
+  url: string | null;
+  state: "starting" | "running" | "stopped";
+  /** Why it stopped, or why it couldn't start. */
+  reason: string | null;
+  /** The last lines of its output, stdout and stderr together. */
+  output: string[];
+}
+
+/**
+ * The card's worktree setup (docs/specs/2026-11-27-worktree-setup-and-try-it.md): the local files copied from your
+ * checkout, the dependencies installed, and how to run the app and its tests on the card's own ports.
+ */
+export interface SetupReport {
+  status: "running" | "done" | "failed";
+  /** Why a failed setup didn't finish. */
+  reason: string | null;
+  /** The local files and folders the hive copied into the worktree. */
+  copied: string[];
+  /** The git-ignored entries that weren't copied: junk the code left out, and what the session didn't pick. */
+  leftOut: string[];
+  /** What was run to install dependencies. */
+  installed: string;
+  start: StartCommand[];
+  /** How to run the tests. */
+  test: string;
+  /** What the worktree still shares with your checkout, e.g. a server database. */
+  shared: string[];
+  notes: string;
+}
+
+/** How many ports each card gets, starting at `CardDetail.port`. */
+export const CARD_PORTS = 10;
+
 // ---------- Board ----------
 
 /** working: a turn is running. needs-you: it's your turn, or a question waits. */
@@ -248,6 +301,16 @@ export interface CardDetail extends CardSummary {
   build: BuildReport | null;
   /** Check's last finished round since the last plan, once one has finished. */
   check: CheckRound | null;
+  /** The worktree's setup, once one has started. */
+  setup: SetupReport | null;
+  /** The first of the card's CARD_PORTS ports, once it has them. */
+  port: number | null;
+  /** Your Try it feedback, while the developer works on it. */
+  feedback: string | null;
+  /** The card's app as the hive runs it in Try it; empty elsewhere. */
+  apps: AppProcess[];
+  /** You stopped the app: a hive restart or a finished setup leaves it stopped. */
+  appStopped: boolean;
   /** Spec issues found so far, waiting for the spec keeper. */
   issues: SpecIssue[];
   /** Decisions made without you. */
@@ -271,6 +334,12 @@ export interface NewCardBody {
 
 export interface MoveBody {
   lane: Lane;
+}
+
+/** Try it feedback (POST /api/cards/:id/feedback). Only `build` is accepted as the lane for now. */
+export interface FeedbackBody {
+  text: string;
+  lane?: Lane;
 }
 
 export interface MessageBody {
@@ -309,6 +378,8 @@ export type HiveEvent =
   | { type: "plan.updated"; cardId: string; plan: Plan }
   /** A Check round finished: the round as stored, and the card's spec issues with the ones it added. */
   | { type: "check.updated"; cardId: string; check: CheckRound; issues: SpecIssue[] }
+  | { type: "setup.updated"; cardId: string; setup: SetupReport; port: number | null }
+  | { type: "app.updated"; cardId: string; apps: AppProcess[]; appStopped: boolean }
   | { type: "pending.updated"; cardId: string; pending: PendingItem | null }
   | { type: "turn.started"; cardId: string }
   | { type: "turn.ended"; cardId: string };

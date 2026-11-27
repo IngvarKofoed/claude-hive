@@ -9,6 +9,8 @@ import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
 import { Hive } from "./hive";
+import { processApps } from "./preview/apps";
+import { lsofPorts } from "./preview/ports";
 import { loadRole } from "./sessions/roles";
 import { SdkRunner } from "./sessions/sdkRunner";
 import { SdkTrustProbe } from "./sessions/trustProbe";
@@ -21,8 +23,16 @@ const pageDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../fro
 const db = new HiveDb(dbPath);
 const hub = new EventHub();
 const specFormatDir = process.env.HIVE_SPEC_FORMAT_DIR ?? join(homedir(), ".claude", "skills", "spec-format");
+const apps = processApps();
+// The card apps the hive started end with it; startup starts them again (docs/specs/2026-11-27-try-it-runs-the-app.md).
+// A signal listener replaces Node's default exit, so the handler exits by itself.
+process.on("exit", () => apps.killAll());
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
 const hive = new Hive({
   db, hub, git, runner: new SdkRunner(), probe: new SdkTrustProbe(), role: (name) => loadRole(name), specFormatDir,
+  ports: lsofPorts,
+  apps,
 });
 hive.recoverAfterRestart();
 

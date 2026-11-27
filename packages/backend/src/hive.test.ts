@@ -5,7 +5,7 @@ import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
 import { answerAsMessage, Hive, HttpError, titleFromIdea } from "./hive";
-import { FakeProbe, FakeRunner, makeRepo, settle, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, makeRepo, settle, type TempRepo, waitFor } from "./testing";
 
 const role = (name: string) => ({ name, model: "opus", kind: "conversation", instructions: "Be a product owner." });
 
@@ -52,6 +52,7 @@ describe("Hive", () => {
   async function inRefine() {
     const setup = await projectWithCard();
     await hive.moveCard(setup.card.id, "refine");
+    await waitFor(() => hive.card(setup.card.id).setup?.status === "done"); // the worktree's setup, in the background
     return { ...setup, turn: runner.last };
   }
 
@@ -131,7 +132,8 @@ describe("Hive", () => {
       turn.handlers.onTextBlock("Here is a first brief.");
       await turn.end();
       const after = hive.card(card.id);
-      expect(after.chat.map((c) => c.kind === "message" && c.text)).toEqual([
+      // The worktree's setup leaves a note of its own in the chat; the product owner's blocks are these.
+      expect(after.chat.filter((c) => c.kind === "message" && c.from === "product-owner").map((c) => c.kind === "message" && c.text)).toEqual([
         "Hello, I've read the repo.",
         "Here is a first brief.",
       ]);
@@ -143,7 +145,7 @@ describe("Hive", () => {
 
     it("saves the brief from write_brief and renames the card", async () => {
       const { card, turn } = await inRefine();
-      const reply = await turn.request.hiveTools!.writeBrief({
+      const reply = await turn.request.hiveTools!.writeBrief!({
         title: "Printer font size", problem: "Text is too small.", whoItsFor: "Users with poor sight",
         whatDoneLooksLike: ["Each printer has a size"], outOfScope: [], openPoints: ["Max size?"],
       });

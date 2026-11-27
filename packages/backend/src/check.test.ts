@@ -77,8 +77,9 @@ describe("Check lane", () => {
     const project = hive.board().projects[0]!;
     const card = hive.createCard(project.id, "Make the printer font adjustable.");
     await hive.moveCard(card.id, "refine");
+    await waitFor(() => hive.card(card.id).setup?.status === "done"); // the worktree's setup, in the background
     const po = runner.last;
-    await po.request.hiveTools!.writeBrief(brief);
+    await po.request.hiveTools!.writeBrief!(brief);
     po.handlers.onSessionCreated();
     await po.end();
     await hive.good(card.id);

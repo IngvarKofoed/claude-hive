@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { api } from "../api/client";
 import { laneImplemented, type CardDetail } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
@@ -7,11 +9,13 @@ import { Chat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
 import { LaneSteps } from "../components/LaneSteps";
+import { TryItPanel } from "../components/TryItPanel";
 import { PlanView } from "../components/PlanView";
 import { ReviewBar } from "../components/ReviewBar";
 import { SpecView } from "../components/SpecView";
 import { useCardLive } from "../components/useCardLive";
 import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 import { Chip } from "../components/ui/Chip";
 import { Panel } from "../components/ui/Panel";
 import type { CardLive } from "../components/cardState";
@@ -42,7 +46,32 @@ function BuildPanel({ detail }: { detail: CardDetail }) {
   );
 }
 
-function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
+function BackToTryIt({ id, onMoved }: { id: string; onMoved: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className={styles.stack}>
+      <div>
+        <Button
+          compact
+          onClick={async () => {
+            setError(null);
+            try {
+              await api.backToTryIt(id);
+              onMoved();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Something went wrong.");
+            }
+          }}
+        >
+          Back to Try it
+        </Button>
+      </div>
+      {error ? <p role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
+export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
   if (!laneImplemented(detail.lane)) {
@@ -50,6 +79,7 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
       <>
         <Panel tone="warning" role="status">
           This lane isn&apos;t implemented yet
+          {detail.lane === "ship" ? <BackToTryIt id={detail.id} onMoved={onMoved} /> : null}
         </Panel>
         <div className={styles.columns}>
           {detail.spec ? (
@@ -69,6 +99,23 @@ function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
           </div>
         </div>
       </>
+    );
+  }
+
+  if (detail.lane === "tryit") {
+    return (
+      <div className={styles.columns}>
+        <TryItPanel detail={detail} onMoved={onMoved} />
+        <div className={styles.stack}>
+          {detail.check ? (
+            <Panel title="Check">
+              <CheckView check={detail.check} />
+            </Panel>
+          ) : null}
+          <BuildPanel detail={detail} />
+          <PlanPanel detail={detail} />
+        </div>
+      </div>
     );
   }
 

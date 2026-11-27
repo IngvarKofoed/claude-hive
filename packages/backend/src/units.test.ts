@@ -66,6 +66,15 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
     expect(laneAfter("build", "move-on")).toBeNull();
   });
 
+  it("Try it → Build on Send to Build, Try it → Ship on Accept, and Ship → Try it until Ship is built", () => {
+    expect(laneAfter("tryit", "feedback")).toBe("build");
+    expect(laneAfter("tryit", "accept")).toBe("ship");
+    expect(laneAfter("ship", "back-to-tryit")).toBe("tryit");
+    expect(laneAfter("check", "feedback")).toBeNull();
+    expect(laneAfter("build", "accept")).toBeNull();
+    expect(laneAfter("tryit", "back-to-tryit")).toBeNull();
+  });
+
   it("allows dragging only Ideas → Refine", () => {
     expect(canMove("ideas", "refine")).toBe(true);
     expect(canMove("ideas", "mockup")).toBe(false);

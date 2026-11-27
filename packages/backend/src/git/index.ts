@@ -184,3 +184,5 @@ export function cardSlug(title: string, id: string): string {
   const idPart = id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 6);
   return base ? `${base}-${idPart}` : `card-${idPart}`;
 }
+
+export * from "./localFiles";

@@ -46,7 +46,7 @@ describe("CardTile", () => {
   });
 
   it("shows Not implemented yet instead of a badge in a lane that isn't built", () => {
-    render(<CardTile card={{ ...base, lane: "tryit", state: "working" }} />);
+    render(<CardTile card={{ ...base, lane: "ship", state: "working" }} />);
     expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
     expect(screen.queryByText("▶ working")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();

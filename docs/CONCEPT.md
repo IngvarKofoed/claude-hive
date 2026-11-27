@@ -41,7 +41,7 @@ Lanes are the columns, and projects are the rows (swimlanes). Each lane has a li
 
 **Try it** is prepared so your testing is quick:
 
-- the app is running on its own port, with test data;
+- the app is running on its own port, with test data, started by the hive from the commands the worktree's setup worked out;
 - a short test guide, written from the spec's How-to-verify bullets;
 - what the automated checks covered, so you don't retest it, and what they couldn't check, so you do;
 - every decision made without you, so you can ask for any of them the other way in your feedback;
@@ -165,11 +165,11 @@ It works down a ladder:
 ## Worktrees
 
 - **Ideas have no worktree.** Entering Refine creates one at `<repo>/.claude/worktrees/<card>`, on a branch `hive/<card>` taken from the latest main.
-- **Setup starts at once,** in the background while you chat: local files and dependencies are copied and installed.
+- **Setup starts at once,** in the background while you chat. A setup session picks the local files the app needs from your checkout, such as `.env` files and local databases, and the hive copies them. It installs dependencies, and works out how to start the app and its tests on the card's own ports.
 - **Refine reads the code from this clean copy,** never from your own checkout.
 - **The number of worktrees is bounded** by the lanes' work-in-progress limits.
 - **Mockup versions get worktrees of their own.** The designer builds them one after another. When you pick one, the others are deleted.
-- **Each card's app runs on its own port.**
+- **Each card has its own ports,** so its app runs beside your own copy. When the card leaves Build, Check or Try it, whatever still listens on them from its worktree is stopped.
 - **Lanes commit checkpoints freely** on the card's branch. The card shows how far it is behind main, and Build starts by bringing in the latest main.
 - **Parking a card** (back to Ideas) removes the worktree but keeps the branch. Moving the card forward again rebuilds the worktree.
 - **Dropping a card** removes the worktree and keeps the branch for a while.

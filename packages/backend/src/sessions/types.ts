@@ -26,10 +26,12 @@ export interface TurnHandlers {
   canUseTool(toolName: string, input: Record<string, unknown>, signal: AbortSignal): Promise<ToolDecision>;
 }
 
-/** The hive's own tools, offered to the session through the in-process `hive` MCP server. */
+/** The hive's own tools, offered to the session through the in-process `hive` MCP server. Each role gets its own. */
 export interface HiveTools {
   /** Replace the card's brief. Returns the text the tool hands back to the session. */
-  writeBrief(brief: Brief): Promise<string>;
+  writeBrief?(brief: Brief): Promise<string>;
+  /** Copy git-ignored paths from the checkout into the card's worktree, under the hive's guards. */
+  copyLocalFiles?(paths: string[]): Promise<string>;
 }
 
 export interface TurnRequest {

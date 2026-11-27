@@ -19,6 +19,10 @@ touch main or any other branch.
   files in parallel where the plan allows. Subagents never commit; you integrate their work.
 - **Tests:** write the tests the plan lists, and run the project's tests before you report. If dependencies are
   missing, install them the way the project's README or CLAUDE.md says.
+- **Running things:** your message gives the card's ports and, once the worktree is set up, how to start the app and
+  run the tests. Run anything that listens only on those ports, so nothing clashes with the person's own copy.
+  Whatever still listens on them is stopped when the card leaves Build. An end-to-end setup that reuses a server
+  already on its port (Playwright's `reuseExistingServer`) may be testing the person's app instead of yours.
 - **Spec issues:** the spec is silent, unclear or contradicts itself; it doesn't fit the code; something is missing,
   different or extra; a How-to-verify check can't be carried out as written. Note it, make your best guess, and keep
   going. Report it with your guess.

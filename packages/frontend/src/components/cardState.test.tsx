@@ -23,6 +23,11 @@ const detail: CardDetail = {
   plan: null,
   build: null,
   check: null,
+  setup: null,
+  port: null,
+  feedback: null,
+  apps: [],
+  appStopped: false,
   issues: [],
   decisions: [],
   chat: [],
@@ -32,6 +37,32 @@ const detail: CardDetail = {
 const start: CardLive = { detail, streaming: "", activity: null };
 
 describe("applyCardEvent", () => {
+  it("applies setup.updated to the card's setup and port, and ignores other cards", () => {
+    const setup = {
+      status: "done" as const,
+      reason: null,
+      copied: [],
+      leftOut: [],
+      installed: "npm ci",
+      start: [],
+      test: "npm test",
+      shared: [],
+      notes: "",
+    };
+    const s = applyCardEvent(start, { type: "setup.updated", cardId: "c1", setup, port: 5300 });
+    expect(s.detail.setup).toEqual(setup);
+    expect(s.detail.port).toBe(5300);
+    expect(applyCardEvent(start, { type: "setup.updated", cardId: "other", setup, port: 1 })).toBe(start);
+  });
+
+  it("applies app.updated to the card's apps and appStopped, and ignores other cards", () => {
+    const apps = [{ what: "the app", port: 5300, url: "http://localhost:5300", state: "running" as const, reason: null, output: ["hi"] }];
+    const s = applyCardEvent(start, { type: "app.updated", cardId: "c1", apps, appStopped: true });
+    expect(s.detail.apps).toEqual(apps);
+    expect(s.detail.appStopped).toBe(true);
+    expect(applyCardEvent(start, { type: "app.updated", cardId: "other", apps, appStopped: true })).toBe(start);
+  });
+
   it("appends deltas, then a message replaces the streaming text", () => {
     let s = applyCardEvent(start, { type: "chat.delta", cardId: "c1", text: "Hel" });
     s = applyCardEvent(s, { type: "chat.delta", cardId: "c1", text: "lo" });

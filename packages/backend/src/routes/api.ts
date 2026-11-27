@@ -48,6 +48,25 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   r.post("/cards/:id/back-to-spec", route((req) => hive.backToSpec(param(req, "id"))));
   r.post("/cards/:id/back-to-build", route((req) => hive.backToBuild(param(req, "id"))));
   r.post("/cards/:id/move-on", route((req) => hive.moveOn(param(req, "id"))));
+  r.post("/cards/:id/feedback", route((req) => hive.feedback(param(req, "id"), req.body ?? {})));
+  r.post("/cards/:id/accept", route((req) => hive.accept(param(req, "id"))));
+  r.post("/cards/:id/back-to-tryit", route((req) => hive.backToTryIt(param(req, "id"))));
+  r.post("/cards/:id/app/start", route(async (req) => {
+    await hive.appStart(param(req, "id"));
+    return { ok: true };
+  }));
+  r.post("/cards/:id/app/stop", route(async (req) => {
+    await hive.appStop(param(req, "id"));
+    return { ok: true };
+  }));
+  r.post("/cards/:id/app/restart", route(async (req) => {
+    await hive.appRestart(param(req, "id"));
+    return { ok: true };
+  }));
+  r.post("/cards/:id/setup", route(async (req) => {
+    hive.setupAgain(param(req, "id"));
+    return { ok: true };
+  }));
   r.post("/for-you/:itemId", route((req) => hive.answer(param(req, "itemId"), body(req) as any)));
 
   r.use((_req, res) => res.status(404).json({ error: "No such endpoint." }));

@@ -1,0 +1,103 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.heading {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.command {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.what {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.warning {
+  padding: var(--space-3) var(--space-5);
+  border: var(--border-width) solid var(--color-needs-you-text);
+  border-radius: var(--radius-sm);
+  background: var(--color-needs-you-bg);
+  color: var(--color-needs-you-text);
+  font-size: var(--text-md);
+}
+
+.warning ul {
+  margin: var(--space-2) 0 0 var(--space-6);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.reason {
+  color: var(--color-stopped-text);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.feedback {
+  width: 100%;
+  min-height: 6rem;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  resize: vertical;
+}
+
+.error {
+  padding: var(--space-3) var(--space-5);
+  border: var(--border-width) solid var(--color-stopped-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-stopped-bg);
+  color: var(--color-stopped-text);
+  font-size: var(--text-md);
+}
+
+.appHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.output {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
