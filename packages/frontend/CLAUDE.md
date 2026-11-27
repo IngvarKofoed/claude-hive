@@ -1,26 +1,19 @@
 # Claude Hive — frontend
 
-The React page (Vite): the board, For you, and the card pages. The look comes from `docs/mockups/`.
-
-## Required tools
-
-- **`LSP`** — the TypeScript language server (`typescript-lsp` plugin). Use it for definitions, references and hover instead of grepping for symbols.
-- **Playwright MCP** (`mcp__playwright__*`, headless) — drive the page in a real browser to verify every UI change (see the verification workflow below).
-
 ## Styling
 
 - **The look is the mockup.** Before building a screen, read its `.dc.html` in `docs/mockups/` and the token table in `docs/mockups/README.md`.
-- **`src/styles/rules.test.ts` enforces the token rules** in `docs/ARCHITECTURE.md` (Frontend): `npm test` fails on an inline style, or on a raw color, pixel font size or font name outside `tokens.css`.
 
 ## Testing
 
-Vitest, with React Testing Library for components. Tests sit next to the code they test, as `*.test.tsx`. Run `npm test` and `npm run typecheck` here before you report a change complete. Do not introduce a different test framework without updating the architecture doc.
+`npm test` doesn't type-check: also run `npm run typecheck` here, not a bare `tsc`, which skips generating `packages/shared/src/version.ts`.
+
+- **Tests never reach a running backend.** They replace `api/client.ts` and `api/events.ts` with `vi.spyOn(api, …)` or `vi.mock`, as `components/useCardLive.test.tsx` does.
 
 ## Verification workflow
 
-For every UI change:
+For a change to what the page shows or does, before you report it complete:
 
-1. Start the app with `npm run dev` at the repo root, which runs the backend and the frontend.
-2. Drive the changed feature via Playwright MCP — headless, so rely on the page snapshot, not a visible window.
+1. Start the app at the repo root on a scratch database: `HIVE_DB=$(mktemp -d)/hive.db npm run dev`. Without `HIVE_DB` it opens the real board in `~/.claude-hive/hive.db`. It needs ports 4317 and 5173 free: if `lsof -nP -iTCP:4317 -iTCP:5173 -sTCP:LISTEN` shows anything, the page would reach that hive instead, so ask the user before going on.
+2. Drive the changed feature in a browser via Playwright MCP, relying on the page snapshot.
 3. Check console messages and network requests for errors.
-4. Only then report the change as complete.
