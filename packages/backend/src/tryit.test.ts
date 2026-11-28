@@ -12,7 +12,7 @@ import { fakeApps } from "./preview/apps";
 import { fakePorts } from "./preview/ports";
 import type { Role } from "./sessions/types";
 import { SETUP_SCHEMA } from "./spec/reports";
-import { FakeProbe, FakeRunner, type FakeTurn, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, type FakeTurn, keeperReport, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
 
 const brief = {
   title: "Printer font size", problem: "Labels are too small.", whoItsFor: "People with low vision",
@@ -92,6 +92,14 @@ describe("worktree setup and Try it", () => {
   const turnsOf = (roleName: string) => runner.turns.filter((t) => t.request.role.name === roleName);
   const lastOf = (roleName: string) => turnsOf(roleName).at(-1)!;
   const lastSetup = () => runner.setupTurns.at(-1)!;
+
+  /** A blocked build's spec keeper turn finds the block isn't about the spec, so Retry and Back to Spec are offered. */
+  async function keeperFallsBack(id: string) {
+    await waitFor(() => turnsOf("spec-writer").at(-1)?.request.message.includes("The developer is blocked") ?? false);
+    const keeper = lastOf("spec-writer");
+    await keeper.end({ kind: "ok", report: keeperReport(keeper.request.message) });
+    await waitFor(() => hive.card(id).state === "needs-you");
+  }
   const notes = (id: string) => hive.card(id).chat.flatMap((c) => (c.kind === "message" && c.from === "hive" ? [c.text] : []));
 
   /** A card in Refine, with its setup turn running. */
@@ -327,7 +335,7 @@ describe("worktree setup and Try it", () => {
       await waitFor(() => turnsOf("developer").length === 1);
       lastOf("developer").handlers.onSessionCreated();
       await lastOf("developer").end({ kind: "ok", report: { ...built, status: "blocked", blockedReason: "No printers table." } });
-      await waitFor(() => hive.card(s.id).state === "needs-you");
+      await keeperFallsBack(s.id);
       await hive.backToSpec(s.id);
       await runner.last.end();
       hive.review(s.id);
@@ -424,7 +432,7 @@ describe("worktree setup and Try it", () => {
       await hive.feedback(id, { text: "It crashes with no printers." });
       await waitFor(() => turnsOf("developer").length === 2);
       await lastOf("developer").end({ kind: "ok", report: { ...built, status: "blocked", blockedReason: "Needs a printers table." } });
-      await waitFor(() => hive.card(id).state === "needs-you");
+      await keeperFallsBack(id);
       await hive.backToSpec(id);
       expect(hive.card(id)).toMatchObject({ lane: "spec", feedback: null });
     });

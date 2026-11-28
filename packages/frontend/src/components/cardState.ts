@@ -45,6 +45,10 @@ export function applyCardEvent(state: CardLive, event: HiveEvent): CardLive {
       // A round that stops the card in Check doesn't change its lane, so nothing else refetches it.
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, check: event.check, issues: event.issues } };
+    case "issues.updated":
+      // The spec keeper's judgments, or your answers, while the card stays in its lane.
+      if (event.cardId !== id) return state;
+      return { ...state, detail: { ...state.detail, issues: event.issues } };
     case "setup.updated":
       if (event.cardId !== id) return state;
       return { ...state, detail: { ...state.detail, setup: event.setup, port: event.port } };

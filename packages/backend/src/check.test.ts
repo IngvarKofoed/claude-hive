@@ -8,7 +8,7 @@ import * as git from "./git";
 import { Hive } from "./hive";
 import type { Role } from "./sessions/types";
 import { CHECK_SCHEMA } from "./spec/reports";
-import { FakeProbe, FakeRunner, type FakeTurn, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, type FakeTurn, keeperReport, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
 
 const brief = {
   title: "Printer font size", problem: "Labels are too small.", whoItsFor: "People with low vision",
@@ -119,8 +119,19 @@ describe("Check lane", () => {
 
   /** End a reviewer's turn and wait until the hive has routed the card. */
   async function reviewerEnds(id: string, reviewer: FakeTurn, outcome: Parameters<FakeTurn["end"]>[0]) {
+    const keepers = turnsOf("spec-writer").length;
     await reviewer.end(outcome);
-    await waitFor(() => hive.card(id).lane !== "check" || hive.card(id).state === "needs-you");
+    await waitFor(() =>
+      hive.card(id).lane !== "check" || hive.card(id).state === "needs-you" || turnsOf("spec-writer").length > keepers);
+  }
+
+  /** The running spec keeper turn ends with `judge`'s judgments; waits until the card moves or stops. */
+  async function keeperJudges(id: string, judge?: Parameters<typeof keeperReport>[1]) {
+    const keeper = lastOf("spec-writer");
+    const lane = hive.card(id).lane;
+    await keeper.end({ kind: "ok", report: keeperReport(keeper.request.message, judge) });
+    await waitFor(() => hive.card(id).lane !== lane || hive.card(id).state === "needs-you");
+    return keeper;
   }
 
   /** A failing round 1 sends the card back; waits for the developer's next turn. */
@@ -156,17 +167,22 @@ describe("Check lane", () => {
       expect(hive.card(id).chat.at(-1)).toMatchObject({ kind: "message", from: "reviewer", text: "Reading the diff." });
     });
 
-    it("moves a round without bugs to Try it, storing its issues", async () => {
+    it("has the spec keeper judge a round without bugs' open issues, then moves the card to Try it", async () => {
       const { id, reviewer } = await inCheck();
       const issue = { where: "Design, Defaults", problem: "The spec doesn't say what new printers get.", guess: "12" };
       await reviewerEnds(id, reviewer, { kind: "ok", report: review([], [issue]) });
-      const card = hive.card(id);
-      expect(card.lane).toBe("tryit");
+      let card = hive.card(id);
+      expect(card.lane).toBe("check");
       expect(card.check).toEqual({ round: 1, summary: "Looks right.", bugs: [] });
       expect(card.issues.map((i) => i.foundIn)).toEqual(["build", "check"]);
-      expect(card.issues[1]).toMatchObject(issue);
+      expect(card.issues[1]).toMatchObject({ ...issue, status: "open" });
       expect(db.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'check'").get()).toEqual({ n: 1 });
-      expect(hive.card(id).build).toMatchObject({ summary: built.summary });
+
+      await keeperJudges(id);
+      card = hive.card(id);
+      expect(card.lane).toBe("tryit");
+      expect(card.issues.map((i) => i.status)).toEqual(["no-change", "no-change"]);
+      expect(card.build).toMatchObject({ summary: built.summary });
     });
   });
 
@@ -197,6 +213,7 @@ describe("Check lane", () => {
       expect(hive.card(id).chat.at(-1)).toMatchObject({ text: "Round 2: the reviewer is reading the branch." });
 
       await reviewerEnds(id, second, { kind: "ok", report: review([]) });
+      await keeperJudges(id);
       expect(hive.card(id)).toMatchObject({ lane: "tryit", check: { round: 2, bugs: [] } });
     });
 
@@ -213,9 +230,13 @@ describe("Check lane", () => {
         actions: ["back-to-build", "move-on"],
       });
 
+      // The card's open issue is judged as built first (docs/specs/2026-11-28-spec-keeper.md, The batch).
       await hive.moveOn(id);
+      expect(hive.card(id).lane).toBe("check");
+      expect(db.chatFor(id, "check").map((c) => c.kind === "message" && c.text)).toContain("You moved the card on to Try it as built.");
+      const keeper = await keeperJudges(id);
+      expect(keeper.request.message).toContain("moved the card on to Try it as built");
       expect(hive.card(id).lane).toBe("tryit");
-      expect(db.chatFor(id, "check").at(-1)).toMatchObject({ kind: "message", from: "hive", text: "You moved the card on to Try it as built." });
     });
 
     it("tells the page the round that stopped the card, since the card stays in Check", async () => {
@@ -324,7 +345,8 @@ describe("Check lane", () => {
     const { id, reviewer } = await inCheck();
     const fixer = await failRound(id, reviewer, [clampBug]);
     await fixer.end({ kind: "ok", report: { ...built, status: "blocked", blockedReason: "Clamping needs a settings table." } });
-    await waitFor(() => hive.card(id).state === "needs-you");
+    await waitFor(() => turnsOf("spec-writer").length > 1);
+    await keeperJudges(id); // not about the spec: Retry and Back to Spec
 
     await hive.backToSpec(id);
     const writer = lastOf("spec-writer");

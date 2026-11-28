@@ -1,6 +1,6 @@
 // The fixed-format reports of the spec reviewer, the planner, the developer and Check's reviewer. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
-import type { Bug, Departure, Plan, ReportedDecision, ReportedIssue } from "@hive/shared";
+import type { Bug, Departure, IssueJudgment, Plan, ReportedDecision, ReportedIssue } from "@hive/shared";
 
 const blockable = {
   status: { type: "string", enum: ["done", "blocked"] },
@@ -94,7 +94,9 @@ export const DEVELOPER_SCHEMA = {
     }),
     issues: objects(["where", "problem", "guess"], {
       where: "The spec's section",
-      problem: "The spec is silent, unclear or contradicts itself, doesn't fit the code, or something is missing, different or extra",
+      problem: "Only what would make the spec keeper change the spec or the code: the spec blocked you, forced a " +
+        "departure, left readings that build different things, contradicts itself or the code, or has a check that " +
+        "can't be carried out. Not wording, a gap filled the obvious way, or a failure that isn't about the spec",
       guess: "What you built instead",
     }),
     decisions: objects(["what", "alternative"], {
@@ -118,9 +120,50 @@ export const CHECK_SCHEMA = {
     }),
     issues: objects(["where", "problem", "guess"], {
       where: "The spec's section",
-      problem: "The spec is silent, unclear or contradicts itself, doesn't fit the code, or the code does more than it asks",
+      problem: "Only what would make the spec keeper change the spec or the code: the spec is silent where it " +
+        "matters, contradicts itself or the code, the code does more than it asks, or a check can't be carried out. " +
+        "Not wording, a gap filled the obvious way, or a failure that isn't about the spec",
       guess: "What the code does",
     }),
+  },
+} as const;
+
+/** The spec keeper's report: one judgment per issue it was given (docs/specs/2026-11-28-spec-keeper.md, The batch). */
+export const KEEPER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "summary", "judgments"],
+  properties: {
+    ...blockable,
+    summary: { type: "string", description: "What you judged and what you changed in the spec, in a few sentences" },
+    judgments: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["issueId", "verdict", "level", "reason", "recommendation", "repeats"],
+        properties: {
+          issueId: { type: "string", description: "The id of the issue judged, as your message gives it" },
+          verdict: {
+            type: "string", enum: ["spec-wrong", "code-wrong", "no-change"],
+            description: "spec-wrong: the spec changes; code-wrong: the code changes; no-change: neither",
+          },
+          level: {
+            type: "string", enum: ["minor", "changes-signoff", "severe"],
+            description: "minor: you settle it; changes-signoff: it changes what the person signed off; severe: the card stops",
+          },
+          reason: { type: "string", description: "Why, in a sentence or two" },
+          recommendation: {
+            type: "string",
+            description: "For changes-signoff and severe: what you would do. Empty for minor",
+          },
+          repeats: {
+            type: ["string", "null"],
+            description: "The id of an earlier issue on this card that this is the same problem as, or null",
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -304,6 +347,40 @@ export function parseCheckReport(raw: unknown): CheckReport | null {
     summary: raw.summary,
     bugs: raw.bugs.map(({ where, problem }) => ({ where, problem })),
     issues: raw.issues.map(({ where, problem, guess }) => ({ where, problem, guess })),
+  };
+}
+
+export type KeeperReport =
+  | { status: "done"; summary: string; judgments: ({ issueId: string } & IssueJudgment)[] }
+  | { status: "blocked"; reason: string };
+
+const VERDICTS = ["spec-wrong", "code-wrong", "no-change"];
+const LEVELS = ["minor", "changes-signoff", "severe"];
+
+/**
+ * The spec keeper's report, or null when there is none, it doesn't have the expected shape, or it doesn't judge each of
+ * `issueIds` exactly once (a report that misses an issue doesn't count).
+ */
+export function parseKeeperReport(raw: unknown, issueIds: string[]): KeeperReport | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done" || !Array.isArray(raw.judgments)) return null;
+  const ok = raw.judgments.every(
+    (j: unknown) => isObject(j) && typeof j.issueId === "string" && VERDICTS.includes(j.verdict) &&
+      LEVELS.includes(j.level) && typeof j.reason === "string" &&
+      (j.recommendation === undefined || typeof j.recommendation === "string") &&
+      (j.repeats === null || j.repeats === undefined || typeof j.repeats === "string"),
+  );
+  if (!ok) return null;
+  const judged = raw.judgments.map((j: any) => j.issueId as string);
+  if (judged.length !== issueIds.length || !issueIds.every((id) => judged.includes(id))) return null;
+  return {
+    status: "done",
+    summary: typeof raw.summary === "string" ? raw.summary : "",
+    judgments: raw.judgments.map((j: any) => ({
+      issueId: j.issueId, verdict: j.verdict, level: j.level, reason: j.reason,
+      recommendation: j.recommendation ?? "", repeats: j.repeats ? j.repeats : null,
+    })),
   };
 }
 

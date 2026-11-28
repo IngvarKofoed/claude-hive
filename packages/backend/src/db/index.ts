@@ -5,7 +5,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { titleFromIdea } from "./titleFromIdea";
 import type {
-  Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, IssueAnswer, IssueJudgment, IssueStatus,
+  Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -100,7 +101,31 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "ship_after_check", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "waiting_since", type: "TEXT" },
   { table: "cards", column: "checklist", type: "TEXT" },
+  { table: "cards", column: "judging", type: "TEXT" },
+  { table: "cards", column: "keeper_fixes", type: "TEXT" },
+  { table: "cards", column: "keeper_rounds", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "block_judged", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "issues", column: "status", type: "TEXT NOT NULL DEFAULT 'open'" },
+  { table: "issues", column: "recommendation", type: "TEXT" },
+  { table: "issues", column: "repeats", type: "TEXT" },
+  { table: "issues", column: "answer", type: "TEXT" },
 ];
+
+/**
+ * The spec keeper's turn under way, kept until it succeeds so Retry and a restart can tell what it was judging
+ * (docs/specs/2026-11-28-spec-keeper.md, The batch). `answers` changes the spec after your answers; the others judge.
+ */
+export interface KeeperJudging {
+  kind: "batch" | "as-built" | "blocking" | "answers";
+  /** The issues the turn is about. */
+  issueIds: string[];
+}
+
+/** Issues going to the developer as code fixes, and the lane they come from; cleared on its next `done` report. */
+export interface KeeperFixes {
+  from: Lane;
+  ids: string[];
+}
 
 /** A landing under way: stored before the push, so a hive restart can finish it or undo it. */
 export interface Landing {
@@ -159,6 +184,14 @@ export interface CardRow {
    * starts (docs/specs/2026-11-28-build-lane-checklist.md).
    */
   checklist: ChecklistItem[] | null;
+  /** The spec keeper's turn under way, or one that failed and waits for Retry. */
+  judging: KeeperJudging | null;
+  /** Code fixes the developer is to make, from the spec keeper or your held answers. */
+  keeperFixes: KeeperFixes | null;
+  /** Keeper fix rounds since sign-off; capped by KEEPER_FIX_ROUNDS. */
+  keeperRounds: number;
+  /** This Build visit has had its keeper turn for a blocked report. */
+  blockJudged: boolean;
   /**
    * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
    * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
@@ -257,7 +290,9 @@ export class HiveDb {
   }
 
   /** A new card has no checklist: only a developer session gives it one. */
-  insertCard(c: Omit<CardRow, "waitingSince" | "checklist">): void {
+  insertCard(
+    c: Omit<CardRow, "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged">,
+  ): void {
     const at = now();
     this.db
       .prepare(
@@ -285,6 +320,7 @@ export class HiveDb {
       reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
       landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check", checklist: "checklist",
+      judging: "judging", keeperFixes: "keeper_fixes", keeperRounds: "keeper_rounds", blockJudged: "block_judged",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -292,10 +328,10 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist"].includes(key)) {
+      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist", "judging", "keeperFixes"].includes(key)) {
         values.push(value ? JSON.stringify(value) : null);
       }
-      else if (key === "reviewApplying" || key === "appStopped" || key === "shipAfterCheck") values.push(value ? 1 : 0);
+      else if (["reviewApplying", "appStopped", "shipAfterCheck", "blockJudged"].includes(key)) values.push(value ? 1 : 0);
       else values.push(value);
     }
     if (sets.length === 0) return;
@@ -454,19 +490,47 @@ export class HiveDb {
     return this.db.transaction(fn)();
   }
 
-  addIssue(cardId: string, issue: Omit<SpecIssue, "id">): void {
+  /** A new issue, open for the spec keeper; returns its id. */
+  addIssue(cardId: string, issue: Pick<SpecIssue, "foundIn" | "where" | "problem" | "guess">): string {
+    const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO issues (id, card_id, found_in, spec_section, problem, guess, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO issues (id, card_id, found_in, spec_section, problem, guess, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`,
       )
-      .run(randomUUID(), cardId, issue.foundIn, issue.where, issue.problem, issue.guess, now());
+      .run(id, cardId, issue.foundIn, issue.where, issue.problem, issue.guess, now());
+    return id;
   }
 
   issuesFor(cardId: string): SpecIssue[] {
     return (
       this.db.prepare("SELECT * FROM issues WHERE card_id = ? ORDER BY created_at, rowid").all(cardId) as any[]
-    ).map((r) => ({ id: r.id, foundIn: r.found_in, where: r.spec_section, problem: r.problem, guess: r.guess }));
+    ).map(toIssue);
+  }
+
+  /** The keeper's judgment of an issue, the status it leads to, and how many repeats its chain has had. */
+  judgeIssue(id: string, judgment: IssueJudgment, status: IssueStatus, flips: number): void {
+    this.db
+      .prepare(
+        `UPDATE issues SET verdict = ?, level = ?, reason = ?, recommendation = ?, repeats = ?, status = ?, flips = ?
+         WHERE id = ?`,
+      )
+      .run(judgment.verdict, judgment.level, judgment.reason, judgment.recommendation, judgment.repeats, status, flips, id);
+  }
+
+  setIssueStatus(ids: string[], status: IssueStatus): void {
+    const set = this.db.prepare("UPDATE issues SET status = ? WHERE id = ?");
+    for (const id of ids) set.run(status, id);
+  }
+
+  answerIssue(id: string, answer: IssueAnswer, status: IssueStatus): void {
+    this.db.prepare("UPDATE issues SET answer = ?, status = ? WHERE id = ?").run(JSON.stringify(answer), status, id);
+  }
+
+  /** How many repeats the chain an issue belongs to has had: 0 for an issue that repeats nothing. */
+  flipsOf(id: string): number {
+    const r = this.db.prepare("SELECT flips FROM issues WHERE id = ?").get(id) as { flips: number } | undefined;
+    return r?.flips ?? 0;
   }
 
   addDecision(cardId: string, decision: Omit<Decision, "id">, sessionId: string | null): void {
@@ -489,6 +553,17 @@ function toProject(r: any): ProjectRow {
   return { id: r.id, name: r.name, path: r.path, trustWarning: !!r.trust_warning };
 }
 
+function toIssue(r: any): SpecIssue {
+  return {
+    id: r.id, foundIn: r.found_in, where: r.spec_section, problem: r.problem, guess: r.guess,
+    status: r.status ?? "open",
+    judgment: r.verdict
+      ? { verdict: r.verdict, level: r.level, reason: r.reason ?? "", recommendation: r.recommendation ?? "", repeats: r.repeats ?? null }
+      : null,
+    answer: r.answer ? JSON.parse(r.answer) : null,
+  };
+}
+
 function toCard(r: any): CardRow {
   return {
     id: r.id, projectId: r.project_id, title: r.title, ideaTitle: r.idea_title, ideaText: r.idea_text, lane: r.lane, state: r.state,
@@ -500,6 +575,8 @@ function toCard(r: any): CardRow {
     appStopped: !!r.app_stopped, landing: r.landing ? JSON.parse(r.landing) : null,
     landed: r.landed ? JSON.parse(r.landed) : null, shipAfterCheck: !!r.ship_after_check,
     checklist: r.checklist ? JSON.parse(r.checklist) : null,
+    judging: r.judging ? JSON.parse(r.judging) : null, keeperFixes: r.keeper_fixes ? JSON.parse(r.keeper_fixes) : null,
+    keeperRounds: r.keeper_rounds ?? 0, blockJudged: !!r.block_judged,
     waitingSince: r.waiting_since ?? r.created_at,
   };
 }

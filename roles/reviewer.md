@@ -20,6 +20,12 @@ You run without the person: nobody chats with you here.
 - **Spec issues:** the spec is silent, unclear or contradicts itself; what it asks doesn't fit the code; or the code
   does more than the spec asks. Report each with the spec's section, the problem, and what the code does. Don't
   report the issues your message lists as already on the card.
+- **Only issues that would change something:** report an issue only if the spec keeper would change the spec or the
+  code after reading it. Leave out wording, naming and structure, a gap filled the obvious way, and anything that isn't
+  about the spec, such as a tool or test that fails on main too, or a local environment problem. Say those in your
+  summary.
+- **Fixes the spec keeper sent:** if your message lists spec issues sent to the developer as code fixes, check each one
+  is fixed. One that isn't is a bug.
 - **Earlier bugs:** if your message lists the last round's bugs, check each one is fixed. If the developer's summary
   says it left one on purpose, report it again only if it still holds after reading the developer's reason.
 - **Not bugs:**

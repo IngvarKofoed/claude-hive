@@ -1,7 +1,60 @@
 import { describe, expect, it } from "vitest";
-import { CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterPlan } from "./board/moves";
+import {
+  CHECK_ROUNDS, KEEPER_FIX_ROUNDS, afterBlocking, canMove, fateOf, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterJudging,
+  laneAfterPlan,
+} from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
 import { describeTool, InputQueue } from "./sessions/sdkRunner";
+
+describe("the spec keeper's routing (docs/specs/2026-11-28-spec-keeper.md)", () => {
+  const j = (verdict: "spec-wrong" | "code-wrong" | "no-change", level: "minor" | "changes-signoff" | "severe" = "minor", repeats: string | null = null) =>
+    ({ verdict, level, repeats });
+
+  it("settles minor issues, asks changes-signoff and every repeat, and stops on severe", () => {
+    expect(fateOf(j("spec-wrong"), "batch", 0)).toBe("spec-fixed");
+    expect(fateOf(j("no-change"), "batch", 0)).toBe("no-change");
+    expect(fateOf(j("code-wrong"), "batch", 0)).toBe("fix");
+    expect(fateOf(j("spec-wrong", "changes-signoff"), "batch", 0)).toBe("waits");
+    expect(fateOf(j("spec-wrong", "minor", "earlier"), "batch", 0)).toBe("waits");
+    expect(fateOf(j("code-wrong", "minor", "earlier"), "batch", 0)).toBe("waits");
+    expect(fateOf(j("code-wrong", "severe", "earlier"), "batch", 0)).toBe("severe");
+  });
+
+  it("asks a code fix judged as built, or past the fix rounds", () => {
+    expect(fateOf(j("code-wrong"), "as-built", 0)).toBe("waits");
+    expect(fateOf(j("code-wrong"), "batch", KEEPER_FIX_ROUNDS - 1)).toBe("fix");
+    expect(fateOf(j("code-wrong"), "batch", KEEPER_FIX_ROUNDS)).toBe("waits");
+  });
+
+  it("Check → Check on severe, Build on a code fix, else Try it, or Ship for a card Ship sent back when nothing waits", () => {
+    expect(laneAfterJudging(["fix", "severe"], false, false)).toBe("check");
+    expect(laneAfterJudging(["fix", "waits"], false, false)).toBe("build");
+    expect(laneAfterJudging(["spec-fixed", "no-change"], false, false)).toBe("tryit");
+    expect(laneAfterJudging(["spec-fixed"], true, false)).toBe("ship");
+    expect(laneAfterJudging(["waits"], true, false)).toBe("tryit");
+    expect(laneAfterJudging(["spec-fixed"], true, true)).toBe("tryit");
+  });
+
+  it("a blocked build: severe stops, no-change falls back, changes-signoff or a repeat asks, else the developer carries on", () => {
+    expect(afterBlocking(j("no-change", "severe"))).toBe("stop");
+    expect(afterBlocking(j("no-change", "changes-signoff"))).toBe("fall-back");
+    expect(afterBlocking(j("code-wrong", "changes-signoff"))).toBe("ask");
+    expect(afterBlocking(j("code-wrong", "minor", "earlier"))).toBe("ask");
+    expect(afterBlocking(j("spec-wrong"))).toBe("spec-fixed");
+    expect(afterBlocking(j("code-wrong"))).toBe("carry-on");
+  });
+
+  it("Check → Try it instead of Ship while a keeper question waits", () => {
+    expect(laneAfterCheck("done", 0, 1, true)).toBe("ship");
+    expect(laneAfterCheck("done", 0, 1, true, true)).toBe("tryit");
+  });
+
+  it("Check stays in Check while open spec issues wait for the keeper, but only on a round without bugs", () => {
+    expect(laneAfterCheck("done", 0, 1, false, false, 2)).toBe("check");
+    expect(laneAfterCheck("done", 0, 1, true, false, 1)).toBe("check");
+    expect(laneAfterCheck("done", 1, 1, false, false, 2)).toBe("build");
+  });
+});
 
 describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
   it("Refine → Spec on Good, skipping Mockup", () => {
@@ -22,7 +75,8 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
 
   it("Plan → Spec on Back to Spec", () => {
     expect(laneAfter("plan", "back-to-spec")).toBe("spec");
-    expect(laneAfter("check", "back-to-spec")).toBeNull();
+    expect(laneAfter("check", "back-to-spec")).toBe("spec");
+    expect(laneAfter("tryit", "back-to-spec")).toBeNull();
   });
 
   it("Build → Check when the developer's report is done, and stays in Build when it's blocked or missing", () => {

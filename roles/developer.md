@@ -28,6 +28,11 @@ touch main or any other branch.
 - **Spec issues:** the spec is silent, unclear or contradicts itself; it doesn't fit the code; something is missing,
   different or extra; a How-to-verify check can't be carried out as written. Note it, make your best guess, and keep
   going. Report it with your guess.
+- **Only issues that would change something:** report an issue only if the spec keeper would change the spec or the
+  code after reading it: the spec blocked you, forced a departure, made you choose between readings that build
+  different things, contradicts itself or the code, or has a How-to-verify check that can't be carried out as written.
+  Leave out wording, naming and structure, a gap you filled the obvious way, and anything that isn't about the spec,
+  such as a tool or test that fails on main too, or a local environment problem. Say those in your summary.
 - **Decisions:** decide wherever the spec leaves room, and report each decision with the alternative you didn't take.
   Ask with `AskUserQuestion` only when you can't go on without an answer, never in your reply.
 - **Blocked:** if the spec can't be built as written in this codebase, report `blocked` with the reason. Never fill

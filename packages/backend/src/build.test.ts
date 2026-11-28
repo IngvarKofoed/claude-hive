@@ -9,7 +9,7 @@ import * as git from "./git";
 import { Hive } from "./hive";
 import type { Role } from "./sessions/types";
 import { DEVELOPER_SCHEMA } from "./spec/reports";
-import { FakeProbe, FakeRunner, type FakeTurn, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, type FakeTurn, keeperReport, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
 
 const brief = {
   title: "Printer font size", problem: "Labels are too small.", whoItsFor: "People with low vision",
@@ -71,6 +71,18 @@ describe("Build lane", () => {
   async function endTurn(turn: FakeTurn, outcome: Parameters<FakeTurn["end"]>[0], id: string) {
     await turn.end(outcome);
     await waitFor(() => hive.card(id).state === "needs-you" || hive.card(id).lane !== "build");
+  }
+
+  /**
+   * The developer reports blocked; the spec keeper judges the block `no-change` (not about the spec), so the card
+   * stops with Retry and Back to Spec (docs/specs/2026-11-28-spec-keeper.md, A blocked build).
+   */
+  async function blocked(id: string, developer: FakeTurn, reason: string) {
+    const keepers = turnsOf("spec-writer").length;
+    await developer.end({ kind: "ok", report: { ...done, status: "blocked", blockedReason: reason } });
+    await waitFor(() => turnsOf("spec-writer").length === keepers + 1);
+    const keeper = lastOf("spec-writer");
+    await endTurn(keeper, { kind: "ok", report: keeperReport(keeper.request.message) }, id);
   }
 
   /** A card whose spec is signed off and whose planner is running. */
@@ -172,7 +184,10 @@ describe("Build lane", () => {
       expect(card.build!.files).toContainEqual({ path: "fonts.ts", added: 1, removed: 0 });
       expect(card.build!.files.some((f) => f.path.startsWith("docs/specs/"))).toBe(true);
       expect(card.issues).toEqual([
-        { id: expect.any(String), foundIn: "build", where: "Design, Storage", problem: done.issues[0]!.problem, guess: "prefs.json" },
+        {
+          id: expect.any(String), foundIn: "build", where: "Design, Storage", problem: done.issues[0]!.problem, guess: "prefs.json",
+          status: "open", judgment: null, answer: null,
+        },
       ]);
       expect(card.decisions).toEqual([
         { id: expect.any(String), lane: "build", what: "Default size 12", alternative: "Default size 10", source: "developer" },
@@ -182,14 +197,15 @@ describe("Build lane", () => {
       expect(sh(repo.root, "status", "--porcelain")).toBe("");
     });
 
-    it("keeps a blocked report in Build with Retry and Back to Spec", async () => {
+    it("keeps a blocked report in Build with Retry and Back to Spec, once the spec keeper finds it isn't about the spec", async () => {
       const { id, developer } = await inBuild();
-      await endTurn(developer, { kind: "ok", report: { ...done, status: "blocked", blockedReason: "No printers table." } }, id);
+      await blocked(id, developer, "No printers table.");
       const card = hive.card(id);
       expect(card.lane).toBe("build");
       expect(card.build).toBeNull();
       expect(card.chat.at(-1)).toMatchObject({
-        kind: "error", message: "The developer couldn't build this: No printers table.", actions: ["retry", "back-to-spec"],
+        kind: "error", message: "The developer couldn't build this: No printers table. The spec keeper: Not about the spec.",
+        actions: ["retry", "back-to-spec"],
       });
     });
 
@@ -255,7 +271,7 @@ describe("Build lane", () => {
     it("commits the partial work, reaches the spec writer, and resumes the same developer after a new sign-off", async () => {
       const { id, worktree, developer, planner } = await inBuild();
       writeFileSync(join(worktree, "half.ts"), "// half done\n");
-      await endTurn(developer, { kind: "ok", report: { ...done, status: "blocked", blockedReason: "No printers table." } }, id);
+      await blocked(id, developer, "No printers table.");
 
       await hive.backToSpec(id);
       expect(hive.card(id).lane).toBe("spec");
@@ -288,7 +304,7 @@ describe("Build lane", () => {
       repo.git("commit", "-qam", "main change");
       await s.planner.end({ kind: "ok", report: plan });
       await waitFor(() => turnsOf("developer").length === 1);
-      await endTurn(lastOf("developer"), { kind: "ok", report: { ...done, status: "blocked", blockedReason: "Can't resolve." } }, s.id);
+      await blocked(s.id, lastOf("developer"), "Can't resolve.");
 
       await hive.backToSpec(s.id);
       expect(await git.mergeInProgress(s.worktree)).toBe(false);

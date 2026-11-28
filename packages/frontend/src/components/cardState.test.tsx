@@ -127,7 +127,7 @@ describe("applyCardEvent", () => {
 
   it("takes a finished Check round and its issues from check.updated", () => {
     const check = { round: 2, summary: "Still off by one", bugs: [{ where: "a.ts:3", problem: "floor, not round" }] };
-    const issues = [{ id: "i1", foundIn: "check" as const, where: "Outcome", problem: "silent", guess: "kept it" }];
+    const issues = [{ id: "i1", foundIn: "check" as const, where: "Outcome", problem: "silent", guess: "kept it", status: "open" as const, judgment: null, answer: null }];
     const s = applyCardEvent(start, { type: "check.updated", cardId: "c1", check, issues });
     expect(s.detail.check).toEqual(check);
     expect(s.detail.issues).toEqual(issues);
@@ -236,10 +236,11 @@ describe("Chat", () => {
       { kind: "message", id: "2", at: "t", from: "product-owner", text: "b" },
       { kind: "message", id: "3", at: "t", from: "spec-writer", text: "c" },
       { kind: "message", id: "4", at: "t", from: "planner", text: "d" },
+      { kind: "message", id: "6", at: "t", from: "spec-keeper", text: "e" },
       { kind: "message", id: "5", at: "t", from: "hive", text: "The review found two fixes" },
     ];
     render(<Chat detail={{ ...detail, turnRunning: false, chat }} streaming="" activity={null} />);
-    for (const label of ["You", "Product owner", "Spec writer", "Planner"]) {
+    for (const label of ["You", "Product owner", "Spec writer", "Spec keeper", "Planner"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText("Hive:")).toBeInTheDocument();

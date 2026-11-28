@@ -6,6 +6,7 @@ export const AUTHOR_LABEL: Record<ChatAuthor, string> = {
   you: "You",
   "product-owner": "Product owner",
   "spec-writer": "Spec writer",
+  "spec-keeper": "Spec keeper",
   planner: "Planner",
   developer: "Developer",
   reviewer: "Reviewer",

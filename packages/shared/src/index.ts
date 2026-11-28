@@ -153,7 +153,51 @@ export interface ChecklistItem {
   status: ChecklistStatus;
 }
 
-/** A mismatch between spec and code, found while building. Judged later by the spec keeper. */
+/**
+ * The spec keeper's verdict on an issue (docs/specs/2026-11-28-spec-keeper.md, The batch): the spec changes, the code
+ * changes, or neither.
+ */
+export type IssueVerdict = "spec-wrong" | "code-wrong" | "no-change";
+
+/** How far an issue reaches: the keeper settles it, it changes what you signed off, or it stops the card. */
+export type IssueLevel = "minor" | "changes-signoff" | "severe";
+
+/** The spec keeper's judgment of one issue. */
+export interface IssueJudgment {
+  verdict: IssueVerdict;
+  level: IssueLevel;
+  reason: string;
+  /** For `changes-signoff` and `severe`: what the keeper would do. Empty for `minor`. */
+  recommendation: string;
+  /** The earlier issue on this card that this one repeats, if any. */
+  repeats: string | null;
+}
+
+/**
+ * Where an issue stands:
+ * - `open`: no verdict yet; waiting for the spec keeper, or "Not judged" on a card moved on past a failed keeper turn;
+ * - `spec-fixed`: the keeper changed the spec;
+ * - `no-change`: neither the spec nor the code changes;
+ * - `sent`: sent to the developer as a code fix, not yet verified by a passing Check round; `fixed` once it is;
+ * - `judged`: judged in a batch that stopped on a severe issue, and not acted on yet;
+ * - `severe`: the severe issue that stopped the card;
+ * - `waiting`: waits for your answer;
+ * - `held`: you answered Change the code (or in your own words); it goes to Build when you press Send to Build;
+ * - `kept`: you answered Keep it as built (or Change the spec, for a blocked build); the spec changes to match;
+ * - `settled`: closed by Back to Spec.
+ */
+export type IssueStatus =
+  | "open" | "spec-fixed" | "no-change" | "sent" | "fixed" | "judged" | "severe" | "waiting" | "held" | "kept" | "settled";
+
+/** Your answer to a spec keeper question about an issue. */
+export interface IssueAnswer {
+  /** `keep`: Keep it as built, or Change the spec; `change`: Change the code, or Keep the spec. */
+  choice: "keep" | "change";
+  /** Your own words, when you answered in them. */
+  words: string | null;
+}
+
+/** A mismatch between spec and code, found while building or checking, and judged by the spec keeper. */
 export interface SpecIssue {
   id: string;
   /** The lane the issue was found in. */
@@ -163,6 +207,11 @@ export interface SpecIssue {
   problem: string;
   /** What was done instead. */
   guess: string;
+  status: IssueStatus;
+  /** The spec keeper's judgment, once it has judged the issue. */
+  judgment: IssueJudgment | null;
+  /** Your answer, once you've given one. */
+  answer: IssueAnswer | null;
 }
 
 /** A decision made without you, listed so you can ask for it the other way in Try it. */
@@ -429,7 +478,8 @@ export interface RolesResponse {
 // ---------- Card detail ----------
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
-export type ChatAuthor = "you" | "product-owner" | "spec-writer" | "planner" | "developer" | "reviewer" | "hive";
+export type ChatAuthor =
+  | "you" | "product-owner" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive";
 
 /**
  * What an error line offers: retry the failed turn, run the review again, send a blocked plan or build back to Spec,
@@ -456,7 +506,16 @@ export interface Question {
 
 /** Something waiting for your answer on the card. */
 export type PendingItem =
-  | { id: string; kind: "question"; questions: Question[] }
+  | {
+      id: string;
+      kind: "question";
+      questions: Question[];
+      /**
+       * Set on the spec keeper's questions: the issue each question asks about, in the same order. The hive routes the
+       * answers itself; no session reads them (docs/specs/2026-11-28-spec-keeper.md, Your answer in Try it).
+       */
+      issueIds?: string[];
+    }
   | { id: string; kind: "permission"; toolName: string; detail: string };
 
 export interface CardDetail extends CardSummary {
@@ -544,6 +603,7 @@ export interface LandBody {
 
 /** Try it feedback (POST /api/cards/:id/feedback). Only `build` is accepted as the lane for now. */
 export interface FeedbackBody {
+  /** May be empty when Change the code answers are held: Send to Build then carries only those. */
   text: string;
   lane?: Lane;
 }
@@ -586,6 +646,8 @@ export type HiveEvent =
   | { type: "checklist.updated"; cardId: string; checklist: ChecklistItem[] }
   /** A Check round finished: the round as stored, and the card's spec issues with the ones it added. */
   | { type: "check.updated"; cardId: string; check: CheckRound; issues: SpecIssue[] }
+  /** The spec keeper judged issues, or your answers changed them, while the card stays in its lane. */
+  | { type: "issues.updated"; cardId: string; issues: SpecIssue[] }
   | { type: "setup.updated"; cardId: string; setup: SetupReport; port: number | null }
   | { type: "app.updated"; cardId: string; apps: AppProcess[]; appStopped: boolean }
   | { type: "pending.updated"; cardId: string; pending: PendingItem | null }

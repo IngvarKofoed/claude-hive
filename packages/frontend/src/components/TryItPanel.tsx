@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { CardDetail } from "@hive/shared";
 import { api } from "../api/client";
 import { outcomeSection } from "./outcome";
+import { PendingCard } from "./PendingCard";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { Markdown } from "./ui/Markdown";
@@ -160,6 +161,22 @@ export function TryItPanel({ detail, onMoved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const guide = outcomeSection(detail.spec?.text ?? null);
+  const held = detail.issues.some((i) => i.status === "held");
+  const unanswered = detail.issues.some((i) => i.status === "waiting");
+  const lastChat = detail.chat[detail.chat.length - 1];
+  const failed = lastChat && lastChat.kind === "error" && lastChat.actions.includes("retry") ? lastChat : null;
+  const question = detail.pending?.kind === "question" ? detail.pending : null;
+  const asking = detail.pending !== null;
+  const acceptBlocked = asking || unanswered || held || detail.turnRunning;
+  const sendBlocked = asking || unanswered || detail.turnRunning || (text.trim() === "" && !held);
+  const whyDisabled =
+    asking || unanswered
+      ? "Answer the spec keeper's question first."
+      : detail.turnRunning
+        ? "The spec keeper is working. Wait for it to finish."
+        : held
+          ? "Changes you asked for go to Build with Send to Build."
+          : null;
   const earlier = detail.history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
 
   async function run(action: () => Promise<unknown>, after?: () => void) {
@@ -179,6 +196,19 @@ export function TryItPanel({ detail, onMoved }: Props) {
   return (
     <Panel title="Try it">
       <div className={styles.panel}>
+        {question ? <PendingCard item={question} onError={setError} /> : null}
+        {failed ? (
+          <div className={styles.section}>
+            <p className={styles.error} role="alert">
+              {failed.message}
+            </p>
+            <div className={styles.actions}>
+              <Button compact onClick={() => run(() => api.retry(detail.id))}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <TheApp detail={detail} onError={setError} />
         <div className={styles.section}>
           <h3 className={styles.heading}>Test guide</h3>
@@ -200,7 +230,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
           <div className={styles.actions}>
             <Button
               variant="primary"
-              disabled={busy || text.trim() === ""}
+              disabled={busy || sendBlocked}
               onClick={() =>
                 run(
                   () => api.feedback(detail.id, text.trim()),
@@ -211,12 +241,13 @@ export function TryItPanel({ detail, onMoved }: Props) {
               Send to Build
             </Button>
             <Button
-              disabled={busy}
+              disabled={busy || acceptBlocked}
               onClick={() => run(() => api.accept(detail.id))}
             >
               Accept
             </Button>
           </div>
+          {whyDisabled ? <p className={styles.muted}>{whyDisabled}</p> : null}
           {error ? (
             <p className={styles.error} role="alert">
               {error}

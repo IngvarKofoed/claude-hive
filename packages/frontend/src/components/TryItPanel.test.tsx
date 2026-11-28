@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppProcess, CardDetail, SetupReport } from "@hive/shared";
+import type { AppProcess, CardDetail, IssueStatus, PendingItem, SetupReport, SpecIssue } from "@hive/shared";
 import { api } from "../api/client";
 import { TryItPanel } from "./TryItPanel";
 
@@ -247,5 +247,69 @@ describe("TryItPanel your call", () => {
     render(<TryItPanel detail={detail()} onMoved={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Accept" }));
     expect(accept).toHaveBeenCalledWith("c1");
+  });
+});
+
+const issueWith = (status: IssueStatus): SpecIssue => ({
+  id: "i1",
+  foundIn: "build",
+  where: "Outcome",
+  problem: "silent",
+  guess: "kept it",
+  status,
+  judgment: null,
+  answer: null,
+});
+const question: PendingItem = {
+  id: "q1",
+  kind: "question",
+  questions: [{ question: "Outcome: silent. The spec keeper recommends keeping it.", header: "Issue", multiSelect: false, options: [{ label: "Keep it as built", description: "" }, { label: "Change the code", description: "" }] }],
+  issueIds: ["i1"],
+};
+const accept = () => screen.getByRole("button", { name: "Accept" });
+const send = () => screen.getByRole("button", { name: "Send to Build" });
+
+describe("TryItPanel spec keeper", () => {
+  it("shows the question at the top and disables both buttons while it waits", () => {
+    render(<TryItPanel detail={detail({ pending: question, issues: [issueWith("waiting")] })} onMoved={() => {}} />);
+    expect(screen.getByText(/The spec keeper recommends keeping it/)).toBeInTheDocument();
+    expect(accept()).toBeDisabled();
+    expect(send()).toBeDisabled();
+    expect(screen.getByText("Answer the spec keeper's question first.")).toBeInTheDocument();
+  });
+
+  it("holds Accept but opens Send to Build, with an empty box, for a held issue", async () => {
+    const feedback = vi.spyOn(api, "feedback").mockResolvedValue({} as never);
+    const onMoved = vi.fn();
+    render(<TryItPanel detail={detail({ issues: [issueWith("held")] })} onMoved={onMoved} />);
+    expect(accept()).toBeDisabled();
+    expect(send()).toBeEnabled();
+    expect(screen.getByText("Changes you asked for go to Build with Send to Build.")).toBeInTheDocument();
+    await userEvent.click(send());
+    expect(feedback).toHaveBeenCalledWith("c1", "");
+    await waitFor(() => expect(onMoved).toHaveBeenCalled());
+  });
+
+  it("disables both buttons while a keeper turn runs", () => {
+    render(<TryItPanel detail={detail({ turnRunning: true })} onMoved={() => {}} />);
+    expect(accept()).toBeDisabled();
+    expect(send()).toBeDisabled();
+  });
+
+  it("needs words for Send to Build when nothing is held, and Accept is open", async () => {
+    render(<TryItPanel detail={detail({ issues: [issueWith("kept")] })} onMoved={() => {}} />);
+    expect(accept()).toBeEnabled();
+    expect(send()).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("What you found"), "x");
+    expect(send()).toBeEnabled();
+  });
+
+  it("shows a failed keeper turn with Retry", async () => {
+    const retry = vi.spyOn(api, "retry").mockResolvedValue({} as never);
+    const chat: CardDetail["chat"] = [{ kind: "error", id: "e1", at: "t", message: "The spec keeper's turn failed", actions: ["retry"] }];
+    render(<TryItPanel detail={detail({ chat })} onMoved={() => {}} />);
+    expect(screen.getByText("The spec keeper's turn failed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledWith("c1");
   });
 });

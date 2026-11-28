@@ -47,7 +47,7 @@ function BuildPanel({ detail }: { detail: CardDetail }) {
   if (!detail.build && detail.issues.length === 0 && detail.decisions.length === 0) return null;
   return (
     <Panel title="Build">
-      <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+      <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} lane={detail.lane} />
     </Panel>
   );
 }
@@ -133,7 +133,7 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
       return (
         <Panel title="Build">
           {detail.build || detail.issues.length > 0 || detail.decisions.length > 0
-            ? <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} />
+            ? <BuildView build={detail.build} issues={detail.issues} decisions={detail.decisions} lane={detail.lane} />
             : none("No build report is kept.")}
         </Panel>
       );

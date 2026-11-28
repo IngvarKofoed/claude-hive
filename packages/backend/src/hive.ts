@@ -8,15 +8,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
-  FeedbackBody, FileChange, ForYouItem, ForYouResponse, Landed, LandBody, Lane, PendingItem, Plan, Question,
-  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, TryItRound, UpdateIdeaBody,
+  FeedbackBody, FileChange, ForYouItem, ForYouResponse, IssueAnswer, IssueJudgment, IssueStatus, Landed, LandBody, Lane, PendingItem,
+  Plan, Question, RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
 } from "@hive/shared";
 import { CARD_PORTS, LANES, lanesBefore } from "@hive/shared";
 import {
-  CHECK_ROUNDS, canMove, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterLanding, laneAfterPlan,
+  CHECK_ROUNDS, afterBlocking, canMove, fateOf, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterJudging,
+  laneAfterLanding, laneAfterPlan, type IssueFate,
 } from "./board/moves";
 import { waitsForYou, whatItWants } from "./board/forYou";
-import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
+import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import { applyChecklistChange } from "./sessions/checklist";
 import { describeHiveTool, type HiveToolName } from "./sessions/hiveTools";
@@ -26,8 +27,9 @@ import type {
 } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
-  CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, parseCheckReport, parseCommitReport,
-  parseDeveloperReport, parsePlanReport, parseReviewReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SETUP_SCHEMA,
+  CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, KEEPER_SCHEMA, parseCheckReport, parseCommitReport,
+  parseDeveloperReport, parseKeeperReport, parsePlanReport, parseReviewReport, parseSetupReport, PLAN_SCHEMA,
+  REVIEW_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
 import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, SquashResult } from "./git";
 import { fakeApps, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
@@ -111,7 +113,18 @@ const LANE_ROLE: Partial<Record<Lane, string>> = {
 const SPEC_REVIEWER = "spec-reviewer";
 /** The worktree's setup session: in the background, its sessions are filed under Refine, where the worktree is made. */
 const SETUP = "setup";
+/**
+ * The spec keeper: not a session of its own, but turns in the spec writer's session after sign-off. Its role file only
+ * holds the instructions sent at the top of each keeper message (docs/specs/2026-11-28-spec-keeper.md, Key decisions).
+ */
+const SPEC_KEEPER = "spec-keeper";
 const CHAT_LANES: Lane[] = ["refine", "spec"];
+
+/** The options of a spec keeper question in Try it, and on a blocked build; the keeper's choice goes first. */
+const KEEP_AS_BUILT = "Keep it as built";
+const CHANGE_THE_CODE = "Change the code";
+const CHANGE_THE_SPEC = "Change the spec";
+const KEEP_THE_SPEC = "Keep the spec";
 
 /** What a role's sessions get beyond its file. */
 interface RoleTurn {
@@ -137,6 +150,7 @@ const ROLE_TURNS: Record<string, RoleTurn> = {
   "product-owner": { tools: ["write_brief"] },
   setup: { report: SETUP_SCHEMA, tools: ["copy_local_files"] },
   "spec-writer": { specFormat: ["format.md"] },
+  "spec-keeper": { report: KEEPER_SCHEMA },
   "spec-reviewer": { report: REVIEW_SCHEMA },
   planner: { specFormat: ["format.md"], report: PLAN_SCHEMA },
   developer: { report: DEVELOPER_SCHEMA, taskTools: true },
@@ -194,6 +208,17 @@ function planText(plan: Plan | null): string {
 
 /** Bugs as a list, for the developer's and the next reviewer's messages. */
 const bugList = (bugs: Bug[]) => list(bugs.map((b) => `${b.where}: ${b.problem}`));
+const issueList = (issues: SpecIssue[]) => list(issues.map((i) => `${i.where}: ${i.problem}`));
+
+/** Spec issues going to the developer as code changes: what's wrong, what was built, why, and your words if any. */
+function keeperFixList(issues: SpecIssue[]): string {
+  return issues.map((i) => [
+    `- ${i.where}: ${i.problem}`,
+    `  Built: ${i.guess}`,
+    ...(i.judgment ? [`  The spec keeper: ${i.judgment.reason}`] : []),
+    ...(i.answer?.words ? [`  The person said: ${i.answer.words}`] : []),
+  ].join("\n")).join("\n");
+}
 
 const portRange = (first: number) => `${first}–${first + CARD_PORTS - 1}`;
 
@@ -700,7 +725,8 @@ export class Hive {
         throw new HttpError(409, (error as Error).message);
       }
       this.watch.unwatch(cardId);
-      this.db.updateCard(cardId, { lane: to });
+      // Keeper fix rounds count from sign-off (docs/specs/2026-11-28-spec-keeper.md, After the batch).
+      this.db.updateCard(cardId, { lane: to, keeperRounds: 0 });
       this.startPlanner(cardId);
       return cardSummary(this.requireCard(cardId));
     });
@@ -714,16 +740,21 @@ export class Hive {
     const card = this.requireCard(cardId);
     const from = card.lane;
     const to = laneAfter(from, "back-to-spec");
-    if (!to) throw new HttpError(409, "Only a card in Plan or Build can go back to Spec.");
-    const who = from === "build" ? "developer" : "planner";
+    if (!to) throw new HttpError(409, "Only a card in Plan, Build or Check can go back to Spec.");
+    const who = from === "build" ? "developer" : from === "check" ? "spec keeper" : "planner";
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, `Wait for the ${who} to finish.`);
     const last = this.db.lastChatItem(cardId, from);
     if (!last || last.kind !== "error" || !last.actions.includes("back-to-spec")) {
-      throw new HttpError(409, `Only a blocked ${from === "build" ? "build" : "plan"} goes back to Spec.`);
+      throw new HttpError(409, from === "check"
+        ? "Only a card the spec keeper stopped goes back to Spec from Check."
+        : `Only a blocked ${from === "build" ? "build" : "plan"} goes back to Spec.`);
     }
     const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
     if (!writer) throw new HttpError(409, "This card has no spec writer to go back to.");
+    // The keeper stopped the card on a severe issue: its own finding goes back to it, as the spec writer.
+    const severe = this.db.issuesFor(cardId).some((i) => i.status === "severe");
     return this.oneMoveAtATime(cardId, async () => {
+      if (from === "check") await this.stopCardServers(cardId, "check");
       if (from === "build") {
         const worktree = card.worktreePath!;
         try {
@@ -734,19 +765,36 @@ export class Hive {
           throw new HttpError(409, `The build's partial work couldn't be committed: ${(error as Error).message}`);
         }
       }
+      // Every issue not yet settled is settled in Spec: the spec writer gets them, and none is judged or asked after
+      // the new sign-off (docs/specs/2026-11-28-spec-keeper.md, After the batch).
+      const unsettled: IssueStatus[] = ["open", "judged", "severe", "waiting", "held"];
+      const settled = this.db.issuesFor(cardId).filter((i) => unsettled.includes(i.status));
+      const open = this.db.openPendingFor(cardId);
+      const question = open?.item.kind === "question" && open.item.issueIds ? open : null;
       // Stored Try it feedback goes with it: the developer's reason carries it to the spec writer, and after the new
       // sign-off the developer must get the new plan.
-      this.db.updateCard(cardId, {
-        lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null, shipAfterCheck: false,
+      this.db.transaction(() => {
+        this.db.setIssueStatus(settled.map((i) => i.id), "settled");
+        if (question) this.db.setPendingAnswer(question.id, { withdrawn: true });
+        this.db.updateCard(cardId, {
+          lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null, shipAfterCheck: false,
+          judging: null, keeperFixes: null,
+        });
       });
+      if (question) this.deps.hub.emit({ type: "pending.updated", cardId, pending: null });
       this.watchSpec(cardId);
-      this.startTurn(cardId, writer.id, [
-        `The ${who} couldn't ${from === "build" ? "build" : "plan"} from the signed-off spec. What it reported:`,
-        "",
-        last.message,
-        "",
-        "Revise the spec to resolve this, then say briefly what you changed. It needs a new review and sign-off.",
-      ].join("\n"), this.turnOptions(LANE_ROLE.spec!));
+      const opening = severe
+        ? [`As the spec keeper, you stopped the card on a severe issue:`, "", last.message, "",
+          "The person sent the card back to Spec. Revise the spec with them, then say briefly what you changed. It " +
+            "needs a new review and sign-off."]
+        : [`The ${who} couldn't ${from === "build" ? "build" : "plan"} from the signed-off spec. What it reported:`, "",
+          last.message, "",
+          "Revise the spec to resolve this, then say briefly what you changed. It needs a new review and sign-off."];
+      const closing = settled.length
+        ? ["", "These spec issues were still open on the card. They're closed now; settle in the spec what needs it:",
+          issueList(settled)]
+        : [];
+      this.startTurn(cardId, writer.id, [...opening, ...closing].join("\n"), this.turnOptions(LANE_ROLE.spec!));
       return cardSummary(this.requireCard(cardId));
     });
   }
@@ -786,14 +834,40 @@ export class Hive {
     const to = laneAfter(card.lane, "move-on");
     if (!to) throw new HttpError(409, "Only a card in Check can move on to Try it.");
     this.requireOffered(cardId, card.lane, "move-on");
+    const issues = this.db.issuesFor(cardId);
+    const open = issues.filter((i) => i.status === "open");
     return this.oneMoveAtATime(cardId, async () => {
-      this.addNote(cardId, "check", "You moved the card on to Try it as built.");
-      await this.stopCardServers(cardId, "check");
-      this.db.updateCard(cardId, { lane: to, shipAfterCheck: false });
-      this.emitCard(cardId);
-      void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
+      // Past a keeper turn that failed: the issues it was judging stay open, shown as not judged.
+      if (card.judging) {
+        this.db.updateCard(cardId, { judging: null });
+        this.addNote(cardId, "check", "You moved the card on to Try it past the spec keeper. Its issues aren't judged.");
+      } else if (issues.some((i) => i.status === "severe")) {
+        // After a severe verdict, the batch is taken as built: the severe issue and its code fixes come to you.
+        this.db.setIssueStatus(issues.filter((i) => i.status === "severe" || i.status === "judged").map((i) => i.id), "waiting");
+        this.addNote(cardId, "check", "You moved the card on to Try it as built. The spec keeper's questions wait for you there.");
+      } else if (open.length > 0) {
+        // The batch is judged first, as built: every code fix becomes a question.
+        this.addNote(cardId, "check", "You moved the card on to Try it as built.");
+        this.startKeeper(cardId, "as-built", open);
+        return cardSummary(this.requireCard(cardId));
+      } else {
+        this.addNote(cardId, "check", "You moved the card on to Try it as built.");
+      }
+      await this.moveToTryIt(cardId, "check");
       return cardSummary(this.requireCard(cardId));
     });
+  }
+
+  /**
+   * The card moves on to Try it: whatever listens on its ports goes, its app starts, and every spec issue waiting for
+   * you is asked there in one question (docs/specs/2026-11-28-spec-keeper.md, After the batch).
+   */
+  private async moveToTryIt(cardId: string, from: Lane): Promise<void> {
+    await this.stopCardServers(cardId, from);
+    this.db.updateCard(cardId, { lane: "tryit", shipAfterCheck: false });
+    this.askWaitingIssues(cardId);
+    this.emitCard(cardId);
+    void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
   }
 
   /** A button on an error line counts only while nothing runs and that line is still the lane's last. */
@@ -955,13 +1029,22 @@ export class Hive {
     if (pending.answered) throw new HttpError(409, "That has already been answered.");
     if (pending.item.kind === "question" && !isAnswers(body)) throw new HttpError(400, "Send answers.");
     if (pending.item.kind === "permission" && !("allow" in body)) throw new HttpError(400, "Send allow.");
-    const lane = this.db.getSession(pending.sessionId)?.lane ?? this.requireCard(pending.cardId).lane;
+    // A spec keeper question is asked in the lane the card is in, and plain code routes its answers.
+    const keeperItem = pending.item.kind === "question" && !!pending.item.issueIds;
+    const lane = keeperItem
+      ? this.requireCard(pending.cardId).lane
+      : this.db.getSession(pending.sessionId)?.lane ?? this.requireCard(pending.cardId).lane;
+    if (keeperItem && this.anyTurnRunning(pending.cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
 
     this.db.setPendingAnswer(itemId, body);
     this.deps.hub.emit({ type: "pending.updated", cardId: pending.cardId, pending: null });
     // Your answer stays in the chat however it was given, since the question card goes once it's answered.
     if (isAnswers(body) && !opts.alreadyInChat) {
       this.addChat(pending.cardId, lane, "you", summarizeAnswers(body.answers));
+    }
+    if (keeperItem && pending.item.kind === "question" && isAnswers(body)) {
+      this.answerKeeper(pending.cardId, pending.item.questions, pending.item.issueIds!, body.answers);
+      return;
     }
 
     const waiter = this.waiters.get(itemId);
@@ -1003,6 +1086,18 @@ export class Hive {
     const last = this.db.lastChatItem(cardId, card.lane);
     if (!last || last.kind !== "error" || !last.actions.includes("retry")) {
       throw new HttpError(409, "There is no failed turn to retry.");
+    }
+    // A spec keeper turn that failed: the same message goes to the spec writer's session again.
+    if (card.judging) {
+      const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+      const { kind, issueIds } = card.judging;
+      // A keeper message that couldn't be built (a broken role file): build it again.
+      if (writer && !writer.lastMessage && kind !== "answers") {
+        return this.startKeeper(cardId, kind, this.db.issuesFor(cardId).filter((i) => issueIds.includes(i.id)));
+      }
+      if (!writer?.lastMessage) throw new HttpError(409, "There is no spec keeper turn to retry.");
+      this.startTurn(cardId, writer.id, writer.lastMessage, this.keeperOptions(card.judging));
+      return;
     }
     // Every Retry in Ship starts the landing over (docs/specs/2026-11-27-ship-lane.md).
     if (card.lane === "ship") return this.land(cardId, {});
@@ -1421,21 +1516,27 @@ export class Hive {
   /** Your words from Try it go to the same developer; Check then starts over (spec: Try it, Send to Build). */
   async feedback(cardId: string, body: FeedbackBody): Promise<CardSummary> {
     const text = typeof body?.text === "string" ? body.text.trim() : "";
-    if (!text) throw new HttpError(400, "Write what's wrong first.");
     if (body.lane !== undefined && body.lane !== "build") throw new HttpError(400, "Only Build takes feedback for now.");
     const card = this.requireCard(cardId);
     const to = laneAfter(card.lane, "feedback");
     if (!to) throw new HttpError(409, "Only a card in Try it can be sent back with feedback.");
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    this.refuseWhileKeeperAsks(cardId);
+    // Your Change the code answers wait for Send to Build, and go with your feedback
+    // (docs/specs/2026-11-28-spec-keeper.md, Your answer in Try it).
+    const held = this.db.issuesFor(cardId).filter((i) => i.status === "held");
+    if (!text && held.length === 0) throw new HttpError(400, "Write what's wrong first.");
     return this.oneMoveAtATime(cardId, async () => {
       await this.apps.clear(cardId);
       const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
       this.db.transaction(() => {
         this.db.updateCard(cardId, {
-          lane: to, build: null, check: null, feedback: text, appStopped: false, shipAfterCheck: false,
+          lane: to, build: null, check: null, feedback: text || null, appStopped: false, shipAfterCheck: false,
+          keeperFixes: held.length ? { from: "tryit", ids: held.map((i) => i.id) } : null,
         });
+        this.db.setIssueStatus(held.map((i) => i.id), "sent");
         if (developer) this.db.updateSession(developer.id, { lastMessage: null });
-        this.db.addEvent(cardId, "feedback", { text }, randomUUID());
+        if (text) this.db.addEvent(cardId, "feedback", { text }, randomUUID());
       });
       this.emitCard(cardId);
       void this.startDeveloper(cardId)
@@ -1450,6 +1551,10 @@ export class Hive {
     const to = laneAfter(card.lane, "accept");
     if (!to) throw new HttpError(409, "Only a card in Try it can be accepted.");
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    this.refuseWhileKeeperAsks(cardId);
+    if (this.db.issuesFor(cardId).some((i) => i.status === "held")) {
+      throw new HttpError(409, "You asked for code changes. Send them to Build first.");
+    }
     return this.oneMoveAtATime(cardId, async () => {
       await this.apps.clear(cardId);
       await this.stopCardServers(cardId, "tryit");
@@ -1801,16 +1906,22 @@ export class Hive {
     try {
       const entering = this.requireCard(cardId);
       const feedback = entering.feedback;
-      const fromCheck = !feedback && entering.check && entering.check.bugs.length > 0 ? entering.check : null;
-      if (feedback || fromCheck) {
-        await this.stopCardServers(cardId, feedback ? (entering.shipAfterCheck ? "ship" : "tryit") : "check");
+      // Code fixes from the spec keeper, or your held Change the code answers (docs/specs/2026-11-28-spec-keeper.md,
+      // Back to the developer).
+      const fixes = entering.keeperFixes;
+      const fixIssues = fixes ? this.db.issuesFor(cardId).filter((i) => fixes.ids.includes(i.id)) : [];
+      const fromCheck = !feedback && !fixes && entering.check && entering.check.bugs.length > 0 ? entering.check : null;
+      if (feedback || fromCheck || fixes) {
+        await this.stopCardServers(cardId,
+          feedback ? (entering.shipAfterCheck ? "ship" : "tryit") : fixes ? fixes.from : "check");
       }
 
       // A new visit starts without a report (Card.build is set only between a done report and the move to Check),
       // and without a last message: until this visit's first turn starts, Retry starts the developer afresh,
       // bringing in main again, instead of re-sending an earlier visit's message with its old plan. Cleared before
       // waiting for setup, so the setup's end sees a developer that hasn't started this visit.
-      this.db.updateCard(cardId, { build: null });
+      // A new visit also gets its own keeper turn for a blocked report (A blocked build).
+      this.db.updateCard(cardId, { build: null, blockJudged: false });
       const existing = this.db.getSessionFor(cardId, "build", roleName);
       if (existing) this.db.updateSession(existing.id, { lastMessage: null });
 
@@ -1828,6 +1939,11 @@ export class Hive {
       const role = this.deps.role(roleName); // a broken role file fails here, before the merge
       const card = this.requireCard(cardId);
       if (feedback) this.addNote(cardId, "build", `Sent back from ${card.shipAfterCheck ? "Ship" : "Try it"}: ${feedback}`);
+      if (fixIssues.length) {
+        this.addNote(cardId, "build", fixes!.from === "tryit"
+          ? `You asked for ${count(fixIssues.length, "code change", "code changes")} on the spec keeper's questions. The developer is making them.`
+          : `The spec keeper sent ${count(fixIssues.length, "code fix", "code fixes")}. The developer is making them.`);
+      }
       if (fromCheck) {
         this.addNote(cardId, "build",
           `Check round ${fromCheck.round} found ${count(fromCheck.bugs.length, "bug", "bugs")}. The developer is fixing them.`);
@@ -1875,12 +1991,34 @@ export class Hive {
             "",
             feedback,
             "",
+            ...(fixIssues.length
+              ? ["They also asked for these code changes, on spec issues the spec keeper raised:", keeperFixList(fixIssues), ""]
+              : []),
             "Fix it, then end with your report.",
             "",
             `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
             "",
             "`git status` may show files left from trying the app. Remove what doesn't belong before you report.",
             "",
+            wholeBuild,
+            "",
+            keepChecklist,
+          ]
+        : fixIssues.length
+        ? [
+            fixes!.from === "tryit"
+              ? "The person tried the card's build and asked for these code changes, on spec issues the spec keeper " +
+                "raised. Make each, then end with your report."
+              : "The spec keeper judged these spec issues: the code should change to match the spec. Fix each, then " +
+                "end with your report. Check's next reviewer verifies each one.",
+            "",
+            `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
+            "",
+            keeperFixList(fixIssues),
+            "",
+            ...(fixes!.from === "tryit"
+              ? ["`git status` may show files left from trying the app. Remove what doesn't belong before you report.", ""]
+              : []),
             wholeBuild,
             "",
             keepChecklist,
@@ -1935,7 +2073,19 @@ export class Hive {
     const report = parseDeveloperReport(outcome.report);
     if (!report) return fail("The developer didn't return a report.", ["retry", "back-to-spec"]);
     if (report.status === "blocked") {
-      return fail(`The developer couldn't build this: ${report.reason}`, ["retry", "back-to-spec"]);
+      const blocked = this.requireCard(cardId);
+      // The first block in a Build visit goes to the spec keeper at once; a second one stops as it always did
+      // (docs/specs/2026-11-28-spec-keeper.md, A blocked build).
+      if (blocked.blockJudged) {
+        return fail(`The developer couldn't build this: ${report.reason}`, ["retry", "back-to-spec"]);
+      }
+      const id = this.db.addIssue(cardId, {
+        foundIn: "build", where: "Blocking", problem: report.reason, guess: "Nothing yet: the build stopped here.",
+      });
+      this.db.updateCard(cardId, { blockJudged: true });
+      this.addNote(cardId, "build", `The developer is blocked: ${report.reason} The spec keeper is judging it.`);
+      this.startKeeper(cardId, "blocking", this.db.issuesFor(cardId).filter((i) => i.id === id));
+      return;
     }
     const card = this.requireCard(cardId);
     const mergeUnfinished = await this.deps.git.mergeInProgress(card.worktreePath!);
@@ -1944,9 +2094,9 @@ export class Hive {
     }
     // The report is stored before the checkpoint, so nothing in it is lost if git refuses the commit.
     this.db.transaction(() => {
-      // Your Try it feedback is handled once the developer reports done.
+      // Your Try it feedback, and the keeper's code fixes, are handled once the developer reports done.
       this.db.updateCard(cardId, {
-        build: { summary: report.summary, departures: report.departures, files: [] }, feedback: null,
+        build: { summary: report.summary, departures: report.departures, files: [] }, feedback: null, keeperFixes: null,
       });
       for (const issue of report.issues) this.db.addIssue(cardId, { foundIn: "build", ...issue });
       for (const decision of report.decisions) {
@@ -2016,7 +2166,7 @@ export class Hive {
       list((build?.departures ?? []).map((d) => `${d.step}: ${d.what} (${d.why})`)),
       "",
       "Spec issues already on the card. Don't report them again:",
-      list(this.db.issuesFor(card.id).map((i) => `${i.where}: ${i.problem}`)),
+      issueList(this.db.issuesFor(card.id).filter((i) => i.status !== "sent")),
       "",
       "Decisions made without the person. They aren't bugs unless they break something:",
       list(this.db.decisionsFor(card.id).map((d) => d.what)),
@@ -2026,6 +2176,16 @@ export class Hive {
         "",
         `Round ${card.check.round} found these bugs. Check that each one is fixed, along with the rest of the branch:`,
         bugList(card.check.bugs),
+      );
+    }
+    // Code fixes from the spec keeper or your answers: verified like bugs, since nothing else re-raises one that
+    // wasn't made (docs/specs/2026-11-28-spec-keeper.md, Back to the developer).
+    const sent = this.db.issuesFor(card.id).filter((i) => i.status === "sent");
+    if (sent.length > 0) {
+      parts.push(
+        "",
+        "These spec issues were sent to the developer as code fixes. Check that each one is fixed; one that isn't is a bug:",
+        keeperFixList(sent),
       );
     }
     return withRunning(card, parts).join("\n");
@@ -2044,18 +2204,34 @@ export class Hive {
 
     const card = this.requireCard(cardId);
     const check: CheckRound = { round: (card.check?.round ?? 0) + 1, summary: report.summary, bugs: report.bugs };
-    const to = laneAfterCheck("done", check.bugs.length, check.round, card.shipAfterCheck);
+    const before = this.db.issuesFor(cardId);
+    const waiting = before.some((i) => i.status === "waiting");
+    // This round's issues are open too: they're stored with the round below.
+    const openIssues = before.filter((i) => i.status === "open").length + report.issues.length;
+    const to = laneAfterCheck("done", check.bugs.length, check.round, card.shipAfterCheck, waiting, openIssues);
     const bugs = count(check.bugs.length, "bug", "bugs");
     const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+    let judge: SpecIssue[] = [];
     // The round and the move land together, so a restart can't fall between them. Going back to Build clears the
     // build report and the developer's last message, as every entry to Build does, so a restart before the developer
     // starts offers "Build hasn't started yet" and its Retry starts it with these bugs.
     this.db.transaction(() => {
       for (const issue of report.issues) this.db.addIssue(cardId, { foundIn: "check", ...issue });
       this.db.addEvent(cardId, "check", { ...check, issues: report.issues }, randomUUID());
-      if (to === "tryit" || to === "ship") {
-        this.addNote(cardId, "check", to === "ship" ? `Round ${check.round}: no bugs. Back to Ship.` : `Round ${check.round}: no bugs.`);
-        this.db.updateCard(cardId, { check, lane: to, shipAfterCheck: false });
+      if (check.bugs.length === 0) {
+        // A passing round verifies every code fix it was asked to check.
+        const issues = this.db.issuesFor(cardId);
+        this.db.setIssueStatus(issues.filter((i) => i.status === "sent").map((i) => i.id), "fixed");
+        // Open spec issues are judged before the card moves on, while it stays in Check
+        // (docs/specs/2026-11-28-spec-keeper.md, The batch).
+        if (to === "check") {
+          judge = issues.filter((i) => i.status === "open");
+          this.addNote(cardId, "check", `Round ${check.round}: no bugs.`);
+          this.db.updateCard(cardId, { check });
+        } else {
+          this.addNote(cardId, "check", to === "ship" ? `Round ${check.round}: no bugs. Back to Ship.` : `Round ${check.round}: no bugs.`);
+          this.db.updateCard(cardId, { check, lane: to, shipAfterCheck: false });
+        }
       } else if (to === "build") {
         this.addNote(cardId, "check", `Round ${check.round} found ${bugs}. Back to the developer.`);
         this.db.updateCard(cardId, { check, lane: to, build: null });
@@ -2070,8 +2246,10 @@ export class Hive {
     // A round that stops the card leaves it in Check, so the page wouldn't refetch the round or its issues.
     this.deps.hub.emit({ type: "check.updated", cardId, check, issues: this.db.issuesFor(cardId) });
     this.emitCard(cardId);
+    if (judge.length > 0) return this.startKeeper(cardId, "batch", judge);
     if (to === "ship") void this.stopCardServers(cardId, "check");
     if (to === "tryit") {
+      this.askWaitingIssues(cardId);
       void this.stopCardServers(cardId, "check")
         .then(() => this.startApp(cardId))
         .catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
@@ -2080,6 +2258,382 @@ export class Hive {
       void this.startDeveloper(cardId)
         .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
     }
+  }
+
+  // ---------- the spec keeper (docs/specs/2026-11-28-spec-keeper.md) ----------
+
+  /** A keeper turn's options: the spec writer's, plus the keeper's report on a turn that judges. */
+  private keeperOptions(judging: KeeperJudging): TurnOptions {
+    const options = this.turnOptions(LANE_ROLE.spec!);
+    return judging.kind === "answers" ? options : { ...options, outputFormat: ROLE_TURNS[SPEC_KEEPER]!.report };
+  }
+
+  /**
+   * A keeper turn that judges: the batch once Check passes, the batch as built after Move on, or a blocked build's
+   * reason. It's a turn in the spec writer's session, with the keeper's instructions at the top of its message, since
+   * the session keeps the system prompt of its first turn. `Card.judging` stays set until it succeeds.
+   */
+  private startKeeper(cardId: string, kind: "batch" | "as-built" | "blocking", issues: SpecIssue[]): void {
+    if (this.gone(cardId)) return;
+    const card = this.requireCard(cardId);
+    const judging: KeeperJudging = { kind, issueIds: issues.map((i) => i.id) };
+    this.db.updateCard(cardId, { judging });
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+    let built = false;
+    try {
+      if (!writer) throw new Error("This card has no spec writer to judge its issues.");
+      const message = this.keeperMessage(card, kind, issues);
+      built = true;
+      this.addNote(cardId, card.lane,
+        `The spec keeper is judging ${count(issues.length, "spec issue", "spec issues")}${kind === "as-built" ? " as built" : ""}.`);
+      this.startTurn(cardId, writer.id, message, this.keeperOptions(judging));
+    } catch (error) {
+      // A message that was never built leaves no last message, so Retry builds it again instead of re-sending the
+      // writer's earlier one.
+      if (writer) this.db.updateSession(writer.id, { turnRunning: false, ...(built ? {} : { lastMessage: null }) });
+      this.setState(cardId, "needs-you");
+      this.keeperFailed(cardId, `The spec keeper couldn't start: ${sentence((error as Error).message)}`);
+    }
+  }
+
+  private keeperMessage(card: CardRow, kind: "batch" | "as-built" | "blocking", issues: SpecIssue[]): string {
+    const role = this.deps.role(SPEC_KEEPER); // a broken role file fails here, before the turn
+    const ids = new Set(issues.map((i) => i.id));
+    const earlier = this.db.issuesFor(card.id).filter((i) => i.judgment && !ids.has(i.id));
+    const describe = (i: SpecIssue) =>
+      [`- id ${i.id}, found in ${i.foundIn}`, `  Section: ${i.where}`, `  Problem: ${i.problem}`, `  Built: ${i.guess}`]
+        .join("\n");
+    return [
+      role.instructions,
+      "",
+      kind === "blocking"
+        ? "The developer is blocked and has stopped. Judge the problem it reported:"
+        : kind === "as-built"
+          ? "The person moved the card on to Try it as built. Judge these spec issues:"
+          : "Check passed. Judge these spec issues:",
+      "",
+      issues.map(describe).join("\n"),
+      "",
+      "Issues judged earlier on this card, for marking a repeat:",
+      earlier.length
+        ? earlier.map((i) => `- id ${i.id}: ${i.where}: ${i.problem} (you judged it ${i.judgment!.verdict})`).join("\n")
+        : "- (none)",
+      "",
+      // The card's base is a fetched origin/main when there's a remote, so a stale local main would show changes that
+      // aren't the card's (docs/specs/2026-11-28-spec-keeper.md, The batch: `git diff <base>...HEAD`).
+      `The spec is ${card.specPath}. Read the branch against the base it was built on, in your working folder: ` +
+        "`git diff origin/main...HEAD` if the repo has an origin remote, otherwise `git diff main...HEAD`.",
+      `Today is ${(this.deps.today ?? localDate)()}, for the Amendments lines.`,
+      "",
+      "End with your report: one judgment for each issue above, by its id.",
+    ].join("\n");
+  }
+
+  /** The end of a keeper turn, whichever kind it was. */
+  private async onKeeperEnded(cardId: string, outcome: TurnOutcome, stopped: boolean): Promise<void> {
+    const judging = this.requireCard(cardId).judging!;
+    if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return this.keeperFailed(cardId, "The spec keeper was stopped.");
+    if (outcome.kind === "error") return this.keeperFailed(cardId, `The spec keeper failed: ${outcome.message}`);
+    if (judging.kind === "answers") return this.onAnswersEnded(cardId, judging);
+    const report = parseKeeperReport(outcome.report, judging.issueIds);
+    if (!report) return this.keeperFailed(cardId, "The spec keeper didn't judge every issue.");
+    if (report.status === "blocked") return this.keeperFailed(cardId, `The spec keeper couldn't judge: ${report.reason}`);
+    await this.commitSpecChange(cardId);
+    if (this.gone(cardId)) return;
+    if (judging.kind === "blocking") return this.afterBlockingJudged(cardId, report.judgments[0]!);
+    await this.afterBatchJudged(cardId, judging.kind, report.judgments);
+  }
+
+  /**
+   * A keeper turn that failed: Retry sends the same message again, since `Card.judging` stays set. In Check, Move on
+   * takes the card on past it, its issues not judged; in Build, Back to Spec stays the way out of a blocked build.
+   */
+  private keeperFailed(cardId: string, message: string): void {
+    const lane = this.requireCard(cardId).lane;
+    const actions: ErrorAction[] = lane === "check" ? ["retry", "move-on"] : lane === "build" ? ["retry", "back-to-spec"] : ["retry"];
+    this.addError(cardId, lane, message, actions);
+  }
+
+  /**
+   * The keeper's change to the spec, committed alone. git refuses a one-file commit during a merge, so a change made
+   * while a blocked build's merge is unfinished goes in with the merge commit or the next checkpoint.
+   */
+  private async commitSpecChange(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (!card.worktreePath || !card.specPath) return;
+    try {
+      if (await this.deps.git.mergeInProgress(card.worktreePath)) return;
+      await this.deps.git.commitFile(card.worktreePath, card.specPath, `Spec keeper: ${card.title}`);
+    } catch (error) {
+      this.addNote(cardId, card.lane,
+        `The spec keeper's change to the spec couldn't be committed: ${sentence((error as Error).message)} It goes in with the next checkpoint.`);
+    }
+  }
+
+  /** A judged batch: store each judgment with what it leads to, then move the card as plain code decides. */
+  private async afterBatchJudged(
+    cardId: string, kind: "batch" | "as-built", judgments: ({ issueId: string } & IssueJudgment)[],
+  ): Promise<void> {
+    const card = this.requireCard(cardId);
+    const fates = new Map(judgments.map((j) => [j.issueId, fateOf(j, kind, card.keeperRounds)] as const));
+    const all = [...fates.values()];
+    const severe = all.includes("severe");
+    // A batch stopped on a severe issue acts on nothing else yet: Move on asks the rest, Back to Spec settles them.
+    const statusOf = (fate: IssueFate): IssueStatus =>
+      fate === "fix" ? (severe ? "judged" : "sent") : fate === "waits" ? (severe ? "judged" : "waiting") : fate;
+    const waitingBefore = this.db.issuesFor(cardId).some((i) => i.status === "waiting");
+    const to = laneAfterJudging(all, card.shipAfterCheck, waitingBefore);
+    const fixIds = judgments.filter((j) => fates.get(j.issueId) === "fix").map((j) => j.issueId);
+    const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+    const tally = (fate: IssueFate) => all.filter((f) => f === fate).length;
+    this.db.transaction(() => {
+      for (const { issueId, ...judgment } of judgments) {
+        const flips = judgment.repeats ? this.db.flipsOf(judgment.repeats) + 1 : 0;
+        this.db.judgeIssue(issueId, judgment, statusOf(fates.get(issueId)!), flips);
+      }
+      this.db.addEvent(cardId, "judged", { kind, judgments }, randomUUID());
+      this.db.updateCard(cardId, { judging: null });
+      const parts = [
+        tally("spec-fixed") && `${count(tally("spec-fixed"), "spec fix", "spec fixes")}`,
+        tally("fix") && `${count(tally("fix"), "code fix", "code fixes")}`,
+        tally("waits") && `${tally("waits")} for you`,
+        tally("no-change") && `${tally("no-change")} with no change`,
+      ].filter(Boolean);
+      if (!severe) this.addNote(cardId, "check", `The spec keeper judged the issues: ${parts.join(", ")}.`);
+      if (to === "build") {
+        this.addNote(cardId, "check", "The code fixes go to the developer, and Check starts again at round 1.");
+        this.db.updateCard(cardId, {
+          lane: "build", build: null, check: null, keeperRounds: card.keeperRounds + 1,
+          keeperFixes: { from: "check", ids: fixIds },
+        });
+        if (developer) this.db.updateSession(developer.id, { lastMessage: null });
+      } else if (to === "check") {
+        const issue = judgments.find((j) => j.level === "severe")!;
+        const where = this.db.issuesFor(cardId).find((i) => i.id === issue.issueId)?.where ?? "";
+        this.addError(cardId, "check",
+          `The spec keeper found a severe issue in ${where}: ${sentence(issue.reason)}` +
+            (issue.recommendation ? ` It recommends: ${sentence(issue.recommendation)}` : "") +
+            " Back to Spec revises the spec with the spec writer; Move on takes the card to Try it as built, where the " +
+            "issues are put to you.",
+          ["back-to-spec", "move-on"]);
+      } else if (to === "ship") {
+        this.addNote(cardId, "check", "Back to Ship.");
+        this.db.updateCard(cardId, { lane: "ship", shipAfterCheck: false });
+      }
+    });
+    this.emitIssues(cardId);
+    this.emitCard(cardId);
+    if (to === "build") {
+      void this.startDeveloper(cardId)
+        .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
+    } else if (to === "tryit") {
+      await this.moveToTryIt(cardId, "check");
+    } else if (to === "ship") {
+      await this.stopCardServers(cardId, "check");
+    }
+  }
+
+  /** The keeper judged a blocked build's reason: plain code decides what follows (A blocked build). */
+  private afterBlockingJudged(cardId: string, judgment: { issueId: string } & IssueJudgment): void {
+    const card = this.requireCard(cardId);
+    const { issueId, ...j } = judgment;
+    const next = afterBlocking(j);
+    const status: IssueStatus = next === "stop" ? "severe" : next === "fall-back" ? "no-change" : next === "ask"
+      ? "waiting" : next === "spec-fixed" ? "spec-fixed" : "sent";
+    this.db.transaction(() => {
+      this.db.judgeIssue(issueId, j, status, j.repeats ? this.db.flipsOf(j.repeats) + 1 : 0);
+      this.db.addEvent(cardId, "judged", { kind: "blocking", judgments: [judgment] }, randomUUID());
+      this.db.updateCard(cardId, { judging: null });
+    });
+    this.emitIssues(cardId);
+    const issue = this.db.issuesFor(cardId).find((i) => i.id === issueId)!;
+    switch (next) {
+      case "stop":
+        this.addError(cardId, "build",
+          `The spec keeper found the block severe: ${sentence(j.reason)}` +
+            (j.recommendation ? ` It recommends: ${sentence(j.recommendation)}` : ""),
+          ["back-to-spec"]);
+        return;
+      case "fall-back":
+        this.addError(cardId, "build",
+          `The developer couldn't build this: ${sentence(issue.problem)} The spec keeper: ${sentence(j.reason)}`,
+          ["retry", "back-to-spec"]);
+        return;
+      case "ask":
+        this.askBlocking(cardId, issue);
+        return;
+      case "spec-fixed":
+        this.resumeDeveloper(cardId,
+          `The spec keeper changed the spec: ${sentence(j.reason)} Read ${card.specPath} again where it changed, then ` +
+            "carry on and end with your report.");
+        return;
+      case "carry-on":
+        this.resumeDeveloper(cardId, `The spec stands: ${sentence(j.reason)} Carry on, then end with your report.`);
+    }
+  }
+
+  /** The same developer carries on after the keeper settled what blocked it. */
+  private resumeDeveloper(cardId: string, message: string): void {
+    const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
+    try {
+      if (!developer) throw new Error("This card has no developer to carry on.");
+      this.startTurn(cardId, developer.id, message, this.turnOptions(LANE_ROLE.build!));
+    } catch (error) {
+      if (developer) this.db.updateSession(developer.id, { turnRunning: false });
+      this.setState(cardId, "needs-you");
+      this.addError(cardId, "build", `The developer couldn't carry on: ${sentence((error as Error).message)}`,
+        ["retry", "back-to-spec"]);
+    }
+  }
+
+  /** One question about an issue the keeper puts to you; its choice is the first option. */
+  private keeperQuestion(issue: SpecIssue, n: number, onBlockedBuild: boolean): Question {
+    const j = issue.judgment!;
+    const recommended = "The spec keeper recommends this.";
+    const [spec, code] = onBlockedBuild
+      ? [{ label: CHANGE_THE_SPEC, description: "The spec keeper changes the spec, and the developer carries on." },
+        { label: KEEP_THE_SPEC, description: "The developer carries on with the spec as it is." }]
+      : [{ label: KEEP_AS_BUILT, description: "The spec changes to describe what was built." },
+        { label: CHANGE_THE_CODE, description: "The code changes to match the spec, when you press Send to Build." }];
+    const specFirst = j.verdict !== "code-wrong";
+    const options = (specFirst ? [spec, code] : [code, spec])
+      .map((o, i) => (i === 0 ? { ...o, description: `${recommended} ${o.description}` } : o));
+    return {
+      question: `${n + 1}. ${issue.where}: ${sentence(issue.problem)} ${sentence(j.recommendation || j.reason)}` +
+        (j.repeats ? " It came back after it was settled once." : ""),
+      header: "Spec issue",
+      options,
+      multiSelect: false,
+    };
+  }
+
+  /** Every issue waiting for you is asked in one question once the card is in Try it (After the batch). */
+  private askWaitingIssues(cardId: string): void {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "tryit" || this.db.openPendingFor(cardId)) return;
+    const waiting = this.db.issuesFor(cardId).filter((i) => i.status === "waiting" && i.judgment);
+    if (waiting.length === 0) return;
+    this.raiseKeeperQuestion(cardId, waiting, false);
+  }
+
+  /** A blocked build's issue that needs you is asked at once, on the card in Build. */
+  private askBlocking(cardId: string, issue: SpecIssue): void {
+    this.raiseKeeperQuestion(cardId, [issue], true);
+  }
+
+  private raiseKeeperQuestion(cardId: string, issues: SpecIssue[], onBlockedBuild: boolean): void {
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+    if (!writer) return;
+    const item: PendingItem = {
+      id: randomUUID(), kind: "question",
+      questions: issues.map((i, n) => this.keeperQuestion(i, n, onBlockedBuild)),
+      issueIds: issues.map((i) => i.id),
+    };
+    this.db.insertPending({ item, cardId, sessionId: writer.id });
+    this.deps.hub.emit({ type: "pending.updated", cardId, pending: item });
+    this.setState(cardId, "needs-you");
+  }
+
+  /**
+   * Your answers to a keeper question, routed by plain code (Your answer in Try it, A blocked build). Answering never
+   * moves the card: Keep it as built and your own words go to the keeper to change the spec at once; Change the code
+   * and your own words are held for Send to Build. On a blocked build, Change the spec (or your words) goes to the keeper
+   * and Keep the spec straight back to the developer.
+   */
+  private answerKeeper(cardId: string, questions: Question[], issueIds: string[], answers: Record<string, string>): void {
+    const card = this.requireCard(cardId);
+    const onBlockedBuild = card.lane === "build";
+    const issues = this.db.issuesFor(cardId);
+    const toSpec: SpecIssue[] = [];
+    const standing: SpecIssue[] = [];
+    questions.forEach((q, n) => {
+      const issue = issues.find((i) => i.id === issueIds[n]);
+      if (!issue) return;
+      const given = (answers[q.question] ?? "").trim() || q.options[0]!.label;
+      const [keepLabel, changeLabel] = onBlockedBuild ? [CHANGE_THE_SPEC, KEEP_THE_SPEC] : [KEEP_AS_BUILT, CHANGE_THE_CODE];
+      const answer: IssueAnswer = given === keepLabel ? { choice: "keep", words: null }
+        : given === changeLabel ? { choice: "change", words: null }
+        // Your own words: a change you want made, written into the spec as well.
+        : { choice: onBlockedBuild ? "keep" : "change", words: given };
+      const status: IssueStatus = answer.choice === "keep" ? "kept" : onBlockedBuild ? "sent" : "held";
+      this.db.answerIssue(issue.id, answer, status);
+      const answered = { ...issue, answer, status };
+      // A no-change issue kept as built needs no edit (docs/specs/2026-11-28-spec-keeper.md, Your answer in Try it).
+      if (answer.words || (answer.choice === "keep" && issue.judgment?.verdict !== "no-change")) toSpec.push(answered);
+      else if (onBlockedBuild) standing.push(answered);
+    });
+    this.emitIssues(cardId);
+    if (toSpec.length > 0) return this.startAnswersTurn(cardId, toSpec);
+    if (onBlockedBuild) {
+      const reasons = standing.map((i) => sentence(i.judgment?.reason ?? "")).join(" ");
+      this.resumeDeveloper(cardId, `The spec stands: ${reasons} Carry on, then end with your report.`);
+    }
+  }
+
+  /** The keeper changes the spec to match your answers, with an Amendments line each; no new judging. */
+  private startAnswersTurn(cardId: string, issues: SpecIssue[]): void {
+    const card = this.requireCard(cardId);
+    const judging: KeeperJudging = { kind: "answers", issueIds: issues.map((i) => i.id) };
+    this.db.updateCard(cardId, { judging });
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+    const what = (i: SpecIssue) =>
+      i.answer?.words
+        ? `  The person decided, in their own words: "${i.answer.words}". Make the spec say it; don't judge it again.`
+        : card.lane === "build"
+          ? "  The person chose to change the spec, so that this no longer blocks the build."
+          : "  The person chose to keep it as built: change the spec to describe what was built.";
+    const message = [
+      "As the spec keeper: the person answered your questions on these spec issues. Change the spec to match each " +
+        "answer, and add a line to the `## Amendments` section at the end of the spec for every change, creating it " +
+        "if it isn't there: `- YYYY-MM-DD: <what changed>. <why, in one line>.` Change no other file, and end with a " +
+        "short summary of what you changed.",
+      "",
+      issues.map((i) => [`- ${i.where}: ${i.problem}`, `  Built: ${i.guess}`, what(i)].join("\n")).join("\n"),
+      "",
+      `The spec is ${card.specPath}. Today is ${(this.deps.today ?? localDate)()}.`,
+    ].join("\n");
+    try {
+      if (!writer) throw new Error("This card has no spec writer to change the spec.");
+      this.addNote(cardId, card.lane, "The spec keeper is changing the spec to match your answers.");
+      this.startTurn(cardId, writer.id, message, this.keeperOptions(judging));
+    } catch (error) {
+      if (writer) this.db.updateSession(writer.id, { turnRunning: false });
+      this.setState(cardId, "needs-you");
+      this.keeperFailed(cardId, `The spec keeper couldn't start: ${sentence((error as Error).message)}`);
+    }
+  }
+
+  /** The spec now matches your answers: commit it, and on a blocked build the developer carries on. */
+  private async onAnswersEnded(cardId: string, judging: KeeperJudging): Promise<void> {
+    await this.commitSpecChange(cardId);
+    if (this.gone(cardId)) return;
+    const card = this.requireCard(cardId);
+    this.db.updateCard(cardId, { judging: null });
+    this.addNote(cardId, card.lane, "The spec keeper changed the spec to match your answers.");
+    if (card.lane !== "build") return;
+    const words = this.db.issuesFor(cardId)
+      .filter((i) => judging.issueIds.includes(i.id) && i.answer?.words)
+      .map((i) => `The person said: "${i.answer!.words}"`);
+    this.resumeDeveloper(cardId, [
+      `The spec keeper changed the spec to settle what blocked you. Read ${card.specPath} again where it changed, then ` +
+        "carry on and end with your report.",
+      ...words,
+    ].join("\n"));
+  }
+
+  /** Send to Build and Accept wait for the spec keeper: a question to answer, or a turn of its that failed. */
+  private refuseWhileKeeperAsks(cardId: string): void {
+    const card = this.requireCard(cardId);
+    if (card.judging) throw new HttpError(409, "The spec keeper's last turn didn't finish. Retry it first.");
+    const open = this.db.openPendingFor(cardId);
+    const asking = open?.item.kind === "question" && !!open.item.issueIds;
+    if (asking || this.db.issuesFor(cardId).some((i) => i.status === "waiting")) {
+      throw new HttpError(409, "Answer the spec keeper's question first.");
+    }
+  }
+
+  private emitIssues(cardId: string): void {
+    this.deps.hub.emit({ type: "issues.updated", cardId, issues: this.db.issuesFor(cardId) });
   }
 
   // ---------- startup ----------
@@ -2111,6 +2665,21 @@ export class Hive {
           this.db.updateSession(session.id, { turnRunning: false });
           this.db.updateCard(card.id, { state: "needs-you" });
           this.addError(card.id, session.lane, `The ${who} couldn't restart: ${(error as Error).message}`, ["retry"]);
+        }
+      } else if (session.role === LANE_ROLE.spec && card.judging) {
+        // A keeper turn is hands-off: resumed, as a planner's or developer's is.
+        const judging = card.judging;
+        try {
+          const resend = !session.existsYet && session.lastMessage;
+          this.startTurn(card.id, session.id,
+            resend || (judging.kind === "answers"
+              ? "Your last turn was cut off when the hive stopped. Finish changing the spec to match the person's answers."
+              : "Your last turn was cut off when the hive stopped. Finish judging the issues, then end with your report."),
+            this.keeperOptions(judging));
+        } catch (error) {
+          this.db.updateSession(session.id, { turnRunning: false });
+          this.db.updateCard(card.id, { state: "needs-you" });
+          this.keeperFailed(card.id, `The spec keeper couldn't restart: ${(error as Error).message}`);
         }
       } else if (session.role === LANE_ROLE.spec && card.reviewApplying) {
         this.addError(card.id, "spec",
@@ -2147,7 +2716,8 @@ export class Hive {
     if (this.anyTurnRunning(card.id)) return;
     const last = this.db.lastChatItem(card.id, "check");
     if (last?.kind === "error" && last.actions.length > 0) return;
-    this.addError(card.id, "check", "Check hasn't started yet.", ["retry"]);
+    if (card.judging) this.addError(card.id, "check", "The spec keeper hasn't finished judging.", ["retry", "move-on"]);
+    else this.addError(card.id, "check", "Check hasn't started yet.", ["retry"]);
     this.setState(card.id, "needs-you");
   }
 
@@ -2155,7 +2725,11 @@ export class Hive {
   private offerBuildWayOn(card: CardRow): void {
     if (this.anyTurnRunning(card.id)) return;
     const last = this.db.lastChatItem(card.id, "build");
-    if (last?.kind === "error" && last.actions.includes("retry")) return;
+    // A line with a way on already, such as a severe block's Back to Spec, stays the last line.
+    if (last?.kind === "error" && last.actions.length > 0) return;
+    // A spec keeper question on a blocked build: answering it is the way on, not re-running the developer.
+    const open = this.db.openPendingFor(card.id);
+    if (open?.item.kind === "question" && open.item.issueIds) return;
     const developer = this.db.getSessionFor(card.id, "build", LANE_ROLE.build!);
     const message = card.build
       ? "The build's checkpoint wasn't committed: the hive stopped first. Retry commits it."
@@ -2203,6 +2777,10 @@ export class Hive {
     const { background, ...turnOptions } = options;
     // The spec reviewer's report and a background setup's working are for the hive, not for the chat.
     const quiet = session.role === SPEC_REVIEWER || !!background;
+    // A spec keeper turn speaks in the lane the card is in, as the keeper, not in Spec's chat as the writer.
+    const keeper = session.role === LANE_ROLE.spec && !!card.judging;
+    const chatLane = keeper ? card.lane : session.lane;
+    const author: ChatAuthor = keeper ? "spec-keeper" : AUTHOR[session.role] ?? "hive";
     const hiveTools = this.hiveToolsFor(session.role, cardId);
     this.db.updateSession(sessionId, { turnRunning: true, lastMessage: message });
     this.withdrawn.delete(sessionId);
@@ -2227,7 +2805,7 @@ export class Hive {
         },
         onTextBlock: (text) => {
           // An interrupted turn of a card being deleted may still flush a block: there's no card to write it to.
-          if (!quiet && !this.deleting.has(cardId)) this.addChat(cardId, session.lane, AUTHOR[session.role] ?? "hive", text);
+          if (!quiet && !this.deleting.has(cardId)) this.addChat(cardId, chatLane, author, text);
         },
         onActivity: (text) => {
           if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
@@ -2272,6 +2850,7 @@ export class Hive {
         else if (session.role === LANE_ROLE.build) await this.onDeveloperEnded(cardId, session, outcome, stopped);
         else if (session.role === LANE_ROLE.check) this.onReviewerEnded(cardId, outcome, stopped);
         else if (session.role === SETUP) this.onSetupEnded(cardId, sessionId, outcome, stopped);
+        else if (keeper) await this.onKeeperEnded(cardId, outcome, stopped);
         else if (session.role === LANE_ROLE.spec && this.requireCard(cardId).reviewApplying) {
           this.onWriterEnded(cardId, outcome, stopped, withdrew);
         } else if (outcome.kind === "error" && !stopped) {
@@ -2321,6 +2900,13 @@ export class Hive {
     }
     if (session.role === SETUP && toolName === "AskUserQuestion") {
       return { behavior: "deny", message: "Setup runs in the background with nobody to ask. Decide, and say what you decided in your notes." };
+    }
+    // The keeper's turns are hands-off, though its session's lane is Spec (docs/specs/2026-11-28-spec-keeper.md).
+    if (session.role === LANE_ROLE.spec && toolName === "AskUserQuestion" && this.db.getCard(cardId)?.judging) {
+      return {
+        behavior: "deny",
+        message: "As the spec keeper you have nobody to ask. Put it in the judgment as changes-signoff, or report blocked.",
+      };
     }
 
     const item: PendingItem =

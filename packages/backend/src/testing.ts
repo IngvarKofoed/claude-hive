@@ -90,6 +90,32 @@ export async function waitFor(condition: () => boolean, timeoutMs = 10_000): Pro
   }
 }
 
+/** The ids of the issues a spec keeper message asks to judge, in order (docs/specs/2026-11-28-spec-keeper.md). */
+export const keeperIssueIds = (message: string): string[] =>
+  [...message.matchAll(/^- id (\S+), found in /gm)].map((m) => m[1]!);
+
+export interface KeeperJudgmentInput {
+  verdict?: "spec-wrong" | "code-wrong" | "no-change";
+  level?: "minor" | "changes-signoff" | "severe";
+  reason?: string;
+  recommendation?: string;
+  repeats?: string | null;
+}
+
+/**
+ * A spec keeper report judging every issue its message lists, each as `judge` says for its index; by default
+ * `no-change` and `minor`, which settles an issue without moving anything.
+ */
+export function keeperReport(message: string, judge: (index: number, issueId: string) => KeeperJudgmentInput = () => ({})) {
+  return {
+    status: "done", blockedReason: null, summary: "Judged.",
+    judgments: keeperIssueIds(message).map((issueId, i) => ({
+      issueId, verdict: "no-change", level: "minor", reason: "Not about the spec.", recommendation: "", repeats: null,
+      ...judge(i, issueId),
+    })),
+  };
+}
+
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" }).trim();
 

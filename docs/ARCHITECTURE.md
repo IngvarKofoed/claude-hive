@@ -108,6 +108,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `setup` | Refine, in the background | Sonnet | Only git-ignored local files, through the hive's copy tool, and dependencies; never tracked files | Work, new for each run |
 | `designer` | Mockup | Opus | Code, in the card's worktree, if its mockup needs it | Conversation |
 | `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
+| `spec-keeper` | Spec, then the lane the card is in | Opus | Only the spec file | Instructions that ride in the spec writer's session, sent at the top of each keeper message |
 | `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
 | `developer` | Build | Opus, as the lead; each chunk on its own model through subagents | Code, in the card's worktree | Work |
 | `reviewer` | Check | Opus | Nothing | Work, new for each round |
@@ -160,7 +161,7 @@ query({
 - **developer:** what was built, departures from the plan, issues, and decisions made without you;
 - **reviewer:** bugs, each with where in the code and what's wrong, which fail the round; and spec issues, in the developer's shape;
 - **tester:** each How-to-verify bullet marked `pass`, `fail` or `cant-verify`, with evidence;
-- **spec keeper:** for each issue, a verdict (`spec-wrong` or `code-wrong`), a level (`minor`, `changes-signoff` or `severe`) and a reason;
+- **spec keeper:** one judgment for each open issue, with `issueId`, `verdict` (`spec-wrong`, `code-wrong` or `no-change`), `level` (`minor`, `changes-signoff` or `severe`), `reason`, `recommendation` (for `changes-signoff` and `severe`) and `repeats` (the earlier issue it's the same problem as, or null);
 - **manager:** the ladder step, the answer or recommendation, and its source.
 
 - **A report must be there to count.** The board engine routes only on `structured_output`. A turn that ends without one stops the card, even when its result says `success`: a session that can't satisfy the schema gives up in prose and still ends "successfully". `stop_reason` is no guide either, since a good report ends on `tool_use`.
@@ -177,17 +178,24 @@ query({
 | Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
 | Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
 | Build | The developer's report is `done` | Check, with the issues found so far still on the card. The report is stored first, then the hive commits a checkpoint, and a new reviewer starts the next round. |
-| Build | The report is `blocked` or missing, or `done` while a merge of main is unfinished | Stays in Build, with the reason, Retry and **Back to Spec** (until the spec keeper judges blocking issues) |
+| Build | The report is `blocked`, the first in this Build visit | Stays in Build while the spec keeper judges the block. If it's about the spec, the keeper settles it and the developer is resumed, or a question waits for you on the card in Build and the developer is resumed with your answer. |
+| Build | The keeper judges the block `no-change`, or the report is `blocked` a second time in the visit, or missing, or `done` while a merge of main is unfinished | Stays in Build, with the reason, Retry and **Back to Spec** |
+| Build | The keeper judges the block `severe`, or a keeper turn fails | Stays in Build, with an error line, **Back to Spec** (and Retry after a failed turn) |
 | Build | You press **Back to Spec** on a blocked build | Spec, after aborting an unfinished merge and committing the partial work. The developer's reason goes to the spec writer; after a new sign-off the planner re-plans and the same developer carries on. |
-| Build | A blocking issue judged `code-wrong` | Plan, for an amendment plan |
 | Check | The reviewer finds a bug in round 1, or the tester finds a failure | Build, counting one round. The hive merges main again and resumes the same developer with the bugs. Spec issues wait on the card for the round that passes. |
 | Check | Round 2 or later still finds bugs | Stays in Check, with **Back to Build** (one more round) and **Move on** (to Try it as built), until ■ stopped exists |
 | Check | The reviewer's report is `blocked` or missing | Stays in Check, with Retry (a new reviewer for the same round) and **Move on** |
 | Check | You press **Back to Build** or **Move on** | Build, with the last round's bugs, or Try it |
-| Check | Everything passes, and the batch of spec issues has no `code-wrong` verdict | Try it, or Ship for a card that Ship sent back. `changes-signoff` questions wait for you in Try it. Until the spec keeper exists, a round without bugs goes straight to Try it, with its issues unjudged. |
-| Check | Everything passes, but the batch has a `code-wrong` verdict | Plan, for one amendment plan covering every `code-wrong` issue |
+| Check | Everything passes, and the card has open spec issues | Stays in Check while the spec keeper judges the batch |
+| Check | Everything passes, and there are no open issues, or the batch needs no code fix | Try it, or Ship for a card that Ship sent back, unless a question waits for you. Questions wait in Try it. |
+| Check | The batch has a `code-wrong` / `minor` issue that isn't a repeat, and fewer than two keeper fix rounds have run since sign-off | Build. The hive merges main again and resumes the same developer with the fixes, and Check starts again at round 1. |
+| Check | The batch has a `severe` verdict | Stays in Check, with the keeper's finding, **Back to Spec** and **Move on** |
+| Check | You press **Move on** after a `severe` verdict | Try it as built: the severe issue and every `code-wrong` issue in the batch become questions |
+| Check | A keeper turn fails (an error, Stop, `blocked`, or a report that misses an issue) | Stays in Check, with Retry and **Move on**. Move on takes the card to Try it with its open issues marked "Not judged". |
+| Check | You press **Back to Spec** after a `severe` verdict | Spec. The keeper's finding goes to the spec writer, and the spec needs a new review and sign-off. Every issue still open or waiting is closed as "Settled in Spec". |
 | Try it | Feedback: what / look / bug | Refine / Mockup / Build. A what or look change passes through Spec again. Until the hive picks the lane, only Build is offered: your words go to the same developer, and Check starts again from round 1. |
-| Try it | You answer a `changes-signoff` question with "change the code" | Plan, for an amendment plan |
+| Try it | You answer a question with **Keep it as built**, or in your own words | Stays in Try it. The spec keeper changes the spec in an `answers` turn, and the hive commits it. |
+| Try it | You press **Send to Build**, with or without feedback, once every question is answered | Build. The issues answered **Change the code**, or in your own words, go to the same developer together with your feedback, and Check starts again at round 1. They don't count toward the keeper fix rounds. |
 | Try it | You accept | Ship |
 | Ship | You press **Back to Try it**, before landing starts | Try it |
 | Ship | You press **Land on main**, and the commit reaches main | Done, after removing the worktree and branch |
@@ -196,7 +204,7 @@ query({
 | Ship | A test fails on the squash, and you press **Back to Build** | Build, the same way, with the test output |
 | Ship | A test fails, the push is refused, or main keeps moving | Stays in Ship, with the reason and Retry |
 | Ship | It's on main | Done |
-| any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you |
+| any | A severe issue, or a round limit or the loop guard trips | Stays put, marked ■ stopped, with a card waiting for you. Until ■ stopped exists, a severe issue is an error line with buttons, as above. |
 | any before Ship | You park it | Ideas. The worktree is removed and the branch kept. |
 | any | You delete it | Gone, after everything it runs is stopped: its worktree and branch are removed and its rows deleted. Refused while it lands on main or moves. |
 
@@ -205,7 +213,7 @@ query({
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
-- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's. The setup's questions are refused: it runs in the background with nobody to ask.
+- **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's. The setup's questions are refused: it runs in the background with nobody to ask. So are the spec keeper's, during its turns.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -277,12 +285,20 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 **Spec keeper.**
 
 - After sign-off, the spec writer's session carries on as the spec keeper. Nothing is frozen and nothing is copied.
-- Its judging instructions and report format come with each batch's message. The session's system prompt stays the spec writer's, because it is recorded at the first turn.
-- Judgments are batched: issues from Build and Check collect on the card and are judged in one batch once Check passes, while the card stays in Check. Only a blocking issue is judged at once. Each batch is a new turn in that session, given the issues and the current diff. The session remembers its earlier verdicts.
-- **`spec-wrong`:** the session edits the spec in the worktree, and the change is logged.
-- **`code-wrong`:** the card goes to Plan, with one amendment covering every `code-wrong` issue in the batch.
-- **`changes-signoff`:** the verdict becomes the recommendation on a question to you: keep it as built, or change the code. The card goes on to Try it as built, and choosing to change the code sends it to Plan.
-- **The loop guard** counts verdicts per issue. A flip back and forth sends the issue to you.
+- Its instructions live in `roles/spec-keeper.md` and are sent at the top of each keeper message, with the report format. The session's system prompt stays the spec writer's, because it is recorded at the first turn. `ROLE_TURNS` has a `spec-keeper` entry with its report, so the Role prompts page shows what the keeper gets.
+- Judgments are batched: issues from Build and Check collect on the card and are judged in one batch once Check passes, while the card stays in Check. A blocking issue is judged at once, once per Build visit, while the card stays in Build. Each batch is a new turn in that session, given the open issues, the issues judged earlier on the card, and how to read the branch (`git diff <base>...HEAD`). The session remembers its earlier verdicts.
+- `Card.judging` records which kind of turn is under way (`batch`, `as-built`, `blocking` or `answers`), so a restart, Retry and the end of the turn all know. A cut-off keeper turn is resumed once, like any hands-off turn.
+- **The report must judge every open issue exactly once.** Anything else is a failed turn.
+- **`spec-wrong`:** the session edits the spec in the worktree, and adds a dated line to `## Amendments` at the end of the spec. A repeat, or a level above `minor`, isn't edited.
+- **`code-wrong`:** the card goes to Build with the issue in `Card.keeperFixes`, and the same developer is resumed. Check starts again at round 1, and its reviewer is asked to verify those fixes. An unfixed one is a bug, and goes through Check's usual round limit. `keeperRounds` counts these rounds since sign-off, and at two, further code fixes come to you as questions.
+- **`no-change`:** nothing is edited.
+- **`changes-signoff`, and any repeat:** the verdict becomes the recommendation on a question to you: keep it as built, or change the code. The card goes on to Try it as built.
+- **`severe`:** the card stays where it is, with an error line and Back to Spec (and Move on in Check).
+- **After each keeper turn,** the hive commits the spec file alone as `Spec keeper: <title>`, if it changed. While a merge of main is unfinished, git refuses a single-file commit, so the hive skips it, and the edit goes in with the developer's merge commit or the next checkpoint.
+- **The keeper can't use `AskUserQuestion`** during its turns: `canUseTool` refuses it, because the session's lane is Spec and the question would reach the page as a Spec-chat question. Anything for you goes into the judgment.
+- **Questions are ordinary `question` pending items** that carry `issueIds`, aligned with their questions. The item hangs on the spec writer's session, and the hive routes your answer itself: no session reads it. When the card enters Try it, one item holds every waiting issue, including those from earlier batches.
+- **Your answers.** Keep it as built, and answers in your own words, go to the keeper in one `answers` turn at once, while the card stays in Try it. For your own words the keeper writes your decision into the spec without judging it again. A `no-change` issue answered Keep it as built needs no turn. Change the code answers, and your own words, are held on the issue until Send to Build.
+- **The loop guard** is the `repeats` link, which any repeat sends to you whatever its verdict, plus the cap of two keeper fix rounds. `Issue.flips` counts the repeats in a chain, for history.
 
 ## Git
 
@@ -312,15 +328,15 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning, laneLimits. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
-| **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
+| **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers, and its issue ids), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
-| **Issue** | card, foundIn, where (the spec's section), problem, guess (what was built instead), verdict, level, reason, flips |
+| **Issue** | card, foundIn, where (the spec's section), problem, guess (what was built instead), status (open, spec-fixed, no-change, sent, fixed, judged, severe, waiting, held, kept, settled), the keeper's judgment (verdict, level, reason, recommendation, repeats), answer (yours), flips (the repeats in a chain) |
 | **Decision** | card, lane, what, alternative, sessionId, source |
 | **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
-| **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn), `brief` (every version of the brief), `plan` (every plan), `build` (every `done` report), `check` (every finished round, with its spec issues), `feedback` (your Try it words), `accept`, `landed` and `setup` so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while, and a card's history of plans, builds, Check rounds and feedback from them too. |
+| **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn), `brief` (every version of the brief), `plan` (every plan), `build` (every `done` report), `check` (every finished round, with its spec issues), `judged` (every keeper turn's judgments), `feedback` (your Try it words), `accept`, `landed` and `setup` so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while, and a card's history of plans, builds, Check rounds and feedback from them too. |
 
 ## API
 
@@ -336,11 +352,11 @@ POST   /api/cards/:id/comments            Comment { on: spec | mockup, anchor, t
 POST   /api/cards/:id/good                Leave Refine or Mockup
 POST   /api/cards/:id/review              Start the blind review of the spec
 POST   /api/cards/:id/signoff             Leave Spec (refused unless the review is fresh)
-POST   /api/cards/:id/back-to-spec        Send a blocked plan or build back to Spec
+POST   /api/cards/:id/back-to-spec        Send a blocked plan or build, or a Check stopped by a severe verdict, back to Spec
 POST   /api/cards/:id/back-to-build       One more Check round for a card Check stopped
-POST   /api/cards/:id/move-on             Move a card Check stopped, or couldn't review, on to Try it
+POST   /api/cards/:id/move-on             Move a card Check stopped, couldn't review, or couldn't judge, on to Try it
 POST   /api/cards/:id/versions/:v/pick    Pick a mockup version
-POST   /api/cards/:id/feedback            Try it feedback { text, lane? }
+POST   /api/cards/:id/feedback            Try it feedback, or Send to Build { text, lane? }; text may be empty when Change the code answers are held
 POST   /api/cards/:id/stop                Stop the running turn
 POST   /api/cards/:id/retry               Send a failed turn's message again
 POST   /api/cards/:id/accept              Accept in Try it

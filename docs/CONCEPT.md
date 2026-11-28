@@ -47,6 +47,8 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 - every decision made without you, so you can ask for any of them the other way in your feedback;
 - any question about a spec change that waits for you, with the spec keeper's recommendation.
 
+Answering a question never moves the card, so you can keep trying it. A **Keep it as built** answer goes to the spec keeper at once, and it changes the spec. A **Change the code** answer is held. When you press **Send to Build**, the held answers go to the developer, together with your feedback. An answer in your own words counts as Change the code, and the keeper also writes your decision into the spec. Accept waits until every question is answered and no Change the code answer is held.
+
 Your feedback goes back to the lane it belongs to. The hive picks the lane and shows it, and you can change it with one click:
 
 | You write | Back to |
@@ -64,7 +66,7 @@ Between your sign-off and Try it, the hive works without you. Only these reach y
 1. **Questions the manager can't settle** (see The Manager). They come with its recommendation.
 2. **Spec issues that change what you signed off.** They come with the spec keeper's recommendation. The card goes on to Try it as built, and the question waits for you there.
 3. **Severe issues.** The card stops.
-4. **Loops:** the same issue flipping back and forth, or Check sending a card back to Build more times than the round limit.
+4. **Loops:** an issue that comes back after the keeper settled it, a third round of code fixes from the keeper, or Check sending a card back to Build more times than the round limit.
 5. **Approvals:** pushing to main.
 
 Everything else is decided by the hive and written into the card's history as "decided for you". Try it lists these decisions. If you want one the other way, you say so in your feedback, like any other change.
@@ -82,7 +84,7 @@ One feature, from idea to Done. It carries everything:
 - the brief;
 - the mockup versions;
 - the spec;
-- the plan and its amendments;
+- the plan;
 - issues and their verdicts;
 - the decisions made for you;
 - the check rounds and your feedback rounds;
@@ -124,26 +126,35 @@ The builder, reviewer and tester find mismatches between spec and code:
 - something is missing, done differently, or added without being asked for;
 - a How-to-verify check fails, or can't be carried out as written.
 
+**Only what would change something is an issue.** Report it only if the spec keeper would change the spec or the code after reading it. Wording and naming, a gap filled the obvious way, and anything that isn't about the spec (a lint error already on main, a test that fails only in the worktree, a local environment problem) go in the report's summary, not on the card.
+
 Each becomes an issue on the card. **The build doesn't stop for them.** The builder notes the issue, makes its best guess and keeps going. Issues from Build and Check collect on the card and are judged together, in one batch once Check passes. Only a blocking issue is judged immediately.
 
-**The spec keeper judges.** It is the spec writer's own session, which carries on after sign-off. It holds your Refine chat, your Mockup comments, the code research and the spec's reasoning. Each batch of issues is a new turn in it: it re-reads the current code, and it remembers its earlier verdicts, so its calls stay consistent.
+**The spec keeper judges.** It is the spec writer's own session, which carries on after sign-off. It holds your Refine chat, your Mockup comments, the code research and the spec's reasoning. Each batch of issues is a new turn in it: it re-reads the current code, and it remembers its earlier verdicts, so its calls stay consistent. It can't ask questions during a turn: what needs you goes into its verdict.
 
 Each issue gets a verdict:
 
 - **The spec is wrong:** the spec is updated, and the code stays as it is.
-- **The code is wrong:** Plan writes a small amendment plan, Build carries it out, and Check re-checks.
+- **The code is wrong:** the same developer fixes it, the way it fixes Check's bugs, and Check starts again.
+- **Neither changes:** nothing is edited. An example is a lint error that was already on main.
+
+Every change the keeper makes to the spec edits the body so it reads true, and adds a dated line to an `## Amendments` section at the end of the spec. The hive commits the spec file on its own.
 
 Each issue also gets a level:
 
 | Level | Example | What happens |
 | --- | --- | --- |
 | **Minor** | The spec was silent about the order of a list | The spec keeper decides on its own. |
-| **Changes what you signed off** | It touches the Outcome, a Key decision tagged (new), (diverges) or (breaking), or something you'd see | A question to you, with the spec keeper's verdict as its recommendation: keep it as built, or change the code. The card goes on to Try it as built, and the question waits there. Choosing to change the code sends the card to Plan for an amendment. |
-| **Severe** | The approach doesn't work in this codebase, the feature clashes with another part of the product, a security or data risk turns up, the work is far bigger than the spec assumed, or the idea itself looks flawed | **The card stops** and comes to you. It shows what was found, why it matters, the options (redesign → Spec, rethink → Refine, narrow the scope, drop it) and a recommendation. |
+| **Changes what you signed off** | It touches the Outcome, a Key decision tagged (new), (diverges) or (breaking), or something you'd see | A question to you, with the spec keeper's verdict as its recommendation: keep it as built, or change the code. The card goes on to Try it as built, and the question waits there. |
+| **Severe** | The approach doesn't work in this codebase, the feature clashes with another part of the product, a security or data risk turns up, the work is far bigger than the spec assumed, or the idea itself looks flawed | **The card stops** and comes to you. It shows what was found, why it matters, the options (redesign → Spec, rethink → Refine, narrow the scope, drop it) and a recommendation. **Move on** takes the card to Try it as built, with the severe issue and the batch's code fixes as questions. |
 
-**A batch with mixed results:** spec fixes are made at once, every code fix goes into one amendment, and questions for you wait in Try it.
+**A batch with mixed results:** spec fixes are made at once. If any issue needs a code fix, the card goes to Build with all of them in one message, and Check starts again. Questions for you wait in Try it.
 
-**Loop guard:** if the same issue flips back and forth (spec, then code, then spec again), it comes to you instead of looping.
+**Loop guard:** the keeper marks an issue that is the same problem as an earlier one. Any repeat comes to you as a question, whatever its verdict, since the first fix didn't take. Code fixes are also capped at two keeper fix rounds since sign-off. After that they come to you as questions.
+
+**A blocked build:** the first time the developer reports it's blocked in a Build visit, the keeper judges the block at once. If it's about the spec, the keeper settles it and the developer carries on, or it comes to you right then, on the card in Build. A block that isn't about the spec, or a second block in the same visit, stops the card with Retry and Back to Spec.
+
+**A keeper that fails:** a failed keeper turn offers Retry. In Check it also offers **Move on**, which takes the card to Try it with its issues marked "Not judged".
 
 ## The Manager
 
@@ -201,7 +212,7 @@ Clean history: one commit per card, no merge commits, no branches left behind.
 - **Refine:** the chat and the brief;
 - **Mockup:** the versions, your comments, and the one you picked, kept as its screenshot;
 - **Spec:** the drafts, the review's findings, and your sign-off;
-- **Plan:** the plan and its amendments;
+- **Plan:** the plan;
 - **Build:** what was built, and where it departed from the plan and why;
 - **Check:** each round's findings;
 - **Try it:** your feedback rounds.
@@ -242,7 +253,7 @@ You start an idea with New idea in the header, or by typing its title into a pro
 3. **Mockup.** Two versions: a slider in the print dialog, and a field in the printer settings. You click B's field and write *"max 24"*, then say Good.
 4. **Spec.** The spec is written in one go. The review flags one decision: what should existing printers get? You pick 12, then sign off.
 5. **Plan, Build and Check** run on their own.
-   - Build finds that the settings table has no per-printer column. The spec keeper judges it minor and updates the spec.
+   - Build finds that the settings table has no per-printer column. The spec keeper judges it minor, updates the spec and adds a line to its Amendments.
    - The tester asks about rounding, and the manager finds the answer in the spec.
 6. **Try it.** The app is running on port 5213, with a test guide and two decisions made for you. You find that the label overlaps on small screens, and the hive sends the card to Build. Next time round, you accept.
 7. **Ship.** You approve, and one commit lands on main. The card moves to Done.
