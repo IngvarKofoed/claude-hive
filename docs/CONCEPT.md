@@ -228,7 +228,7 @@ One page, with several views:
   - ◆ versions to compare
   - ■ stopped
 - **For you:** everything waiting for you, across the whole board, oldest first.
-- **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec, each half the width. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
+- **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec, each half the width. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
 - **Role prompts,** behind the ☰ menu: what each lane's sessions are told. For each role, its instructions and what its sessions get on top of them: the report they end with, and the hive's own tools.

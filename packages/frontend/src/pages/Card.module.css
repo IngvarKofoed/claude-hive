@@ -1,4 +1,14 @@
+/* The card page fits the window: the header and the top block keep their height, the columns scroll on their own. */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
 .main {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   padding: var(--space-8);
   display: flex;
   flex-direction: column;
@@ -42,7 +52,49 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-6);
-  align-items: start;
+  grid-template-rows: 1fr;
+  align-items: stretch;
+  flex: 1;
+  min-height: var(--chat-min-height);
+}
+
+/* Each column scrolls on its own, whatever it is: a panel, a stack, or a wrapper. */
+.columns > * {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * A chat panel is never squeezed below its title, the log's floor and its footer. Its automatic minimum holds the grid
+ * row at that height, and on a shorter window the row runs past the frame and the window scrolls.
+ */
+.columns > .chatPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: auto;
+  overflow: visible;
+}
+
+/* The Spec panel: its title and ReviewBar stay at the top, and only the spec scrolls. */
+.columns > .specPanel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.specHead {
+  margin-bottom: var(--space-6);
+}
+
+/* No spec yet, so no ReviewBar: no gap above "The spec writer is writing the spec…". */
+.specHead:empty {
+  display: none;
+}
+
+.specBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* An artifact with no chat beside it, kept in the right-hand column. */
@@ -51,8 +103,29 @@
 }
 
 @media (max-width: 60rem) {
+  .page {
+    height: auto;
+  }
+
+  .main {
+    flex: none;
+  }
+
   .columns {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    flex: none;
+    min-height: 0;
+  }
+
+  .columns > *,
+  .columns > .chatPanel,
+  .columns > .specPanel {
+    overflow: visible;
+  }
+
+  .specBody {
+    overflow-y: visible;
   }
 
   .right {

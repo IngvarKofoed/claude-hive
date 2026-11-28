@@ -313,3 +313,27 @@ describe("looking back at a finished lane", () => {
     expect(lookBackLanes("plan")).toEqual(["ideas", "refine", "spec"]);
   });
 });
+
+describe("the card page's chat panels", () => {
+  it("frames the chat in a chat lane, with Good in Send's row in Refine", () => {
+    show({ lane: "refine" });
+    expect(screen.getByRole("log").closest("[data-framed]")).not.toBeNull();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send.parentElement).toContainElement(screen.getByRole("button", { name: "Good" }));
+  });
+
+  it("leaves Ship's Landing chat unframed", async () => {
+    vi.spyOn(api, "shipPlan").mockResolvedValue({
+      base: "origin/main",
+      uncommitted: [],
+      unpushed: 0,
+      tests: "npm test",
+      noTestsReason: null,
+      checkoutBlocks: false,
+      busy: false,
+    });
+    show({ lane: "ship" });
+    await screen.findByRole("button", { name: "Land on main" });
+    expect(screen.getByRole("log").closest("[data-framed]")).toBeNull();
+  });
+});

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { CardDetail, ChatAuthor, ChatItem, ErrorAction, Lane } from "@hive/shared";
 import { api } from "../api/client";
 import { PendingCard } from "./PendingCard";
@@ -34,6 +34,18 @@ interface Props {
   detail: CardDetail;
   streaming: string;
   activity: string | null;
+  /** The five chat lanes: the log scrolls on its own between the panel's title and the footer. */
+  framed?: boolean;
+  /** Put at the right end of the Send row (Refine's Good). */
+  sendRowEnd?: ReactNode;
+}
+
+/** How far short of the bottom still counts as the bottom, in pixels. */
+const BOTTOM_SLACK = 8;
+
+/** Whether a scrolling box is at its bottom, give or take a few pixels. */
+export function isAtBottom(box: { scrollHeight: number; scrollTop: number; clientHeight: number }): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= BOTTOM_SLACK;
 }
 
 /** A chat's messages and error lines. Without `onAction`, error lines have no buttons. */
@@ -73,17 +85,64 @@ export function PastChat({ items }: { items: ChatItem[] }) {
   );
 }
 
-export function Chat({ detail, streaming, activity }: Props) {
+export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props) {
   const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [unseen, setUnseen] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+  // Whether the log was at its bottom before the latest content arrived; kept by the scroll listener.
+  const followRef = useRef(true);
+  const seenRef = useRef<{ chat: number; streaming: string; pending: string | undefined } | null>(null);
 
+  function toBottom() {
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }
+
+  // After a render that changed what the log shows: follow it from the bottom, or flag what arrived while scrolled up.
+  useLayoutEffect(() => {
+    const pending = detail.pending?.id;
+    const before = seenRef.current;
+    seenRef.current = { chat: detail.chat.length, streaming, pending };
+    if (before === null || followRef.current) {
+      followRef.current = true;
+      toBottom();
+      return;
+    }
+    const added =
+      detail.chat.length > before.chat ||
+      (streaming !== "" && streaming !== before.streaming) ||
+      (pending !== undefined && pending !== before.pending);
+    if (added) setUnseen(true);
+  }, [detail.chat.length, streaming, detail.pending?.id, activity]);
+
+  // The log's own box changes size when the window does, or when the footer grows (a hint, Stop, an error line, a
+  // taller reply box). No scroll event says so, so keep the log at its bottom here if it was there.
   useEffect(() => {
-    endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [detail.chat.length, streaming, detail.pending?.id]);
+    const log = logRef.current;
+    if (!log || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (followRef.current) toBottom();
+    });
+    observer.observe(log);
+    return () => observer.disconnect();
+  }, []);
+
+  function onLogScroll() {
+    const log = logRef.current;
+    if (!log) return;
+    followRef.current = isAtBottom(log);
+    if (followRef.current) setUnseen(false);
+  }
+
+  function jumpToBottom() {
+    followRef.current = true;
+    setUnseen(false);
+    toBottom();
+  }
 
   async function send() {
     const body = text.trim();
@@ -92,6 +151,7 @@ export function Chat({ detail, streaming, activity }: Props) {
     try {
       await api.sendMessage(detail.id, { text: body });
       setText("");
+      jumpToBottom();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send the message.");
     }
@@ -121,58 +181,67 @@ export function Chat({ detail, streaming, activity }: Props) {
   }
 
   return (
-    <div className={styles.chat}>
-      <div className={styles.log} role="log" aria-live="polite">
-        <ChatItems items={detail.chat} onAction={(action) => void run(errorActions[action])} />
-        {streaming ? (
-          <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
-            {streaming}
-          </ChatBubble>
+    <div className={styles.chat} data-framed={framed || undefined}>
+      <div className={styles.logBox}>
+        <div className={styles.log} role="log" aria-live="polite" ref={logRef} onScroll={onLogScroll}>
+          <ChatItems items={detail.chat} onAction={(action) => void run(errorActions[action])} />
+          {streaming ? (
+            <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
+              {streaming}
+            </ChatBubble>
+          ) : null}
+          {activity ? <p className={styles.activity}>{activity}</p> : null}
+          {detail.pending ? <PendingCard item={detail.pending} onError={setError} /> : null}
+        </div>
+        {unseen ? (
+          <Button compact className={styles.newMessages} onClick={jumpToBottom}>
+            ↓ New messages
+          </Button>
         ) : null}
-        {activity ? <p className={styles.activity}>{activity}</p> : null}
-        {detail.pending ? <PendingCard item={detail.pending} onError={setError} /> : null}
-        <div ref={endRef} />
       </div>
-      {error ? (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
-      ) : null}
-      {readOnly ? (
-        detail.turnRunning ? (
-          <div className={styles.actions}>
-            <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button>
-          </div>
-        ) : null
-      ) : (
-        <form
-          className={styles.reply}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!closed) void send();
-          }}
-        >
-          <label className={styles.label} htmlFor="reply">
-            Your reply
-          </label>
-          <textarea
-            id="reply"
-            className={styles.input}
-            rows={3}
-            value={text}
-            disabled={closed}
-            onKeyDown={onKeyDown}
-            onChange={(event) => setText(event.target.value)}
-          />
-          {hint ? <p className={styles.hint}>{hint}</p> : null}
-          <div className={styles.actions}>
-            <Button type="submit" variant="primary" disabled={closed || !text.trim()}>
-              Send
-            </Button>
-            {detail.turnRunning ? <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button> : null}
-          </div>
-        </form>
-      )}
+      <div className={styles.footer}>
+        {error ? (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        ) : null}
+        {readOnly ? (
+          detail.turnRunning ? (
+            <div className={styles.actions}>
+              <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button>
+            </div>
+          ) : null
+        ) : (
+          <form
+            className={styles.reply}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!closed) void send();
+            }}
+          >
+            <label className={styles.label} htmlFor="reply">
+              Your reply
+            </label>
+            <textarea
+              id="reply"
+              className={styles.input}
+              rows={3}
+              value={text}
+              disabled={closed}
+              onKeyDown={onKeyDown}
+              onChange={(event) => setText(event.target.value)}
+            />
+            {hint ? <p className={styles.hint}>{hint}</p> : null}
+            <div className={styles.actions}>
+              <Button type="submit" variant="primary" disabled={closed || !text.trim()}>
+                Send
+              </Button>
+              {detail.turnRunning ? <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button> : null}
+              {sendRowEnd ? <div className={styles.sendRowEnd}>{sendRowEnd}</div> : null}
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

@@ -243,7 +243,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
         <div className={styles.stack}>
           <ShipPanel detail={detail} onMoved={onMoved} />
           <Panel title="Landing">
-            <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+            <Chat key={detail.lane} detail={detail} streaming={live.streaming} activity={live.activity} />
           </Panel>
         </div>
         <div className={styles.stack}>
@@ -302,11 +302,13 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
     return (
       <div className={styles.columns}>
         <Panel title="Spec writer" className={styles.chatPanel}>
-          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          <Chat key={detail.lane} framed detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
-        <Panel title="Spec" className={styles.sidePanel}>
-          <div className={styles.stack}>
+        <Panel title="Spec" className={styles.specPanel}>
+          <div className={styles.specHead}>
             <ReviewBar detail={detail} onMoved={onMoved} />
+          </div>
+          <div className={styles.specBody}>
             {detail.spec ? (
               <SpecView spec={detail.spec} />
             ) : (
@@ -322,11 +324,9 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
     return (
       <div className={styles.columns}>
         <Panel title="Planner" className={styles.chatPanel}>
-          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          <Chat key={detail.lane} framed detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
-        <div className={styles.sidePanel}>
-          <PlanPanel detail={detail} />
-        </div>
+        <PlanPanel detail={detail} />
       </div>
     );
   }
@@ -335,7 +335,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
     return (
       <div className={styles.columns}>
         <Panel title="Developer" className={styles.chatPanel}>
-          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          <Chat key={detail.lane} framed detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
         <div className={`${styles.sidePanel} ${styles.stack}`}>
           {detail.check && detail.check.bugs.length > 0 ? (
@@ -353,7 +353,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
     return (
       <div className={styles.columns}>
         <Panel title="Reviewer" className={styles.chatPanel}>
-          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
+          <Chat key={detail.lane} framed detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
         <div className={`${styles.sidePanel} ${styles.stack}`}>
           {detail.check ? (
@@ -370,10 +370,14 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
   return (
     <div className={styles.columns}>
       <Panel title="Product owner" className={styles.chatPanel}>
-        <div className={styles.stack}>
-          <Chat detail={detail} streaming={live.streaming} activity={live.activity} />
-          <GoodBar detail={detail} onMoved={onMoved} />
-        </div>
+        <Chat
+          key={detail.lane}
+          framed
+          detail={detail}
+          streaming={live.streaming}
+          activity={live.activity}
+          sendRowEnd={<GoodBar detail={detail} onMoved={onMoved} />}
+        />
       </Panel>
       <Panel title="Brief" className={styles.briefPanel}>
         <BriefPanel brief={detail.brief} />
@@ -392,7 +396,7 @@ export function Card() {
   const viewing = live ? (lookBackLanes(live.detail.lane).find((lane) => lane === asked) ?? null) : null;
 
   return (
-    <>
+    <div className={styles.page}>
       <Header />
       <main className={styles.main}>
         {error ? (
@@ -440,6 +444,6 @@ export function Card() {
           </>
         ) : null}
       </main>
-    </>
+    </div>
   );
 }
