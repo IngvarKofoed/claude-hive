@@ -23,6 +23,26 @@ describe("SpecView", () => {
     expect(fold).toHaveAttribute("open");
   });
 
+  it("shows Outcome and Key decisions open above the whole spec, which stays folded", () => {
+    const text = "# Title\n\n## Outcome\n\n- You get it.\n\n## Key decisions\n\n- Reuse it.\n\n## Goals\n\n- A goal.\n";
+    const { container } = render(<SpecView spec={{ path: "docs/specs/x.md", text, review: "none" }} />);
+    const fold = container.querySelector("details")!;
+    expect(fold).not.toHaveAttribute("open");
+    const open = screen.getAllByRole("heading", { level: 2 }).filter((h) => !fold.contains(h));
+    expect(open.map((h) => h.textContent)).toEqual(["Outcome", "Key decisions"]);
+    expect(screen.getAllByText("You get it.").filter((t) => !fold.contains(t))).toHaveLength(1);
+    // The whole spec is still in the fold, as it is in the file.
+    expect(fold).toHaveTextContent("Title");
+    expect(fold).toHaveTextContent("You get it.");
+    expect(fold).toHaveTextContent("A goal.");
+    expect(screen.getAllByText("A goal.").filter((t) => !fold.contains(t))).toHaveLength(0);
+  });
+
+  it("shows only the fold for a spec without those chapters", () => {
+    const { container } = render(<SpecView spec={{ path: "docs/specs/x.md", text: "# Title\n\n## Goals", review: "none" }} />);
+    expect(container.firstElementChild?.tagName).toBe("DETAILS");
+  });
+
   it("doesn't repeat the brief", () => {
     render(<SpecView spec={{ path: "docs/specs/x.md", text: "# Title", review: "fresh" }} />);
     expect(screen.queryByText("Brief")).toBeNull();

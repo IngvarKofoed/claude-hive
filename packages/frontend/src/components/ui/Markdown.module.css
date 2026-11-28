@@ -6,6 +6,10 @@
   overflow-wrap: anywhere;
 }
 
+.markdown > :first-child {
+  margin-top: 0;
+}
+
 .markdown h1 {
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
