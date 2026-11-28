@@ -1,6 +1,6 @@
 .row {
   display: grid;
-  grid-template-columns: var(--project-col-width) repeat(10, var(--lane-width));
+  grid-template-columns: var(--board-columns);
   border-bottom: var(--border-width) solid var(--color-border);
 }
 
@@ -25,4 +25,48 @@
 
 .cell[data-droppable] {
   background: var(--color-working-bg);
+}
+
+.row[data-compact] .project {
+  padding: var(--space-3);
+}
+
+.row[data-compact] .cell {
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.row[data-landed-open] .project {
+  grid-row: 1 / span 2;
+}
+
+.landedToggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--color-done-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.landedToggle:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-width);
+}
+
+.landedCount {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+.landed {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--lane-min-width-compact), 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
 }

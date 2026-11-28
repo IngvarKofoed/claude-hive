@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import { useId, useState, type DragEvent } from "react";
 import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectSummary } from "@hive/shared";
 import { AddIdea } from "./AddIdea";
 import { CardTile } from "./CardTile";
@@ -19,6 +19,8 @@ interface Props {
   /** A card was deleted from its tile. */
   onDeleted?: (card: CardSummary) => void;
   onBoard: (board: BoardResponse) => void;
+  /** Board's Compact By lane: smaller tiles, and Done as a count that opens the landed cards under the row. */
+  compact?: boolean;
 }
 
 /** One project's row on the Board By lane: its heading, then a cell per lane. */
@@ -33,13 +35,18 @@ export function ProjectRow({
   onStart,
   onBoard,
   onDeleted,
+  compact = false,
 }: Props) {
+  const [landedOpen, setLandedOpen] = useState(false);
+  const stripId = useId();
+  const landed = cards.filter((card) => card.lane === "done");
+  const showStrip = compact && landedOpen && landed.length > 0;
   const canDropOn = (lane: Lane) => lane === "refine" && dragging !== null && dragging.projectId === project.id;
 
   return (
-    <div className={styles.row}>
+    <div className={styles.row} data-compact={compact || undefined} data-landed-open={showStrip || undefined}>
       <div className={styles.project}>
-        <ProjectHeading project={project} onBoard={onBoard} />
+        <ProjectHeading project={project} onBoard={onBoard} compact={compact} />
       </div>
       {LANES.map((lane) => {
         const laneCards = cards.filter((card) => card.lane === lane.id);
@@ -60,21 +67,47 @@ export function ProjectRow({
               onDrop(dragging, lane.id);
             }}
           >
-            {laneCards.map((card) => (
-              <CardTile
-                key={card.id}
-                card={card}
-                onOpen={onOpen}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                onDeleted={onDeleted}
-                onStart={onStart}
-              />
-            ))}
+            {compact && lane.id === "done" ? (
+              landed.length > 0 ? (
+                <button
+                  type="button"
+                  className={styles.landedToggle}
+                  aria-label={`${landed.length} landed`}
+                  aria-expanded={landedOpen}
+                  aria-controls={stripId}
+                  onClick={() => setLandedOpen((open) => !open)}
+                >
+                  <span className={styles.landedCount}>{landed.length}</span>
+                  <span>
+                    landed <span aria-hidden="true">{landedOpen ? "▾" : "▸"}</span>
+                  </span>
+                </button>
+              ) : null
+            ) : (
+              laneCards.map((card) => (
+                <CardTile
+                  key={card.id}
+                  card={card}
+                  compact={compact}
+                  onOpen={onOpen}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  onDeleted={onDeleted}
+                  onStart={onStart}
+                />
+              ))
+            )}
             {lane.id === "ideas" ? <AddIdea project={project} /> : null}
           </div>
         );
       })}
+      {showStrip ? (
+        <div id={stripId} role="group" aria-label={`${project.name}, landed`} className={styles.landed}>
+          {landed.map((card) => (
+            <CardTile key={card.id} card={card} compact onOpen={onOpen} onDeleted={onDeleted} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -228,7 +228,7 @@ It also shows every judgment, manager action and "decided for you", the time spe
 One page, with several views:
 
 - **Board,** in two layouts, one click apart:
-  - **By lane:** lanes by projects.
+  - **By lane:** lanes by projects. A **Compact** switch fits it to a smaller screen: the lanes share the window's width, the tiles get smaller, and Done becomes a count that opens the landed cards.
   - **By project:** a panel for each project, as many side by side as the screen fits, with no lane columns. Each card shows which lane it's in, and a project's cards stay in lane order, so a card only moves when it changes lane.
 
   In both, each card in progress shows a badge:

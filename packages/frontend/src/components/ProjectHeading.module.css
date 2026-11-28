@@ -24,3 +24,10 @@
   padding: var(--space-4);
   font-size: var(--text-md);
 }
+
+.heading[data-compact] .path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}

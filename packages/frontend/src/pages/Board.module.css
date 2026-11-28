@@ -31,6 +31,12 @@
   font-size: var(--text-md);
 }
 
+.switches {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .switch {
   display: inline-flex;
   gap: var(--space-1);
@@ -47,7 +53,7 @@
 /* By lane's phase bands, in the same columns as the lane headers. */
 .bandRow {
   display: grid;
-  grid-template-columns: var(--project-col-width) repeat(10, var(--lane-width));
+  grid-template-columns: var(--board-columns);
   padding-top: var(--space-3);
   background: var(--color-surface);
 }
@@ -124,11 +130,25 @@
 
 .grid {
   width: max-content;
+  --board-columns: var(--project-col-width) repeat(10, var(--lane-width));
+}
+
+/* Compact (docs/specs/2026-11-28-compact-by-lane-for-a-13-screen.md): the lanes share the window's width. A definite
+   width keeps the separately gridded rows lined up. */
+.grid[data-compact] {
+  width: 100%;
+  min-width: calc(var(--project-col-width-compact) + 9 * var(--lane-min-width-compact) + var(--done-col-width-compact));
+  --board-columns: var(--project-col-width-compact) repeat(9, minmax(var(--lane-min-width-compact), 1fr))
+    var(--done-col-width-compact);
+}
+
+.grid[data-compact] .headCell {
+  padding: var(--space-3);
 }
 
 .headRow {
   display: grid;
-  grid-template-columns: var(--project-col-width) repeat(10, var(--lane-width));
+  grid-template-columns: var(--board-columns);
   border-bottom: var(--border-width) solid var(--color-border-strong);
 }
 

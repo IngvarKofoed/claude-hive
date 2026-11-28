@@ -18,12 +18,32 @@ describe("cardBadge", () => {
   });
 
   it("says when a lane isn't built", () => {
-    expect(cardBadge(card("mockup"))).toEqual({ tone: "neutral", label: "Not implemented yet" });
+    expect(cardBadge(card("mockup"))).toEqual({
+      tone: "neutral",
+      label: "Not implemented yet",
+      symbol: null,
+      text: "Not implemented yet",
+    });
   });
 
   it("follows the card's state everywhere else", () => {
-    expect(cardBadge(card("refine", "working"))).toEqual({ tone: "working", label: "▶ working" });
-    expect(cardBadge(card("tryit"))).toEqual({ tone: "needs-you", label: "● needs you" });
+    expect(cardBadge(card("refine", "working"))).toEqual({ tone: "working", label: "▶ working", symbol: "▶", text: "working" });
+    expect(cardBadge(card("tryit"))).toEqual({
+      tone: "needs-you",
+      label: "● needs you",
+      symbol: "●",
+      text: "needs you",
+    });
+  });
+});
+
+describe("cardBadge symbol and text", () => {
+  it("splits the symbol from the words, and keeps the label", () => {
+    expect(cardBadge(card("tryit"))).toMatchObject({ symbol: "●", text: "needs you", label: "● needs you" });
+    expect(cardBadge(card("build", "working"))).toMatchObject({ symbol: "▶", text: "working", label: "▶ working" });
+    expect(cardBadge(card("mockup"))).toMatchObject({ symbol: null, text: "Not implemented yet" });
+    expect(cardBadge(card("ideas"))).toBeNull();
+    expect(cardBadge(card("done"))).toBeNull();
   });
 });
 

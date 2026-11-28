@@ -20,9 +20,11 @@ interface Props {
   showLane?: boolean;
   /** Start an idea: the same move to Refine as the drag. Shown on ideas only. */
   onStart?: (card: CardSummary) => Promise<void>;
+  /** The smaller tile of Board's Compact By lane: the badge as its symbol, the title clamped to two lines. */
+  compact?: boolean;
 }
 
-export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, showLane = false, onStart }: Props) {
+export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, showLane = false, onStart, compact = false }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, show
   return (
     <article
       className={styles.tile}
+      data-compact={compact || undefined}
       data-draggable={draggable || undefined}
       draggable={draggable}
       onDragStart={draggable ? (event) => onDragStart?.(card, event) : undefined}
@@ -76,8 +79,13 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, show
     >
       {/* Every card opens, an idea too: its page is where its title and text are edited
           (docs/specs/2026-11-27-card-lane-artifacts.md). */}
-      <button type="button" className={styles.title} onClick={() => onOpen?.(card)}>
-        {card.title}
+      <button
+        type="button"
+        className={styles.title}
+        title={compact ? card.title : undefined}
+        onClick={() => onOpen?.(card)}
+      >
+        {compact ? <span className={styles.titleText}>{card.title}</span> : card.title}
       </button>
       {showLane ? (
         <div className={styles.lane}>
@@ -106,11 +114,21 @@ export function CardTile({ card, onOpen, onDragStart, onDragEnd, onDeleted, show
         <div className={styles.meta}>
           {/* Start sits at the left and Delete at the far right, so aiming for one doesn't hit the other. */}
           {startable ? (
-            <Button compact variant="primary" disabled={starting} onClick={() => void start()}>
+            <Button compact variant="primary" className={styles.start} disabled={starting} onClick={() => void start()}>
               Start
             </Button>
           ) : null}
-          {badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null}
+          {badge ? (
+            compact && badge.symbol ? (
+              <Badge compact tone={badge.tone} role="img" aria-label={badge.text} title={badge.text}>
+                {badge.symbol}
+              </Badge>
+            ) : (
+              <Badge compact={compact} tone={badge.tone}>
+                {badge.label}
+              </Badge>
+            )
+          ) : null}
           <button type="button" className={styles.delete} onClick={() => setConfirming(true)}>
             Delete
           </button>

@@ -45,6 +45,25 @@ function storeLayout(layout: Layout) {
   }
 }
 
+/** Where this browser remembers the Compact switch, in the same way. */
+export const COMPACT_KEY = "hive.boardCompact";
+
+function readCompact(): boolean {
+  try {
+    return localStorage.getItem(COMPACT_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function storeCompact(compact: boolean) {
+  try {
+    localStorage.setItem(COMPACT_KEY, compact ? "on" : "off");
+  } catch {
+    // Remembered for this visit only.
+  }
+}
+
 type BandTone = "you" | "you-plain" | "hands-off";
 
 /**
@@ -72,6 +91,7 @@ export function Board() {
   const [path, setPath] = useState("");
   const [projectError, setProjectError] = useState<string | null>(null);
   const [layout, setLayout] = useState<Layout>(readLayout);
+  const [compact, setCompact] = useState(readCompact);
 
   const applyBoard = useCallback((board: BoardResponse) => {
     setProjects(board.projects);
@@ -105,6 +125,12 @@ export function Board() {
   function chooseLayout(next: Layout) {
     setLayout(next);
     storeLayout(next);
+  }
+
+  function toggleCompact() {
+    const next = !compact;
+    setCompact(next);
+    storeCompact(next);
   }
 
   async function addProject() {
@@ -152,13 +178,20 @@ export function Board() {
               <h1 className={styles.title}>Board</h1>
               {projects.length > 0 ? <p className={styles.summary}>{boardSummary(projects.length, cards)}</p> : null}
             </div>
-            <div className={styles.switch} role="group" aria-label="Board layout">
-              <Button aria-pressed={layout === "lane"} onClick={() => chooseLayout("lane")}>
-                By lane
-              </Button>
-              <Button aria-pressed={layout === "project"} onClick={() => chooseLayout("project")}>
-                By project
-              </Button>
+            <div className={styles.switches}>
+              <div className={styles.switch} role="group" aria-label="Board layout">
+                <Button aria-pressed={layout === "lane"} onClick={() => chooseLayout("lane")}>
+                  By lane
+                </Button>
+                <Button aria-pressed={layout === "project"} onClick={() => chooseLayout("project")}>
+                  By project
+                </Button>
+              </div>
+              {layout === "lane" ? (
+                <Button aria-pressed={compact} onClick={toggleCompact}>
+                  Compact
+                </Button>
+              ) : null}
             </div>
           </div>
           <form
@@ -202,7 +235,7 @@ export function Board() {
 
         {layout === "lane" ? (
           <div className={styles.scroll}>
-            <div className={styles.grid}>
+            <div className={styles.grid} data-compact={compact || undefined}>
               <div className={styles.bandRow}>
                 <div />
                 {PHASE_BANDS.map((band) => (
@@ -218,9 +251,14 @@ export function Board() {
               <div className={styles.headRow}>
                 <div className={styles.headCell}>Projects</div>
                 {LANES.map((lane) => (
-                  <div key={lane.id} className={styles.headCell} data-hands-off={!lane.withYou || undefined}>
+                  <div
+                    key={lane.id}
+                    className={styles.headCell}
+                    data-hands-off={!lane.withYou || undefined}
+                    title={compact ? lane.who || undefined : undefined}
+                  >
                     <span className={styles.laneName}>{lane.name}</span>
-                    {lane.who ? <span className={styles.who}>{lane.who}</span> : null}
+                    {lane.who && !compact ? <span className={styles.who}>{lane.who}</span> : null}
                   </div>
                 ))}
               </div>
@@ -229,6 +267,7 @@ export function Board() {
                   key={project.id}
                   project={project}
                   cards={cards.filter((card) => card.projectId === project.id)}
+                  compact={compact}
                   dragging={dragging}
                   onDragStart={startDrag}
                   onDragEnd={() => setDragging(null)}

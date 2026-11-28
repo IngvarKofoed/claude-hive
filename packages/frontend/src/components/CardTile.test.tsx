@@ -159,3 +159,50 @@ describe("CardTile", () => {
     });
   });
 });
+
+describe("CardTile, compact", () => {
+  it("shows a needs-you badge as its symbol alone, named and titled 'needs you'", () => {
+    render(<CardTile compact card={{ ...base, lane: "refine" }} />);
+    const badge = screen.getByRole("img", { name: "needs you" });
+    expect(badge).toHaveTextContent("●");
+    expect(badge).toHaveAttribute("title", "needs you");
+    expect(screen.queryByText("● needs you")).toBeNull();
+  });
+
+  it("shows ▶ for working, and keeps the words of a lane that isn't built", () => {
+    const { rerender } = render(<CardTile compact card={{ ...base, lane: "refine", state: "working" }} />);
+    expect(screen.getByRole("img", { name: "working" })).toHaveTextContent("▶");
+    rerender(<CardTile compact card={{ ...base, lane: "mockup" }} />);
+    expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("carries the full title as its title and keeps it as the button's name", () => {
+    const { container } = render(<CardTile compact card={base} />);
+    const button = screen.getByRole("button", { name: "Seed price history" });
+    expect(button).toHaveAttribute("title", "Seed price history");
+    expect(container.querySelector("article")).toHaveAttribute("data-compact");
+  });
+
+  it("still starts and deletes an idea, and shows its move error", async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const onDeleted = vi.fn();
+    const deleted = vi.spyOn(api, "deleteCard").mockResolvedValue(undefined as never);
+    render(<CardTile compact card={{ ...base, moveError: "no worktree" }} onStart={onStart} onDeleted={onDeleted} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("no worktree");
+    await userEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("Delete this idea?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleted).toHaveBeenCalledWith("c1");
+    expect(onDeleted).toHaveBeenCalled();
+    deleted.mockRestore();
+  });
+
+  it("without compact has no data-compact and no title attribute", () => {
+    const { container } = render(<CardTile card={base} />);
+    expect(container.querySelector("article")).not.toHaveAttribute("data-compact");
+    expect(screen.getByRole("button", { name: "Seed price history" })).not.toHaveAttribute("title");
+  });
+});

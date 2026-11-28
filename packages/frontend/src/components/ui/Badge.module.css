@@ -30,3 +30,8 @@
   background: var(--color-done-bg);
   color: var(--color-done-text);
 }
+
+.badge[data-compact] {
+  padding: var(--space-1) var(--space-2);
+  white-space: normal;
+}

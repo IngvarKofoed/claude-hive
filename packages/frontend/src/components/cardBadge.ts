@@ -4,6 +4,10 @@ import type { BadgeTone } from "./ui/Badge";
 export interface CardBadge {
   tone: BadgeTone;
   label: string;
+  /** The badge's symbol alone (● ▶), shown by a Compact tile; null when the badge has no symbol. */
+  symbol: string | null;
+  /** The badge's words without the symbol. */
+  text: string;
 }
 
 /**
@@ -13,10 +17,10 @@ export interface CardBadge {
  */
 export function cardBadge(card: CardSummary): CardBadge | null {
   if (card.lane === "ideas" || card.lane === "done") return null;
-  if (!laneImplemented(card.lane)) return { tone: "neutral", label: "Not implemented yet" };
+  if (!laneImplemented(card.lane)) return { tone: "neutral", label: "Not implemented yet", symbol: null, text: "Not implemented yet" };
   return card.state === "working"
-    ? { tone: "working", label: "▶ working" }
-    : { tone: "needs-you", label: "● needs you" };
+    ? { tone: "working", label: "▶ working", symbol: "▶", text: "working" }
+    : { tone: "needs-you", label: "● needs you", symbol: "●", text: "needs you" };
 }
 
 /** A card from Refine through Ship: neither an idea nor landed. */

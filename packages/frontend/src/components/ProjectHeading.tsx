@@ -8,10 +8,12 @@ import styles from "./ProjectHeading.module.css";
 interface Props {
   project: ProjectSummary;
   onBoard: (board: BoardResponse) => void;
+  /** Board's Compact By lane: the path on one line, cut short, with the full path as its title. */
+  compact?: boolean;
 }
 
 /** A project's name and path, and the trust warning when its folder isn't trusted. Both board layouts use it. */
-export function ProjectHeading({ project, onBoard }: Props) {
+export function ProjectHeading({ project, onBoard, compact = false }: Props) {
   const [checkError, setCheckError] = useState<string | null>(null);
 
   async function checkAgain() {
@@ -24,9 +26,9 @@ export function ProjectHeading({ project, onBoard }: Props) {
   }
 
   return (
-    <div className={styles.heading}>
+    <div className={styles.heading} data-compact={compact || undefined}>
       <h2 className={styles.name}>{project.name}</h2>
-      <p className={styles.path}>{project.path}</p>
+      <p className={styles.path} title={compact ? project.path : undefined}>{project.path}</p>
       {project.trustWarning ? (
         <Panel tone="warning" className={styles.warning} role="alert">
           <p>

@@ -99,3 +99,42 @@ button.title {
   display: flex;
   gap: var(--space-3);
 }
+
+/* Compact (Board's By lane, docs/specs/2026-11-28-compact-by-lane-for-a-13-screen.md): every part stays, smaller. */
+.titleText {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--tile-title-lines-compact);
+  line-clamp: var(--tile-title-lines-compact);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.tile[data-compact] {
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.tile[data-compact] .title {
+  font-size: var(--text-md);
+}
+
+.tile[data-compact] .meta {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tile[data-compact] .start {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.tile[data-compact] .delete,
+.tile[data-compact] .question,
+.tile[data-compact] .error {
+  font-size: var(--text-xs);
+}
+
+.tile[data-compact] .actions {
+  flex-wrap: wrap;
+}

@@ -68,6 +68,10 @@
   /* Layout */
   --project-col-width: 220px;
   --lane-width: 210px;
+  --project-col-width-compact: 150px;
+  --lane-min-width-compact: 120px;
+  --done-col-width-compact: 84px;
+  --tile-title-lines-compact: 2;
   --board-panel-min-width: 400px;
   --popover-width: 420px;
   --card-title-min-width: 320px;

@@ -1,11 +1,18 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes } from "react";
 import styles from "./Badge.module.css";
 
 export type BadgeTone = "needs-you" | "working" | "stopped" | "done" | "neutral";
 
-export function Badge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
+interface Props extends HTMLAttributes<HTMLSpanElement> {
+  tone?: BadgeTone;
+  /** Less side padding, and wrapping allowed: for a symbol alone, or a Compact tile's words. */
+  compact?: boolean;
+}
+
+export function Badge({ tone = "neutral", compact = false, children, ...rest }: Props) {
+  const classes = [styles.badge, rest.className].filter(Boolean).join(" ");
   return (
-    <span className={styles.badge} data-tone={tone}>
+    <span {...rest} className={classes} data-tone={tone} data-compact={compact || undefined}>
       {children}
     </span>
   );
