@@ -77,7 +77,7 @@ describe("Hive.roles()", () => {
   it("orders lanes as the board does, each lane's own role first, and roles with no lane last", () => {
     const hive = hiveWith(files({
       committer: "ship", reviewer: "check", "spec-reviewer": "spec", setup: "refine", "spec-writer": "spec",
-      "product-owner": "refine", developer: "build", planner: "plan", stray: "nowhere",
+      "product-owner": "refine", designer: "mockup", developer: "build", planner: "plan", stray: "nowhere",
     }));
     expect(hive.roles().roles.map((r) => `${r.lane ?? "-"}:${r.name}`)).toEqual([
       "refine:product-owner", "refine:setup",
@@ -117,6 +117,19 @@ describe("Hive.roles()", () => {
     expect(by("product-owner").report).toBeNull();
   });
 
+  it("lists the designer under Mockup, with the set_mockup tool (docs/specs/2026-11-28-mockup-lane-and-designer-role.md)", () => {
+    const real = listRoles().find((e) => e.name === "designer");
+    expect(real).toMatchObject({ role: { lane: "mockup", model: "opus", kind: "conversation" } });
+    expect(PLANNED_ROLES.map((p) => p.name)).not.toContain("designer");
+
+    const designer = hiveWith([real!]).roles().roles.find((r) => r.name === "designer")!;
+    expect(designer).toMatchObject({ lane: "mockup", model: "opus", kind: "conversation", report: null, extras: [] });
+    expect(designer).not.toHaveProperty("planned");
+    expect(designer.tools.map((t) => t.name)).toEqual(["set_mockup"]);
+    const input = designer.tools[0]!.input as { properties: Record<string, unknown> };
+    expect(Object.keys(input.properties)).toEqual(["page", "link"]);
+  });
+
   it("says which roles get Claude Code's task-list tools: only the developer", () => {
     const roles = hiveWith(files({ developer: "build", planner: "plan" })).roles().roles;
     expect(roles.find((r) => r.name === "developer")!.taskTools).toBe(true);
@@ -134,9 +147,9 @@ describe("Hive.roles()", () => {
 
   it("lists the roles still to be written, unless a file of that name exists, and gives an unknown lane none", () => {
     const roles = hiveWith(files({ tester: "check", odd: "somewhere" })).roles().roles;
-    expect(roles.filter((r) => r.planned).map((r) => r.name)).toEqual(["designer", "manager"]);
-    expect(roles.find((r) => r.name === "designer")).toEqual({
-      name: "designer", lane: "mockup", model: null, kind: null, instructions: "", extras: [], report: null, tools: [],
+    expect(roles.filter((r) => r.planned).map((r) => r.name)).toEqual(["manager"]);
+    expect(roles.find((r) => r.name === "manager")).toEqual({
+      name: "manager", lane: null, model: null, kind: null, instructions: "", extras: [], report: null, tools: [],
       taskTools: false, planned: true,
     });
     expect(roles.find((r) => r.name === "tester")).not.toHaveProperty("planned");

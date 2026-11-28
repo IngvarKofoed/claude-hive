@@ -1,8 +1,14 @@
 // Only the hive's own page may call the API (spec: Workspace). Binding to 127.0.0.1 doesn't stop a web page
 // you visit from reaching the hive through DNS rebinding, and this API starts full-access sessions on paths and
-// prompts the caller picks. So: the Host must be the hive itself, a foreign Origin is refused, no CORS headers
-// are ever sent, and a request body must be JSON.
+// prompts the caller picks. So: the Host must be the hive itself, a foreign Origin is refused, and a request body must
+// be JSON. The one exception is a card's mockup folder: its sandboxed pages run in an opaque origin, so their module
+// scripts, fonts and fetch() send `Origin: null`, and only GET or HEAD of those files is let through with it. That
+// route alone also sends a CORS header (docs/specs/2026-11-28-mockup-lane-and-designer-role.md).
 import type { NextFunction, Request, Response } from "express";
+
+/** A read of a card's mockup file, the only request an opaque origin (`Origin: null`) may make. */
+const MOCKUP_FILE = /^\/api\/cards\/[^/]+\/mockup\/./;
+const isMockupRead = (req: Request) => (req.method === "GET" || req.method === "HEAD") && MOCKUP_FILE.test(req.path);
 
 export function localOnly(ports: number[]) {
   const hosts = new Set(ports.flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`]));
@@ -15,7 +21,7 @@ export function localOnly(ports: number[]) {
       return;
     }
     const origin = req.headers.origin;
-    if (origin !== undefined && !origins.has(origin)) {
+    if (origin !== undefined && !origins.has(origin) && !(origin === "null" && isMockupRead(req))) {
       res.status(403).json({ error: "Requests from other sites are refused." });
       return;
     }

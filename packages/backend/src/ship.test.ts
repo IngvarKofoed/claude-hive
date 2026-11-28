@@ -96,7 +96,7 @@ describe("Ship lane", () => {
     await po.request.hiveTools!.writeBrief!(brief);
     po.handlers.onSessionCreated();
     await po.end();
-    await hive.good(card.id);
+    await hive.good(card.id, { skipMockup: true });
     const writer = runner.last;
     const worktree = hive.card(card.id).worktreePath!;
     writeFileSync(join(worktree, hive.card(card.id).spec!.path),

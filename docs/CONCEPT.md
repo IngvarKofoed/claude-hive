@@ -22,8 +22,8 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 | Lane | Who | What happens | Moves on when |
 | --- | --- | --- | --- |
 | **Ideas** | you | You type an idea: a title, and a text of two sentences or so. You can edit both until it starts. | You drag it to Refine, or press Start. |
-| **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**. |
-| **Mockup** | you ⇄ designer | A clickable mockup, made however the designer thinks best. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. Skipped when there's nothing to show. | You say **Good**. |
+| **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**: on to Mockup, or skip to Spec when there's nothing to show. |
+| **Mockup** | you ⇄ designer | A clickable mockup: plain HTML pages the designer makes in the card's own folder, never inside the app, or a mockup you make yourself in Claude Design and paste as a link. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. | You say **Good**, and choose whether to keep the mockup. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
 | **Plan** | planner | The build plan the spec deliberately leaves out: the steps in order, which chunk each agent owns, the tests, and how each step is checked. | The plan is written. |
 | **Build** | developer | Brings in the latest main first, then builds to the plan. One developer per card, which hands chunks to its own subagents when the spec's Implementation strategy calls for several agents. | It's built. |
@@ -135,7 +135,9 @@ What the hive knows about how you want things. Each project has one, plus one sh
 
 ## Mockups
 
-- **How a mockup is made is the designer's call:** in the app itself, or as a page of its own. The hive adds nothing of its own to it.
+- **A mockup is plain HTML pages,** with their CSS and scripts, in the card's own folder, `docs/mockups/<card>/`. The designer makes them, copying the app's look, and edits them in place as you comment. It never builds the mockup inside the app, and changes no app code. The hive serves the pages itself, sandboxed, and the card links to them.
+- **Or you use Claude Design** on claude.ai yourself. The designer writes a starting prompt when you ask, and you paste the link back. No session can open it, so the designer asks for exported files or a description of the screens, and sums up the look in the chat for the spec writer.
+- **Good keeps the mockup, or doesn't.** Keep commits the folder on the card's branch, so the mockup lands on main with the card, at `docs/mockups/<card>/`. A Claude Design mockup is kept as a `README.md` with its link, beside any exported files. Don't keep leaves nothing on the branch: the pages stay in the worktree for the spec writer to read, and sign-off deletes them. Until then, **Keep it after all** in Spec still commits them.
 - **The approved mockup is the visual reference.** The tester compares the finished screens with it.
 
 ## Spec Issues During the Build

@@ -5,6 +5,7 @@ import type { CardDetail } from "@hive/shared";
 import { api } from "../api/client";
 import type { CardLive } from "../components/cardState";
 import { Card, LaneView, lookBackLanes } from "./Card";
+import { skippedLanes } from "../components/skippedLanes";
 
 // The full page is rendered with its header stubbed and its live state handed in, so these tests reach no backend.
 vi.mock("../components/Header", () => ({ Header: () => null }));
@@ -26,6 +27,7 @@ const detail: CardDetail = {
   branch: null,
   worktreePath: null,
   brief: null,
+  mockup: null,
   spec: null,
   specPath: null,
   plan: null,
@@ -60,9 +62,29 @@ function show(over: Partial<CardDetail>) {
 }
 
 describe("LaneView", () => {
-  it("says a lane that isn't built yet isn't implemented", () => {
-    show({});
-    expect(screen.getByText(/This lane isn't implemented yet/)).toBeInTheDocument();
+  it("gives Mockup the Designer chat with its Good buttons, and the Mockup panel above the Brief", () => {
+    show({ mockup: { folder: "docs/mockups/c1", current: null, kept: null, files: [] } });
+    expect(screen.getByRole("heading", { name: "Designer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Good · keep in docs/mockups" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Good · don't keep" })).toBeInTheDocument();
+    expect(screen.getByText("The designer's mockup shows here once it has one.")).toBeInTheDocument();
+    const headings = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(headings.indexOf("Mockup")).toBeGreaterThan(-1);
+    expect(headings.indexOf("Mockup")).toBeLessThan(headings.indexOf("Brief"));
+  });
+
+  it("gives Refine two Good buttons", () => {
+    show({ lane: "refine" });
+    expect(screen.getByRole("button", { name: "Good · on to Mockup" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Good · skip to Spec" })).toBeInTheDocument();
+  });
+
+  it("offers Keep it after all in Spec for a mockup that wasn't kept", () => {
+    show({
+      lane: "spec",
+      mockup: { folder: "docs/mockups/c1", current: { kind: "pages", page: "docs/mockups/c1/index.html" }, kept: false, files: ["index.html"] },
+    });
+    expect(screen.getByRole("button", { name: "Keep it after all" })).toBeInTheDocument();
   });
 
   it("gives Ship its panel and a Landing chat", async () => {
@@ -139,7 +161,7 @@ describe("the live Build lane's right column", () => {
   });
 });
 
-const chat = (from: "you" | "product-owner" | "spec-writer", text: string, id: string) =>
+const chat = (from: "you" | "product-owner" | "designer" | "spec-writer", text: string, id: string) =>
   ({ kind: "message", id, at: "t", from, text }) as const;
 
 const specCard: CardDetail = {
@@ -363,9 +385,40 @@ describe("looking back at a finished lane", () => {
     expect(screen.queryByText("● needs you")).toBeNull();
   });
 
-  it("counts only built lanes before the current one as finished", () => {
+  it("counts every lane before the current one as finished, except a skipped one", () => {
     expect(lookBackLanes("ideas")).toEqual([]);
-    expect(lookBackLanes("plan")).toEqual(["ideas", "refine", "spec"]);
+    expect(lookBackLanes("plan", ["mockup"])).toEqual(["ideas", "refine", "spec"]);
+    expect(lookBackLanes("plan")).toEqual(["ideas", "refine", "mockup", "spec"]);
+    expect(skippedLanes(specCard)).toEqual(["mockup"]);
+  });
+
+  const withMockup = (over: Partial<NonNullable<CardDetail["mockup"]>> = {}): CardDetail => ({
+    ...specCard,
+    pastChats: { ...specCard.pastChats, mockup: [chat("designer", "Here's a first mockup.", "m1")] },
+    mockup: {
+      folder: "docs/mockups/c1",
+      current: { kind: "pages", page: "docs/mockups/c1/index.html" },
+      kept: true,
+      files: ["index.html"],
+      ...over,
+    },
+  });
+
+  it("links Mockup in the strip for a card that made one, and looks back at the Designer chat and the mockup", () => {
+    page({ ...withMockup(), worktreePath: "/r/.claude/worktrees/c1" }, "/cards/c1");
+    const strip = screen.getByRole("list", { name: "Lanes" });
+    expect(within(strip).getByRole("link", { name: "✓ Mockup" })).toHaveAttribute("href", "/cards/c1?lane=mockup");
+    fireEvent.click(within(strip).getByRole("link", { name: "✓ Mockup" }));
+    expect(screen.getByText(/Looking back at Mockup/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Designer" })).toBeInTheDocument();
+    expect(screen.getByText("Here's a first mockup.")).toBeInTheDocument();
+    expect(screen.getByText("Kept in docs/mockups/c1/")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "index.html" })).toHaveAttribute("href", "/api/cards/c1/mockup/index.html");
+  });
+
+  it("shows no Mockup look-back for a skipped lane, even when asked for by address", () => {
+    page(specCard, "/cards/c1?lane=mockup");
+    expect(screen.queryByText(/Looking back/)).toBeNull();
   });
 });
 
@@ -424,7 +477,7 @@ describe("the card page's chat panels", () => {
     show({ lane: "refine" });
     expect(screen.getByRole("log").closest("[data-framed]")).not.toBeNull();
     const send = screen.getByRole("button", { name: "Send" });
-    expect(send.parentElement).toContainElement(screen.getByRole("button", { name: "Good" }));
+    expect(send.parentElement).toContainElement(screen.getByRole("button", { name: "Good · on to Mockup" }));
   });
 
   it("leaves Ship's Landing chat unframed", async () => {

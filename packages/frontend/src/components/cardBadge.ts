@@ -1,4 +1,4 @@
-import { laneImplemented, type CardSummary } from "@hive/shared";
+import type { CardSummary } from "@hive/shared";
 import type { BadgeTone } from "./ui/Badge";
 
 export interface CardBadge {
@@ -13,11 +13,10 @@ export interface CardBadge {
 /**
  * The badge a card's tile shows, and the one rule the Board's "waiting for you" counts by
  * (docs/specs/2026-11-27-board-by-project.md): none in Ideas, which wait for Start rather than an answer, and none in
- * Done; "Not implemented yet" in a lane that isn't built; otherwise the card's state.
+ * Done; otherwise the card's state.
  */
 export function cardBadge(card: CardSummary): CardBadge | null {
   if (card.lane === "ideas" || card.lane === "done") return null;
-  if (!laneImplemented(card.lane)) return { tone: "neutral", label: "Not implemented yet", symbol: null, text: "Not implemented yet" };
   return card.state === "working"
     ? { tone: "working", label: "▶ working", symbol: "▶", text: "working" }
     : { tone: "needs-you", label: "● needs you", symbol: "●", text: "needs you" };

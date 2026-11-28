@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { titleFromIdea } from "./titleFromIdea";
 import type {
   Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, IssueAnswer, IssueJudgment, IssueStatus,
-  Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Landed, MockupRef, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -105,6 +105,7 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "keeper_fixes", type: "TEXT" },
   { table: "cards", column: "keeper_rounds", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "block_judged", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "cards", column: "mockup", type: "TEXT" },
   { table: "issues", column: "status", type: "TEXT NOT NULL DEFAULT 'open'" },
   { table: "issues", column: "recommendation", type: "TEXT" },
   { table: "issues", column: "repeats", type: "TEXT" },
@@ -132,6 +133,18 @@ export interface Landing {
   base: string;
   commit: string;
   pushed: boolean;
+}
+
+/**
+ * The card's mockup as stored (docs/specs/2026-11-28-mockup-lane-and-designer-role.md). The folder is stored, not
+ * derived, so a landed card with no worktree still knows its path; `MockupInfo.files` is read from disk on each fetch.
+ */
+export interface MockupState {
+  /** "docs/mockups/<card>", relative to the worktree. */
+  folder: string;
+  current: MockupRef | null;
+  /** Your choice at Good; null while the card is in Mockup. */
+  kept: boolean | null;
 }
 
 export interface ProjectRow {
@@ -192,6 +205,8 @@ export interface CardRow {
   keeperRounds: number;
   /** This Build visit has had its keeper turn for a blocked report. */
   blockJudged: boolean;
+  /** The card's mockup, set when it enters Mockup; null for a card that never did. */
+  mockup: MockupState | null;
   /**
    * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
    * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
@@ -289,9 +304,9 @@ export class HiveDb {
     return r ? toCard(r) : undefined;
   }
 
-  /** A new card has no checklist: only a developer session gives it one. */
+  /** A new card has no checklist (only a developer session gives it one) and no mockup (only Mockup does). */
   insertCard(
-    c: Omit<CardRow, "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged">,
+    c: Omit<CardRow, "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged" | "mockup">,
   ): void {
     const at = now();
     this.db
@@ -321,6 +336,7 @@ export class HiveDb {
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
       landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check", checklist: "checklist",
       judging: "judging", keeperFixes: "keeper_fixes", keeperRounds: "keeper_rounds", blockJudged: "block_judged",
+      mockup: "mockup",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -328,7 +344,8 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist", "judging", "keeperFixes"].includes(key)) {
+      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist", "judging", "keeperFixes", "mockup"]
+        .includes(key)) {
         values.push(value ? JSON.stringify(value) : null);
       }
       else if (["reviewApplying", "appStopped", "shipAfterCheck", "blockJudged"].includes(key)) values.push(value ? 1 : 0);
@@ -576,7 +593,7 @@ function toCard(r: any): CardRow {
     landed: r.landed ? JSON.parse(r.landed) : null, shipAfterCheck: !!r.ship_after_check,
     checklist: r.checklist ? JSON.parse(r.checklist) : null,
     judging: r.judging ? JSON.parse(r.judging) : null, keeperFixes: r.keeper_fixes ? JSON.parse(r.keeper_fixes) : null,
-    keeperRounds: r.keeper_rounds ?? 0, blockJudged: !!r.block_judged,
+    keeperRounds: r.keeper_rounds ?? 0, blockJudged: !!r.block_judged, mockup: r.mockup ? JSON.parse(r.mockup) : null,
     waitingSince: r.waiting_since ?? r.created_at,
   };
 }

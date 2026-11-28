@@ -17,13 +17,9 @@ describe("cardBadge", () => {
     expect(cardBadge(card("done"))).toBeNull();
   });
 
-  it("says when a lane isn't built", () => {
-    expect(cardBadge(card("mockup"))).toEqual({
-      tone: "neutral",
-      label: "Not implemented yet",
-      symbol: null,
-      text: "Not implemented yet",
-    });
+  it("gives a Mockup card its state badge", () => {
+    expect(cardBadge(card("mockup"))).toEqual({ tone: "needs-you", label: "● needs you", symbol: "●", text: "needs you" });
+    expect(cardBadge(card("mockup", "working"))).toEqual({ tone: "working", label: "▶ working", symbol: "▶", text: "working" });
   });
 
   it("follows the card's state everywhere else", () => {
@@ -41,7 +37,7 @@ describe("cardBadge symbol and text", () => {
   it("splits the symbol from the words, and keeps the label", () => {
     expect(cardBadge(card("tryit"))).toMatchObject({ symbol: "●", text: "needs you", label: "● needs you" });
     expect(cardBadge(card("build", "working"))).toMatchObject({ symbol: "▶", text: "working", label: "▶ working" });
-    expect(cardBadge(card("mockup"))).toMatchObject({ symbol: null, text: "Not implemented yet" });
+    expect(cardBadge(card("mockup"))).toMatchObject({ symbol: "●", text: "needs you" });
     expect(cardBadge(card("ideas"))).toBeNull();
     expect(cardBadge(card("done"))).toBeNull();
   });
@@ -66,9 +62,8 @@ describe("boardSummary", () => {
       card("mockup", "needs-you", "e"),
       card("done", "needs-you", "f"),
     ];
-    // In progress: refine, build, tryit, mockup. Waiting: refine and tryit; not the idea, the landed card, or the
-    // Mockup card, which shows "Not implemented yet".
-    expect(boardSummary(4, cards)).toBe("4 projects · 4 cards in progress · 2 waiting for you");
+    // In progress: refine, build, tryit, mockup. Waiting: refine, tryit and mockup; not the idea or the landed card.
+    expect(boardSummary(4, cards)).toBe("4 projects · 4 cards in progress · 3 waiting for you");
   });
 
   it("reads one in the singular, and none as nothing waiting", () => {

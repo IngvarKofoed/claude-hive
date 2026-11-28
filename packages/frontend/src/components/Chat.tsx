@@ -9,6 +9,7 @@ import styles from "./Chat.module.css";
 
 const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
   refine: "product-owner",
+  mockup: "designer",
   spec: "spec-writer",
   plan: "planner",
   build: "developer",

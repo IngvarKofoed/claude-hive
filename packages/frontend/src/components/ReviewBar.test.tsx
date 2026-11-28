@@ -19,6 +19,7 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     branch: null,
     worktreePath: null,
     brief: null,
+    mockup: null,
     spec: { path: "docs/specs/x.md", text, review },
     specPath: "docs/specs/x.md",
     plan: null,

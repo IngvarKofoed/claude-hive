@@ -31,6 +31,7 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
     branch: "hive/c1",
     worktreePath: "/r/.claude/worktrees/c1",
     brief: null,
+    mockup: null,
     spec: { path: "docs/specs/x.md", text: "# T\n\n## Outcome\n\n- You get a button\n\n## Design\n\nsecret", review: "fresh" },
     specPath: "docs/specs/x.md",
     plan: null,

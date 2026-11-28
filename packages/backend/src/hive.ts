@@ -4,12 +4,15 @@
 // docs/specs/2026-11-27-check-lane-reviewer.md, docs/specs/2026-11-27-worktree-setup-and-try-it.md).
 // Plain code decides; Claude sessions only do the work (packages/backend/CLAUDE.md, Rules).
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import {
+  appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+} from "node:fs";
+import { basename, join, relative, resolve, sep } from "node:path";
 import type {
-  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction, LaneActionInput, LaneErrorAction,
-  FeedbackBody, FileChange, ForYouItem, ForYouResponse, IssueAnswer, IssueJudgment, IssueStatus, Landed, LandBody, Lane, PendingItem,
-  Plan, Question, RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
+  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
+  FeedbackBody, FileChange, ForYouItem, ForYouResponse, GoodBody, IssueAnswer, IssueJudgment, IssueStatus, Landed, LandBody, Lane,
+  LaneActionInput, LaneErrorAction, MockupInfo, MockupRef, PendingItem, Plan, Question, RoleInfo, RolesResponse, SetupReport,
+  ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
 } from "@hive/shared";
 import { CARD_PORTS, LANES, lanesBefore } from "@hive/shared";
 import {
@@ -17,7 +20,7 @@ import {
   laneAfterLanding, laneAfterPlan, type IssueFate,
 } from "./board/moves";
 import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
-import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type SessionRow } from "./db";
+import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type MockupState, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import { applyChecklistChange } from "./sessions/checklist";
 import { describeHiveTool, type HiveToolName } from "./sessions/hiveTools";
@@ -104,6 +107,7 @@ export interface HiveDeps {
 /** The role whose session a lane talks to. */
 const LANE_ROLE: Partial<Record<Lane, string>> = {
   refine: "product-owner",
+  mockup: "designer",
   spec: "spec-writer",
   plan: "planner",
   build: "developer",
@@ -118,7 +122,7 @@ const SETUP = "setup";
  * holds the instructions sent at the top of each keeper message (docs/specs/2026-11-28-spec-keeper.md, Key decisions).
  */
 const SPEC_KEEPER = "spec-keeper";
-const CHAT_LANES: Lane[] = ["refine", "spec"];
+const CHAT_LANES: Lane[] = ["refine", "mockup", "spec"];
 
 /** The options of a spec keeper question in Try it, and on a blocked build; the keeper's choice goes first. */
 const KEEP_AS_BUILT = "Keep it as built";
@@ -148,6 +152,7 @@ interface RoleTurn {
  */
 const ROLE_TURNS: Record<string, RoleTurn> = {
   "product-owner": { tools: ["write_brief"] },
+  designer: { tools: ["set_mockup"] },
   setup: { report: SETUP_SCHEMA, tools: ["copy_local_files"] },
   "spec-writer": { specFormat: ["format.md"] },
   "spec-keeper": { report: KEEPER_SCHEMA },
@@ -160,6 +165,7 @@ const ROLE_TURNS: Record<string, RoleTurn> = {
 
 const AUTHOR: Record<string, ChatAuthor> = {
   "product-owner": "product-owner",
+  designer: "designer",
   "spec-writer": "spec-writer",
   planner: "planner",
   developer: "developer",
@@ -414,6 +420,7 @@ export class Hive {
       branch: card.branch,
       worktreePath: card.worktreePath,
       brief: card.brief,
+      mockup: this.mockupInfo(card),
       spec: card.specPath ? (this.landedSpec(card) ?? this.refreshSpec(card.id)) : null,
       specPath: card.specPath,
       plan: card.plan,
@@ -628,6 +635,7 @@ export class Hive {
           landing: this.landingProjects.get(card.projectId) === card.id,
           shipPlan: null,
           hasFeedback: false,
+          mockup: this.mockupInfo(card),
         };
         return {
           card: cardSummary(card),
@@ -697,26 +705,143 @@ export class Hive {
     return cardSummary(this.requireCard(id));
   }
 
-  /** Refine → Spec when you say Good. Mockup is skipped in this slice. */
-  async good(cardId: string): Promise<CardSummary> {
+  /**
+   * Good: Refine → Mockup, or straight to Spec with `skipMockup`; Mockup → Spec, keeping the mockup or not
+   * (docs/specs/2026-11-28-mockup-lane-and-designer-role.md, Into Mockup and Out of Mockup).
+   */
+  async good(cardId: string, body: GoodBody = {}): Promise<CardSummary> {
     const card = this.requireCard(cardId);
-    const to = laneAfter(card.lane, "good");
-    if (!to) throw new HttpError(409, "Good moves a card on from Refine.");
+    if (card.lane === "mockup") return this.leaveMockup(cardId, body ?? {});
+    if (body?.skipMockup !== undefined && typeof body.skipMockup !== "boolean") {
+      throw new HttpError(400, "skipMockup must be true or false.");
+    }
+    const to = laneAfter(card.lane, body?.skipMockup ? "skip-mockup" : "good");
+    if (!to) throw new HttpError(409, "Good moves a card on from Refine or Mockup.");
     if (this.anyTurnRunning(cardId) || this.db.openPendingFor(cardId)) {
       throw new HttpError(409, "Wait for the product owner to finish.");
     }
-    const options = this.turnOptions(LANE_ROLE.spec!); // reads format.md: a missing one refuses here, before the move
-    this.formatFile("review.md"); // the review gate needs it later; refuse now rather than in the middle of Spec
+    if (to === "spec") {
+      const spec = this.prepareSpec();
+      return this.oneMoveAtATime(cardId, async () => {
+        this.enterSpec(cardId, spec);
+        return cardSummary(this.requireCard(cardId));
+      });
+    }
+    // Load the designer's role before anything changes, so a missing or broken file leaves the card in Refine.
+    let role: Role;
+    try {
+      role = this.deps.role(LANE_ROLE.mockup!);
+    } catch (error) {
+      throw new HttpError(500, `The designer's role can't be loaded: ${(error as Error).message}`);
+    }
     return this.oneMoveAtATime(cardId, async () => {
-      const role = this.deps.role(LANE_ROLE.spec!);
-      const specPath = specPathFor(card.worktreePath!, card.brief?.title || card.title, (this.deps.today ?? localDate)());
-      this.db.updateCard(cardId, { lane: to, specPath, reviewedSpecHash: null, reviewApplying: false });
+      const worktree = card.worktreePath!;
+      // The folder is named after the worktree, the same slug as the branch hive/<card>. Git can't see it while it's
+      // empty, so making it early leaves nothing on the branch.
+      const folder = `docs/mockups/${basename(worktree)}`;
+      try {
+        mkdirSync(join(worktree, folder), { recursive: true });
+      } catch (error) {
+        throw new HttpError(409, `The mockup folder couldn't be made: ${(error as Error).message}`);
+      }
+      this.db.updateCard(cardId, { lane: to, mockup: { folder, current: null, kept: null } });
       const sessionId = randomUUID();
-      this.db.insertSession({ id: sessionId, cardId, lane: to, role: LANE_ROLE.spec!, kind: role.kind });
-      this.watchSpec(cardId);
-      this.startTurn(cardId, sessionId, this.specFirstMessage(cardId, specPath), options);
+      this.db.insertSession({ id: sessionId, cardId, lane: to, role: LANE_ROLE.mockup!, kind: role.kind });
+      this.emitMockup(cardId);
+      this.startTurn(cardId, sessionId, this.designerFirstMessage(cardId));
       return cardSummary(this.requireCard(cardId));
     });
+  }
+
+  /** Mockup → Spec: Keep commits the mockup's folder on the card's branch; Don't keep leaves it until sign-off. */
+  private async leaveMockup(cardId: string, body: GoodBody): Promise<CardSummary> {
+    const card = this.requireCard(cardId);
+    if (laneAfter(card.lane, "good") !== "spec") throw new HttpError(409, "Good moves a card on from Mockup to Spec.");
+    if (typeof body.keep !== "boolean") throw new HttpError(400, "Say whether to keep the mockup: keep must be true or false.");
+    if (this.anyTurnRunning(cardId) || this.db.openPendingFor(cardId)) {
+      throw new HttpError(409, "Wait for the designer to finish.");
+    }
+    const keep = body.keep;
+    if (keep) this.refuseUnkeepable(card);
+    const spec = this.prepareSpec();
+    return this.oneMoveAtATime(cardId, async () => {
+      const now = this.requireCard(cardId);
+      if (keep) await this.commitMockup(now);
+      this.db.updateCard(cardId, { mockup: { ...now.mockup!, kept: keep } });
+      this.enterSpec(cardId, spec);
+      this.emitMockup(cardId);
+      return cardSummary(this.requireCard(cardId));
+    });
+  }
+
+  /**
+   * Keep, at Good or after all in Spec, needs a named mockup, and an HTML one needs pages in its folder. A link needs
+   * no files: Keep writes its README.
+   */
+  private refuseUnkeepable(card: CardRow): void {
+    const mockup = card.mockup;
+    if (!mockup?.current) throw new HttpError(409, "There's no mockup to keep: the designer hasn't named one.");
+    if (mockup.current.kind === "pages" && this.mockupFiles(card).length === 0) {
+      throw new HttpError(409, `There's nothing to keep: ${mockup.folder}/ is empty.`);
+    }
+  }
+
+  /**
+   * Keep it after all: Keep, done later. It commits a mockup you didn't keep while the card is in Spec, and refuses
+   * what Keep refuses. It touches only the mockup's folder, so it neither waits for the spec writer nor starts a turn.
+   */
+  async keepMockup(cardId: string): Promise<void> {
+    const check = (card: CardRow) => {
+      if (card.lane !== "spec") throw new HttpError(409, "Keep it after all works while the card is in Spec.");
+      if (!card.mockup || card.mockup.kept === null) throw new HttpError(409, "This card has no mockup to keep.");
+      if (card.mockup.kept) throw new HttpError(409, "The mockup is already kept.");
+      this.refuseUnkeepable(card);
+    };
+    check(this.requireCard(cardId));
+    await this.oneMoveAtATime(cardId, async () => {
+      const card = this.requireCard(cardId);
+      check(card);
+      await this.commitMockup(card);
+      this.db.updateCard(cardId, { mockup: { ...card.mockup!, kept: true } });
+      this.emitMockup(cardId);
+      this.addNote(cardId, "spec", `The mockup is kept after all, at ${card.mockup!.folder}/.`);
+    });
+  }
+
+  /**
+   * Commits the mockup's folder alone as `Mockup: <title>`. A Claude Design link gets a README.md with its link
+   * first, in a folder made again if it's gone. A git error refuses the move.
+   */
+  private async commitMockup(card: CardRow): Promise<void> {
+    const { folder, current } = card.mockup!;
+    const worktree = card.worktreePath!;
+    try {
+      if (current?.kind === "link") writeMockupReadme(join(worktree, folder), card.title, current.url);
+      await this.deps.git.commitFile(worktree, folder, `Mockup: ${card.title}`);
+    } catch (error) {
+      throw new HttpError(409, `The mockup couldn't be committed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * What entering Spec needs, checked before anything moves: the spec format (format.md for the writer, review.md for
+   * the review gate later) and the spec writer's role.
+   */
+  private prepareSpec(): { options: TurnOptions; role: Role } {
+    const options = this.turnOptions(LANE_ROLE.spec!); // reads format.md: a missing one refuses here, before the move
+    this.formatFile("review.md"); // the review gate needs it later; refuse now rather than in the middle of Spec
+    return { options, role: this.deps.role(LANE_ROLE.spec!) };
+  }
+
+  /** Into Spec: the spec writer's session and its first turn, and the watch on the spec. Run inside oneMoveAtATime. */
+  private enterSpec(cardId: string, { options, role }: { options: TurnOptions; role: Role }): void {
+    const card = this.requireCard(cardId);
+    const specPath = specPathFor(card.worktreePath!, card.brief?.title || card.title, (this.deps.today ?? localDate)());
+    this.db.updateCard(cardId, { lane: "spec", specPath, reviewedSpecHash: null, reviewApplying: false });
+    const sessionId = randomUUID();
+    this.db.insertSession({ id: sessionId, cardId, lane: "spec", role: LANE_ROLE.spec!, kind: role.kind });
+    this.watchSpec(cardId);
+    this.startTurn(cardId, sessionId, this.specFirstMessage(cardId, specPath), options);
   }
 
   /** Spec → Plan, only while the spec on disk is the text the last finished review produced. */
@@ -738,9 +863,23 @@ export class Hive {
       } catch (error) {
         throw new HttpError(409, (error as Error).message);
       }
+      // A mockup you didn't keep was never committed. It goes now, before Build's checkpoint (`git add -A`) could
+      // commit it; a failed delete refuses sign-off. The spec commit above finds nothing to do on the next try.
+      const mockup = this.requireCard(cardId).mockup;
+      const deleted = mockup?.kept === false && existsSync(join(card.worktreePath!, mockup.folder));
+      if (deleted) {
+        try {
+          rmSync(join(card.worktreePath!, mockup.folder), { recursive: true, force: true });
+        } catch (error) {
+          this.emitMockup(cardId);
+          throw new HttpError(409,
+            `The mockup you didn't keep couldn't be deleted from ${mockup.folder}/: ${(error as Error).message}`);
+        }
+      }
       this.watch.unwatch(cardId);
       // Keeper fix rounds count from sign-off (docs/specs/2026-11-28-spec-keeper.md, After the batch).
       this.db.updateCard(cardId, { lane: to, keeperRounds: 0 });
+      if (deleted) this.emitMockup(cardId);
       this.startPlanner(cardId);
       return cardSummary(this.requireCard(cardId));
     });
@@ -2790,6 +2929,9 @@ export class Hive {
       ...(names.includes("copy_local_files")
         ? { copyLocalFiles: (paths: string[]) => this.copyLocalFiles(cardId, paths) }
         : {}),
+      ...(names.includes("set_mockup")
+        ? { setMockup: (input: { page?: string; link?: string }) => Promise.resolve(this.setMockup(cardId, input)) }
+        : {}),
     };
   }
 
@@ -2893,6 +3035,9 @@ export class Hive {
         } else if (outcome.kind === "error" && !stopped) {
           this.addError(cardId, session.lane, outcome.message, ["retry"]);
         }
+        // The designer may have changed the folder's files without naming a new mockup (exports copied in beside a
+        // link, pages removed), so the page's file list and Good's hints are read again once its turn ends.
+        if (session.role === LANE_ROLE.mockup) this.emitMockup(cardId);
 
         if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text: null });
         // A handler above may have started the next turn (a review's findings go straight to the spec writer);
@@ -3003,16 +3148,106 @@ export class Hive {
     return "The brief is saved and shown next to the chat.";
   }
 
+  // ---------- the mockup (docs/specs/2026-11-28-mockup-lane-and-designer-role.md) ----------
+
+  /**
+   * set_mockup: names the card's current mockup. A page must be an existing .html file whose real path lies inside
+   * the card's folder; a link must be https. Answers in text and never throws, like write_brief.
+   */
+  private setMockup(cardId: string, input: { page?: string; link?: string }): string {
+    const card = this.db.getCard(cardId);
+    if (!card || card.lane !== "mockup" || !card.mockup || !card.worktreePath) {
+      return "Not saved: the card isn't in Mockup any more.";
+    }
+    const page = typeof input?.page === "string" && input.page.trim() ? input.page.trim() : null;
+    const link = typeof input?.link === "string" && input.link.trim() ? input.link.trim() : null;
+    if ((page === null) === (link === null)) return "Not saved: set exactly one of page and link.";
+    const { folder } = card.mockup;
+    let current: MockupRef;
+    if (link !== null) {
+      let url: URL;
+      try {
+        url = new URL(link);
+      } catch {
+        return `Not saved: ${link} isn't a URL.`;
+      }
+      if (url.protocol !== "https:") return "Not saved: a link must start with https://.";
+      current = { kind: "link", url: url.href };
+    } else {
+      if (!page!.toLowerCase().endsWith(".html")) return `Not saved: the page must be an .html file in ${folder}/.`;
+      const worktree = card.worktreePath;
+      let realFolder: string;
+      let realPage: string;
+      try {
+        realFolder = realpathSync(join(worktree, folder));
+        realPage = realpathSync(resolve(worktree, page!));
+      } catch {
+        return `Not saved: ${page} doesn't exist. Write the page in ${folder}/ first.`;
+      }
+      if (!realPage.startsWith(realFolder + sep)) return `Not saved: the page must be inside ${folder}/.`;
+      if (!statSync(realPage).isFile()) return `Not saved: ${page} isn't a file.`;
+      // Stored as the page's path within the folder as it really is, so `..` or a symlink can't make it point elsewhere.
+      current = { kind: "pages", page: `${folder}/${relative(realFolder, realPage).split(sep).join("/")}` };
+    }
+    this.db.updateCard(cardId, { mockup: { ...card.mockup, current } });
+    this.emitMockup(cardId);
+    return `The Mockup panel now opens ${current.kind === "pages" ? current.page : current.url}.`;
+  }
+
+  /** The card's mockup for the page: what's stored, with the folder's files read now. */
+  private mockupInfo(card: CardRow): MockupInfo | null {
+    return card.mockup ? { ...card.mockup, files: this.mockupFiles(card) } : null;
+  }
+
+  /** The mockup folder's files, relative to it: [] once the folder or the worktree is gone. */
+  private mockupFiles(card: CardRow): string[] {
+    if (!card.mockup || !card.worktreePath) return [];
+    return listMockupFiles(join(card.worktreePath, card.mockup.folder));
+  }
+
+  private emitMockup(cardId: string): void {
+    const mockup = this.mockupInfo(this.requireCard(cardId));
+    if (mockup) this.deps.hub.emit({ type: "mockup.updated", cardId, mockup });
+  }
+
+  /**
+   * A file of the card's mockup to serve: the folder, and the file's path within it. 404 for no card, no mockup or
+   * no worktree, a dot segment, a missing file, or a real path outside the folder.
+   */
+  mockupFile(cardId: string, path: string): { root: string; file: string } {
+    const notFound = new HttpError(404, "No such file in the mockup.");
+    const card = this.db.getCard(cardId);
+    if (!card?.mockup || !card.worktreePath) throw notFound;
+    const segments = path.split("/");
+    if (!path || segments.some((s) => s === "" || s.startsWith(".") || s.includes("\\") || s.includes("\0"))) throw notFound;
+    let root: string;
+    let real: string;
+    try {
+      root = realpathSync(join(card.worktreePath, card.mockup.folder));
+      real = realpathSync(join(root, ...segments));
+      if (!statSync(real).isFile()) throw notFound;
+    } catch {
+      throw notFound;
+    }
+    if (!real.startsWith(root + sep)) throw notFound;
+    return { root, file: relative(root, real) };
+  }
+
   // ---------- the spec on disk ----------
 
-  private specFirstMessage(cardId: string, specPath: string): string {
+  /** A lane's chat as `you:` / `<label>:` lines, without the hive's notes, for a later role's first message. */
+  private chatTranscript(cardId: string, lane: Lane, label: string): string {
+    return this.db
+      .chatFor(cardId, lane)
+      .filter((c): c is Extract<ChatItem, { kind: "message" }> => c.kind === "message" && c.from !== "hive")
+      .map((c) => `${c.from === "you" ? "you" : label}: ${c.text}`)
+      .join("\n\n");
+  }
+
+  private designerFirstMessage(cardId: string): string {
     const card = this.requireCard(cardId);
     const project = this.db.getProject(card.projectId)!;
-    const chat = this.db
-      .chatFor(cardId, "refine")
-      .filter((c): c is Extract<ChatItem, { kind: "message" }> => c.kind === "message" && c.from !== "hive")
-      .map((c) => `${c.from === "you" ? "you" : "product owner"}: ${c.text}`)
-      .join("\n\n");
+    const folder = card.mockup!.folder;
     return [
       `The idea for this card, in the project ${project.name}:`,
       "",
@@ -3026,7 +3261,64 @@ export class Hive {
       "",
       "The Refine chat:",
       "",
-      chat || "(empty)",
+      this.chatTranscript(cardId, "refine", "product owner") || "(empty)",
+      "",
+      `The mockup's folder is ${folder}/, relative to your working folder. It's empty, and it's the only place you ` +
+        "write.",
+      "",
+      "Open with a first mockup: write its HTML pages in that folder, then name the page to open with set_mockup. " +
+        "In your first reply, say in one line that the person can make the mockup in Claude Design instead and paste " +
+        "its link here.",
+    ].join("\n");
+  }
+
+  /** What the spec writer is told about the mockup, by case (Design, The spec writer's first message). */
+  private mockupParagraph(card: CardRow): string {
+    const mockup = card.mockup;
+    if (!mockup) return "The person skipped Mockup, so there's no mockup.";
+    const { folder, current, kept } = mockup;
+    if (!current) return "The person went on without a mockup. Go by the chat for the look.";
+    if (current.kind === "pages") {
+      return kept
+        ? `The mockup is HTML pages in ${folder}/, and the page the person approved is ${current.page}. They're ` +
+            "committed and land with the card. Read them, and point the spec at them as the look."
+        : `The mockup is HTML pages in ${folder}/, opening at ${current.page}. The person didn't keep it: read the ` +
+            "pages now, but the hive deletes them at sign-off, so the spec mustn't point at them.";
+    }
+    return kept
+      ? `The mockup is a link the person made elsewhere, such as in Claude Design: ${current.url}. You can't open it, ` +
+          "since it needs the person's login. Go by the designer's summary of the look in the Mockup chat, and by the " +
+          `README.md and any exported files in ${folder}/, which are committed and land with the card.`
+      : `The mockup is a link the person made elsewhere, such as in Claude Design: ${current.url}. You can't open it. ` +
+          "Go by the designer's summary of the look in the Mockup chat, and by any exported files in " +
+          `${folder}/ until sign-off, when the hive deletes them; the spec mustn't point at them.`;
+  }
+
+  private specFirstMessage(cardId: string, specPath: string): string {
+    const card = this.requireCard(cardId);
+    const project = this.db.getProject(card.projectId)!;
+    const mockupChat = card.mockup
+      ? ["The Mockup chat:", "", this.chatTranscript(cardId, "mockup", "designer") || "(empty)", ""]
+      : [];
+    return [
+      `The idea for this card, in the project ${project.name}:`,
+      "",
+      `Title: ${card.ideaTitle}`,
+      "",
+      `The idea: ${card.ideaText}`,
+      "",
+      "The brief the product owner wrote with the person:",
+      "",
+      briefText(card.brief),
+      "",
+      "The Refine chat:",
+      "",
+      this.chatTranscript(cardId, "refine", "product owner") || "(empty)",
+      "",
+      ...mockupChat,
+      "The mockup:",
+      "",
+      this.mockupParagraph(card),
       "",
       `Write the whole spec to ${specPath}, relative to your working folder, in one go, following the spec format in ` +
         "your instructions. Then sum up in a few sentences what it proposes.",
@@ -3155,6 +3447,56 @@ export class Hive {
     if (!session) throw new HttpError(409, "This card has no conversation yet. Drag it to Refine first.");
     return session;
   }
+}
+
+/** How many of a mockup folder's files the page lists. */
+const MOCKUP_FILES = 200;
+
+/**
+ * A mockup folder's files, relative to it, sorted and cut at MOCKUP_FILES. Dot entries are skipped, and symlinks are
+ * neither listed nor followed. [] when the folder is missing.
+ */
+export function listMockupFiles(folder: string): string[] {
+  const files: string[] = [];
+  const walk = (dir: string, prefix: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (name.startsWith(".") || files.length >= 10_000) continue;
+      const path = join(dir, name);
+      let stat;
+      try {
+        stat = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) walk(path, `${prefix}${name}/`);
+      else if (stat.isFile()) files.push(`${prefix}${name}`);
+    }
+  };
+  walk(folder, "");
+  return files.sort().slice(0, MOCKUP_FILES);
+}
+
+/**
+ * A kept Claude Design mockup's README.md: the card's title and its link, or the link line added to a README that's
+ * already there, unless the link is already in it.
+ */
+function writeMockupReadme(folder: string, title: string, url: string): void {
+  const line = `The mockup for this card, made in Claude Design: ${url}`;
+  const path = join(folder, "README.md");
+  mkdirSync(folder, { recursive: true });
+  if (!existsSync(path)) {
+    writeFileSync(path, `# ${title}\n\n${line}\n\nAny files exported from it sit beside this README.\n`);
+    return;
+  }
+  const text = readFileSync(path, "utf8");
+  if (text.includes(url)) return;
+  appendFileSync(path, `${text.endsWith("\n") || text === "" ? "" : "\n"}\n${line}\n`);
 }
 
 export function cardSummary(c: CardRow): CardSummary {

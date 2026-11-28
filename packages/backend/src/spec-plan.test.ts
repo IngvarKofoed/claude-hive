@@ -78,7 +78,7 @@ describe("Spec and Plan lanes", () => {
   /** A card in Spec whose writer has written the spec file and finished its turn. */
   async function specWritten(text = "# Printer font size\n\nThe spec.\n") {
     const id = await refined();
-    await hive.good(id);
+    await hive.good(id, { skipMockup: true });
     const writer = runner.last;
     const card = hive.card(id);
     writeFileSync(join(card.worktreePath!, card.spec!.path), text);
@@ -93,11 +93,12 @@ describe("Spec and Plan lanes", () => {
   const decision = { kind: "decision", category: "UX", where: "Outcome", stakes: "Unclear.", options: ["A", "B"] };
 
   describe("Good", () => {
-    it("moves the card to Spec and starts the spec writer with the brief, the chat and the format", async () => {
+    it("skips Mockup to Spec and starts the spec writer with the brief, the chat and the format", async () => {
       const id = await refined();
-      await hive.good(id);
+      await hive.good(id, { skipMockup: true });
       const card = hive.card(id);
       expect(card.lane).toBe("spec");
+      expect(card.mockup).toBeNull();
       expect(card.spec).toMatchObject({ path: "docs/specs/2026-11-26-printer-font-size.md", text: null, review: "none" });
       expect(existsSync(join(card.worktreePath!, "docs", "specs"))).toBe(true);
       const writer = runner.last;
@@ -108,6 +109,8 @@ describe("Spec and Plan lanes", () => {
       expect(writer.request.message).toContain("Problem: Labels are too small.");
       expect(writer.request.message).toContain("product owner: Here is a first brief.");
       expect(writer.request.message).toContain("docs/specs/2026-11-26-printer-font-size.md");
+      expect(writer.request.message).toContain("The person skipped Mockup, so there's no mockup.");
+      expect(writer.request.message).not.toContain("The Mockup chat:");
       expect(card.chat).toEqual([]); // Refine's chat stays in Refine
     });
 
@@ -115,10 +118,11 @@ describe("Spec and Plan lanes", () => {
       await hive.addProject(repo.root);
       const card = hive.createCard(hive.board().projects[0]!.id, "Font", "An idea.");
       await hive.moveCard(card.id, "refine");
+      await expect(hive.good(card.id, { skipMockup: true })).rejects.toMatchObject({ status: 409 });
       await expect(hive.good(card.id)).rejects.toMatchObject({ status: 409 });
       await runner.last.end();
       format.cleanup();
-      await expect(hive.good(card.id)).rejects.toThrow(/spec format is missing/);
+      await expect(hive.good(card.id, { skipMockup: true })).rejects.toThrow(/spec format is missing/);
     });
   });
 

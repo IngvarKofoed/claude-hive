@@ -84,7 +84,7 @@ describe("the spec keeper", () => {
     await po.request.hiveTools!.writeBrief!(brief);
     po.handlers.onSessionCreated();
     await po.end();
-    await hive.good(card.id);
+    await hive.good(card.id, { skipMockup: true });
     const writer = runner.last;
     const detail = hive.card(card.id);
     const specFile = join(detail.worktreePath!, detail.spec!.path);

@@ -31,6 +31,7 @@ const detail: CardDetail = {
   branch: null,
   worktreePath: null,
   brief: null,
+  mockup: null,
   spec: null,
   specPath: null,
   plan: null,

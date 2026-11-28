@@ -1,0 +1,47 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.open {
+  align-self: flex-start;
+  font-weight: var(--weight-semibold);
+  color: var(--color-link);
+  overflow-wrap: anywhere;
+}
+
+.open:hover {
+  color: var(--color-link-hover);
+}
+
+.path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.files a {
+  color: var(--color-link);
+}

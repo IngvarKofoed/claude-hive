@@ -77,6 +77,16 @@ function hiveToolList(tools: HiveTools) {
       async (args) => ({ content: [{ type: "text" as const, text: await copy(args.paths) }] }),
     ));
   }
+  if (tools.setMockup) {
+    const setMockup = tools.setMockup;
+    const { description, shape } = HIVE_TOOLS.set_mockup;
+    list.push(tool(
+      "set_mockup",
+      description,
+      shape,
+      async (args) => ({ content: [{ type: "text" as const, text: await setMockup(args) }] }),
+    ));
+  }
   return list;
 }
 
@@ -85,6 +95,7 @@ export function hiveToolNames(tools: HiveTools): string[] {
   return [
     ...(tools.writeBrief ? ["mcp__hive__write_brief"] : []),
     ...(tools.copyLocalFiles ? ["mcp__hive__copy_local_files"] : []),
+    ...(tools.setMockup ? ["mcp__hive__set_mockup"] : []),
   ];
 }
 
@@ -102,6 +113,8 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
       return "updating the brief…";
     case "mcp__hive__copy_local_files":
       return "copying local files…";
+    case "mcp__hive__set_mockup":
+      return "updating the mockup…";
     case "Read":
       return `reading ${path(input.file_path)}…`;
     case "Glob":

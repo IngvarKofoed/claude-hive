@@ -1,6 +1,6 @@
 import { Link, useParams, useSearchParams } from "react-router";
 import { api } from "../api/client";
-import { LANES, laneImplemented, lanesBefore, type CardDetail, type Lane } from "@hive/shared";
+import { LANES, lanesBefore, type CardDetail, type Lane } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
 import { BuildRoundView } from "../components/BuildRoundView";
@@ -15,6 +15,10 @@ import { Header } from "../components/Header";
 import { IdeaPanel } from "../components/IdeaPanel";
 import { IdeaView } from "../components/IdeaView";
 import { LaneSteps } from "../components/LaneSteps";
+import { KeepMockupLine } from "../components/KeepMockupLine";
+import { MockupBar } from "../components/MockupBar";
+import { MockupLookBack, MockupPanel } from "../components/MockupPanel";
+import { skippedLanes } from "../components/skippedLanes";
 import { DonePanel, ShipPanel } from "../components/ShipPanel";
 import { TryItPanel } from "../components/TryItPanel";
 import { PlanView } from "../components/PlanView";
@@ -55,16 +59,17 @@ function BuildPanel({ detail }: { detail: CardDetail }) {
 const laneName = (lane: Lane) => LANES.find((l) => l.id === lane)?.name ?? lane;
 
 /**
- * The lanes a card can be looked back at: the ones before its own, except a lane that isn't built, which it skipped
+ * The lanes a card can be looked back at: the ones before its own, except a lane it skipped
  * (docs/specs/2026-11-27-card-lane-artifacts.md).
  */
-export function lookBackLanes(current: Lane): Lane[] {
-  return lanesBefore(current).filter(laneImplemented);
+export function lookBackLanes(current: Lane, skipped: Lane[] = []): Lane[] {
+  return lanesBefore(current).filter((lane) => !skipped.includes(lane));
 }
 
 /** Who a finished lane's chat was with, as the left panel's title. */
 const PAST_CHAT_TITLE: Partial<Record<Lane, string>> = {
   refine: "Product owner",
+  mockup: "Designer",
   spec: "Spec writer",
   plan: "Planner",
   build: "Developer",
@@ -88,6 +93,12 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
       return (
         <Panel title="Brief">
           <BriefPanel brief={detail.brief} />
+        </Panel>
+      );
+    case "mockup":
+      return (
+        <Panel title="Mockup">
+          <MockupLookBack cardId={detail.id} mockup={detail.mockup} hasWorktree={detail.worktreePath !== null} />
         </Panel>
       );
     case "spec":
@@ -199,33 +210,6 @@ export function PastLaneView({ detail, lane }: { detail: CardDetail; lane: Lane 
 export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
-  if (!laneImplemented(detail.lane)) {
-    return (
-      <>
-        <Panel tone="warning" role="status">
-          This lane isn&apos;t implemented yet
-        </Panel>
-        <div className={styles.columns}>
-          {detail.spec ? (
-            <Panel title="Spec">
-              <SpecView spec={detail.spec} />
-            </Panel>
-          ) : null}
-          {/* The newest work first: the build report sits above the plan, beside the spec, not under it. */}
-          <div className={styles.stack}>
-            {detail.check ? (
-              <Panel title="Check">
-                <CheckView check={detail.check} />
-              </Panel>
-            ) : null}
-            <BuildPanel detail={detail} />
-            {detail.plan ? <PlanPanel detail={detail} /> : null}
-          </div>
-        </div>
-      </>
-    );
-  }
-
   // The idea is the lane's artifact, so it sits on the right like every lane's. The left stays empty: Refine's chat
   // starts there.
   if (detail.lane === "ideas") {
@@ -307,6 +291,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
         </Panel>
         <Panel title="Spec" className={styles.specPanel}>
           <div className={styles.specHead}>
+            <KeepMockupLine detail={detail} />
             <ReviewBar detail={detail} onMoved={onMoved} />
           </div>
           <div className={styles.specBody}>
@@ -379,6 +364,31 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
     );
   }
 
+  if (detail.lane === "mockup") {
+    return (
+      <div className={styles.columns}>
+        <Panel title="Designer" className={styles.chatPanel}>
+          <Chat
+            key={detail.lane}
+            framed
+            detail={detail}
+            streaming={live.streaming}
+            activity={live.activity}
+            sendRowEnd={<MockupBar detail={detail} onMoved={onMoved} />}
+          />
+        </Panel>
+        <div className={styles.stack}>
+          <Panel title="Mockup">
+            <MockupPanel cardId={detail.id} mockup={detail.mockup} />
+          </Panel>
+          <Panel title="Brief">
+            <BriefPanel brief={detail.brief} />
+          </Panel>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.columns}>
       <Panel title="Product owner" className={styles.chatPanel}>
@@ -403,9 +413,10 @@ export function Card() {
   const { live, error, reload, gone } = useCardLive(id);
   const [params] = useSearchParams();
   const asked = params.get("lane");
+  const skipped = live ? skippedLanes(live.detail) : [];
   // Anything that isn't a lane the card has finished (its own lane, a later one, a skipped one, Done, a typo, or a lane
   // that stopped being past since the link was made) shows the card's current lane.
-  const viewing = live ? (lookBackLanes(live.detail.lane).find((lane) => lane === asked) ?? null) : null;
+  const viewing = live ? (lookBackLanes(live.detail.lane, skipped).find((lane) => lane === asked) ?? null) : null;
 
   return (
     <div className={styles.page}>
@@ -435,7 +446,7 @@ export function Card() {
                 )}
               </div>
               <div className={styles.endGroup}>
-                <LaneSteps current={live.detail.lane} viewing={viewing} navigable />
+                <LaneSteps current={live.detail.lane} viewing={viewing} navigable skipped={skipped} />
                 <DeleteCard detail={live.detail} gone={gone} />
               </div>
             </div>

@@ -26,31 +26,21 @@ export interface LaneInfo {
   who: string;
   /** Lanes where you're in the conversation; the rest run hands off. */
   withYou: boolean;
-  /**
-   * Temporary: false for a lane whose slice isn't built yet. A card there shows "Not implemented yet" instead of a
-   * badge. Each lane's slice turns its own flag on, and the flag goes once every lane exists.
-   */
-  implemented: boolean;
 }
 
 /** The ten lanes, in board order (docs/CONCEPT.md, The Board). */
 export const LANES: readonly LaneInfo[] = [
-  { id: "ideas", name: "Ideas", who: "you", withYou: true, implemented: true },
-  { id: "refine", name: "Refine", who: "you ⇄ product owner", withYou: true, implemented: true },
-  { id: "mockup", name: "Mockup", who: "you ⇄ designer", withYou: true, implemented: false },
-  { id: "spec", name: "Spec", who: "spec writer, then you", withYou: true, implemented: true },
-  { id: "plan", name: "Plan", who: "planner", withYou: false, implemented: true },
-  { id: "build", name: "Build", who: "developer", withYou: false, implemented: true },
-  { id: "check", name: "Check", who: "reviewer, tester", withYou: false, implemented: true },
-  { id: "tryit", name: "Try it", who: "you", withYou: true, implemented: true },
-  { id: "ship", name: "Ship", who: "the hive", withYou: false, implemented: true },
-  { id: "done", name: "Done", who: "", withYou: false, implemented: true },
+  { id: "ideas", name: "Ideas", who: "you", withYou: true },
+  { id: "refine", name: "Refine", who: "you ⇄ product owner", withYou: true },
+  { id: "mockup", name: "Mockup", who: "you ⇄ designer", withYou: true },
+  { id: "spec", name: "Spec", who: "spec writer, then you", withYou: true },
+  { id: "plan", name: "Plan", who: "planner", withYou: false },
+  { id: "build", name: "Build", who: "developer", withYou: false },
+  { id: "check", name: "Check", who: "reviewer, tester", withYou: false },
+  { id: "tryit", name: "Try it", who: "you", withYou: true },
+  { id: "ship", name: "Ship", who: "the hive", withYou: false },
+  { id: "done", name: "Done", who: "", withYou: false },
 ];
-
-/** Whether a lane's slice is built yet (temporary, see LaneInfo.implemented). */
-export function laneImplemented(lane: Lane): boolean {
-  return LANES.find((l) => l.id === lane)?.implemented ?? false;
-}
 
 /**
  * The lanes before `current` in board order: the ones a card has finished, as far as the hive can tell. There are no
@@ -71,6 +61,27 @@ export interface Brief {
   whatDoneLooksLike: string[];
   outOfScope: string[];
   openPoints: string[];
+}
+
+// ---------- The mockup ----------
+
+/** What the designer last named with set_mockup (docs/specs/2026-11-28-mockup-lane-and-designer-role.md). */
+export type MockupRef =
+  /** The page to open, relative to the worktree: "docs/mockups/<card>/index.html". */
+  | { kind: "pages"; page: string }
+  /** A Claude Design mockup, or any https page you pasted. */
+  | { kind: "link"; url: string };
+
+/** The card's mockup, once it has entered Mockup. */
+export interface MockupInfo {
+  /** "docs/mockups/<card>", relative to the worktree. */
+  folder: string;
+  /** What the designer last named with set_mockup. */
+  current: MockupRef | null;
+  /** Your choice at Good; null while the card is in Mockup. */
+  kept: boolean | null;
+  /** The folder's files, relative to it, read now; [] once the folder or worktree is gone. */
+  files: string[];
 }
 
 // ---------- The spec and the plan ----------
@@ -485,7 +496,7 @@ export interface RolesResponse {
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
 export type ChatAuthor =
-  | "you" | "product-owner" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive";
+  | "you" | "product-owner" | "designer" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive";
 
 export type ChatItem =
   | { kind: "message"; id: string; at: string; from: ChatAuthor; text: string }
@@ -526,6 +537,8 @@ export interface CardDetail extends CardSummary {
   branch: string | null;
   worktreePath: string | null;
   brief: Brief | null;
+  /** The card's mockup; null when the card never entered Mockup. */
+  mockup: MockupInfo | null;
   /** The spec, once the card has entered Spec, while its worktree is there to read it from. */
   spec: SpecInfo | null;
   /** Where the spec is, relative to the repo, even once it can't be read: a landed card's worktree is gone. */
@@ -591,6 +604,15 @@ export interface MoveBody {
   lane: Lane;
 }
 
+/**
+ * Good (POST /api/cards/:id/good). `skipMockup` is read in Refine: true goes straight to Spec. `keep` is required in
+ * Mockup: true commits the mockup's folder on the card's branch.
+ */
+export interface GoodBody {
+  skipMockup?: boolean;
+  keep?: boolean;
+}
+
 /** What deleting a card left behind (DELETE /api/cards/:id): a line for each git step that failed, with git's reason. */
 export interface DeleteResult {
   left: string[];
@@ -640,6 +662,8 @@ export type HiveEvent =
   /** A passing line such as "reading src/market.ts…". Null clears it. Never stored. */
   | { type: "chat.activity"; cardId: string; text: string | null }
   | { type: "brief.updated"; cardId: string; brief: Brief }
+  /** The designer named a mockup, you chose to keep it or not, or its pages were deleted at sign-off. */
+  | { type: "mockup.updated"; cardId: string; mockup: MockupInfo }
   | { type: "spec.updated"; cardId: string; spec: SpecInfo }
   | { type: "plan.updated"; cardId: string; plan: Plan }
   /** The developer changed its task list: the whole list as the card now holds it. */

@@ -106,7 +106,7 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | --- | --- | --- | --- | --- |
 | `product-owner` | Refine | Opus | Nothing in the repo; writes the card's brief | Conversation |
 | `setup` | Refine, in the background | Sonnet | Only git-ignored local files, through the hive's copy tool, and dependencies; never tracked files | Work, new for each run |
-| `designer` | Mockup | Opus | Code, in the card's worktree, if its mockup needs it | Conversation |
+| `designer` | Mockup | Opus | Only its mockup folder, `docs/mockups/<card>/` | Conversation |
 | `spec-writer` | Spec | Opus | Only the spec file | Conversation, carried on after sign-off as the spec keeper |
 | `spec-keeper` | Spec, then the lane the card is in | Opus | Only the spec file | Instructions that ride in the spec writer's session, sent at the top of each keeper message |
 | `planner` | Plan | Opus | Nothing in the repo; writes the card's plan | Work |
@@ -141,7 +141,7 @@ query({
     settingSources: ["user", "project", "local"],
     outputFormat: role.report,       // hands-off roles: a fixed-format report the board engine routes on
     includePartialMessages: true,    // text streams to the page as it's written
-    mcpServers: { hive },            // the hive's own tools, in-process: write_brief, copy_local_files
+    mcpServers: { hive },            // the hive's own tools, in-process: write_brief, copy_local_files, set_mockup
     allowedTools: hiveToolNames,     // the hive's own tools never wait on a permission check
     canUseTool,                      // questions, and anything auto mode passes on
   },
@@ -172,8 +172,12 @@ query({
 | From | Event | To |
 | --- | --- | --- |
 | Ideas | You drag the card, or press Start | Refine, and the worktree is created. The card gets its ports, and the worktree's setup starts in the background. |
-| Refine, Mockup | You say **Good** | the next lane. Mockup is skipped when there's nothing to show. |
-| Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper |
+| Refine | You say **Good · on to Mockup** | Mockup. The hive makes the card's folder, `docs/mockups/<card>/`, sets `Card.mockup`, and starts the designer. A designer role that can't be loaded refuses the move. |
+| Refine | You say **Good · skip to Spec** | Spec, with `Card.mockup` null: the lane strip shows "– Mockup". |
+| Mockup | You say **Good · keep in docs/mockups** | Spec, after committing the folder alone as `Mockup: <title>`, with a `README.md` holding the link for a Claude Design mockup. Refused until the designer has named a mockup with `set_mockup`, for a folder of pages that's empty, and while the designer works or asks. A git error leaves the card in Mockup. |
+| Mockup | You say **Good · don't keep** | Spec, with nothing committed. The folder stays in the worktree for the spec writer to read. |
+| Spec | You press **Keep it after all**, for a mockup you didn't keep whose folder still has files | Stays in Spec. The folder is committed as Keep would, and a note goes in the chat. No turn starts, and the review isn't touched. |
+| Spec | You **sign off** (only when the review is fresh) | Plan, and the spec writer's session carries on as the spec keeper. A mockup you didn't keep is deleted from the worktree after the spec is committed, so Build's checkpoint can't commit it; a failed delete refuses sign-off. |
 | Plan | The planner's report is `done` | Build. Its plan is stored on the card, Check's rounds start over, the hive merges main into the card's branch, and the developer starts, or is resumed after a revised spec. Build first waits for a setup that's running, or runs one for a worktree that never had one. |
 | Plan | The planner's report is `blocked` or missing | Stays in Plan, with the reason, Retry and **Back to Spec** |
 | Plan | You press **Back to Spec** on a blocked plan | Spec. The planner's reason goes to the spec writer, and the spec needs a new review and sign-off. |
@@ -310,6 +314,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 | --- | --- |
 | Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> <base>`, where the base is a freshly fetched `origin/main`, or main without a remote; then the worktree's setup in the background. A setup session picks the git-ignored local files the app needs, and the hive copies them: never over an existing file, as copy-on-write clones, never from outside the checkout. The session installs dependencies and works out how to start the app and its tests on the card's ports. |
+| Card enters Mockup | The card's folder `docs/mockups/<card>/` is made, named after the worktree. Keep commits it alone with `commitFile`; sign-off deletes one you didn't keep. |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
 | Each lane exit | A checkpoint commit on `hive/<card>` of everything left (`git add -A`, with `--no-verify`, since a checkpoint never lands on main), never over an unfinished merge. The lane's diff is saved to the card's history. Check, which changes nothing, makes none. |
 | Build starts | Merge the base into `hive/<card>`: a freshly fetched `origin/main`, or local main without a remote (a merge, never a rebase). A merge that stops on conflicts, or that git refuses, is told to the developer as its first job. The card shows how many commits it's behind. |
@@ -323,7 +328,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 - **Each project sets a run command** that takes its port from an environment variable.
 - **Each card has a block of 10 ports** from 5200–5999, assigned when its setup starts and checked free. The setup works out how to start the app on them: each process's command, folder and port.
-- **In Try it the hive runs the app** from those commands, as its own child processes, each in its own process group: it starts when the card enters Try it, and stops on Stop, when the card leaves Try it, and when the hive exits. Each command is checked first: its port must be the card's, its folder inside the worktree. The page shows each process's state, link and last output lines. Mockup will use the same runner.
+- **In Try it the hive runs the app** from those commands, as its own child processes, each in its own process group: it starts when the card enters Try it, and stops on Stop, when the card leaves Try it, and when the hive exits. Each command is checked first: its port must be the card's, its folder inside the worktree. The page shows each process's state, link and last output lines.
 - **It keeps a list of what it started** and only ever stops those processes. Besides those, when a card leaves Build, Check or Try it, the hive stops what listens on the card's ports from inside its worktree, whoever started it.
 - **Screenshots** are taken with Playwright: of the approved mockup at Good, and of the built screens in Check for the tester to compare.
 
@@ -332,7 +337,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
-| **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers, and its issue ids), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
+| **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, mockup (the card's mockup once it has entered Mockup: its folder `docs/mockups/<card>`, what the designer last named with `set_mockup`, a page or a link, and whether you kept it; null for a card that skipped Mockup. The folder's files are read from disk on each fetch), moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers, and its issue ids), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
@@ -353,7 +358,9 @@ DELETE /api/cards/:id                     Delete the card: { left } lists anythi
 GET    /api/cards/:id                     The card with every lane's history
 POST   /api/cards/:id/messages            Chat in the current lane { text }
 POST   /api/cards/:id/comments            Comment { on: spec | mockup, anchor, text }
-POST   /api/cards/:id/good                Leave Refine or Mockup
+POST   /api/cards/:id/good                Leave Refine { skipMockup? } or Mockup { keep }
+GET    /api/cards/:id/mockup/<path>       A file of the card's mockup folder, sandboxed and never cached
+POST   /api/cards/:id/keep-mockup         Commit a mockup you didn't keep, while the card is in Spec
 POST   /api/cards/:id/review              Start the blind review of the spec
 POST   /api/cards/:id/signoff             Leave Spec (refused unless the review is fresh)
 POST   /api/cards/:id/back-to-spec        Send a blocked plan or build, or a Check stopped by a severe verdict, back to Spec
@@ -381,6 +388,8 @@ GET    /api/health                        Status and the app's version
 GET    /api/events                        SSE stream
 ```
 
+The mockup route is the one exception to the local-only guard: a sandboxed mockup page runs in an opaque origin, so its own module scripts, fonts and `fetch()` calls arrive with `Origin: null`. Only `GET` and `HEAD` of a mockup file are let through with it, and only that route sends `Access-Control-Allow-Origin: *`. Every other route still refuses any Origin that isn't the hive's own.
+
 ## Frontend
 
 The look comes from the mockup in `docs/mockups/`. The CSS is built so that the whole app can be restyled later without touching any component:
@@ -391,7 +400,6 @@ The look comes from the mockup in `docs/mockups/`. The CSS is built so that the 
 - **No inline styles,** and no style objects in TSX. A state that changes the look (picked, needs you, stopped) is a class or a `data-` attribute that the CSS selects on.
 - **Shared building blocks live in `components/ui/`:** button, badge, panel, chip, chat bubble. Pages are built from them.
 - **A second theme,** such as dark mode, would be a second set of token values under `[data-theme="dark"]`. Nothing else would change.
-- **Lanes not built yet** are marked `implemented: false` in the shared lane list, and a card in one shows "Not implemented yet" instead of a badge. This is temporary: each lane's slice turns its own flag on.
 
 ## Versioning
 

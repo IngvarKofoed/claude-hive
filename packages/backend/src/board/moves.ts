@@ -9,13 +9,18 @@ export function canMove(from: Lane, to: Lane): boolean {
 
 /** What you did on the card page that moves a card. */
 export type CardAction =
-  | "good" | "signoff" | "back-to-spec" | "back-to-build" | "move-on" | "feedback" | "accept" | "back-to-tryit";
+  | "good" | "skip-mockup" | "signoff" | "back-to-spec" | "back-to-build" | "move-on" | "feedback" | "accept" | "back-to-tryit";
 
 /** The lane a card goes to when you act on it, or null when that action doesn't move a card from this lane. */
 export function laneAfter(from: Lane, action: CardAction): Lane | null {
   switch (action) {
     case "good":
-      return from === "refine" ? "spec" : null; // Mockup is skipped until its slice is built
+      // Refine's Good goes on to Mockup, and Mockup's Good (keep or don't keep) to Spec
+      // (docs/specs/2026-11-28-mockup-lane-and-designer-role.md)
+      return from === "refine" ? "mockup" : from === "mockup" ? "spec" : null;
+    case "skip-mockup":
+      // Refine's "Good · skip to Spec", when there's nothing to show
+      return from === "refine" ? "spec" : null;
     case "signoff":
       return from === "spec" ? "plan" : null;
     case "back-to-spec":

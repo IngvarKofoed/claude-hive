@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { LANES, laneImplemented, type Lane } from "@hive/shared";
+import { LANES, type Lane } from "@hive/shared";
 import styles from "./LaneSteps.module.css";
 
 type Status = "past" | "current" | "future" | "skipped";
@@ -16,20 +16,22 @@ interface Props {
    */
   viewing?: Lane | null;
   navigable?: boolean;
+  /** Lanes the card passed without entering (see skippedLanes): drawn as "– Mockup", never a link. */
+  skipped?: Lane[];
 }
 
 /**
- * The lanes, with the card's own marked. A lane the card passed that isn't built yet (Mockup, for now) was skipped.
+ * The lanes, with the card's own marked. A past lane in `skipped` is drawn as skipped.
  * `compact` draws the lanes as a thin strip without names; the lane's name sits beside it there, so screen readers
  * skip the strip.
  */
-export function LaneSteps({ current, compact = false, viewing = null, navigable = false }: Props) {
+export function LaneSteps({ current, compact = false, viewing = null, navigable = false, skipped = [] }: Props) {
   const currentIndex = LANES.findIndex((lane) => lane.id === current);
   const statusOf = (index: number): Status =>
     index < currentIndex
-      ? laneImplemented(LANES[index]!.id)
-        ? "past"
-        : "skipped"
+      ? skipped.includes(LANES[index]!.id)
+        ? "skipped"
+        : "past"
       : index === currentIndex
         ? "current"
         : "future";

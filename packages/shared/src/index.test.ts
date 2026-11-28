@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANES, laneImplemented, lanesBefore } from "./index";
+import { LANES, lanesBefore } from "./index";
 
 describe("lanes", () => {
   it("lists the ten lanes in board order", () => {
@@ -8,10 +8,8 @@ describe("lanes", () => {
     ]);
   });
 
-  it("marks the lanes built so far as implemented, and the rest not", () => {
-    expect(LANES.filter((l) => l.implemented).map((l) => l.id)).toEqual(["ideas", "refine", "spec", "plan", "build", "check", "tryit", "ship", "done"]);
-    expect(laneImplemented("build")).toBe(true);
-    expect(laneImplemented("mockup")).toBe(false);
+  it("has no implemented flag now that every lane is built", () => {
+    for (const lane of LANES) expect(lane).not.toHaveProperty("implemented");
   });
 
   it("lists the lanes before a lane, in board order", () => {

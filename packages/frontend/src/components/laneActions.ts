@@ -22,6 +22,7 @@ export function laneActionsFor(detail: CardDetail, extras: LaneActionExtras = {}
     landing: detail.landing || (detail.lane === "ship" && detail.state === "working"),
     shipPlan: extras.shipPlan ?? null,
     hasFeedback: extras.hasFeedback ?? false,
+    mockup: detail.mockup,
   });
 }
 
@@ -50,7 +51,10 @@ export type LaneActionCall = Exclude<LaneActionId, "start" | "send-to-build">;
 
 /** Each such action's api call, the same route on the card page and For you. Wrapped, so a test's spy on `api` holds. */
 export const LANE_ACTION_CALLS: Record<LaneActionCall, (cardId: string) => Promise<unknown>> = {
-  good: (id) => api.good(id),
+  good: (id) => api.good(id, { skipMockup: false }),
+  "skip-mockup": (id) => api.good(id, { skipMockup: true }),
+  keep: (id) => api.good(id, { keep: true }),
+  "dont-keep": (id) => api.good(id, { keep: false }),
   review: (id) => api.review(id),
   signoff: (id) => api.signoff(id),
   retry: (id) => api.retry(id),

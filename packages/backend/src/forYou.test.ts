@@ -27,16 +27,16 @@ const note: ChatItem = { kind: "message", id: "m1", at: "t", from: "hive", text:
 describe("which cards wait for you", () => {
   const card = (lane: Lane, state: CardState = "needs-you") => ({ lane, state });
 
-  it("lists cards under way that need you, in lanes that are built", () => {
-    for (const lane of ["refine", "spec", "plan", "build", "check", "tryit", "ship"] as Lane[]) {
+  it("lists cards under way that need you, in every lane from Refine to Ship", () => {
+    for (const lane of ["refine", "mockup", "spec", "plan", "build", "check", "tryit", "ship"] as Lane[]) {
       expect(waitsForYou(card(lane))).toBe(true);
     }
   });
 
-  it("leaves out ideas, landed cards, unbuilt lanes and anything working", () => {
+  it("leaves out ideas, landed cards and anything working", () => {
     expect(waitsForYou(card("ideas"))).toBe(false);
     expect(waitsForYou(card("done"))).toBe(false);
-    expect(waitsForYou(card("mockup"))).toBe(false);
+    expect(waitsForYou(card("mockup", "working"))).toBe(false);
     expect(waitsForYou(card("tryit", "working"))).toBe(false);
   });
 });
@@ -62,6 +62,7 @@ describe("what a waiting card wants", () => {
 
   it("says each lane's default, and Spec's by its review", () => {
     expect(wants("refine")).toEqual({ kind: "your-turn", text: "Reply to the product owner, or say Good." });
+    expect(wants("mockup")).toEqual({ kind: "your-turn", text: "Reply to the designer, or say Good." });
     expect(wants("spec", { review: "none" }).kind).toBe("your-turn");
     expect(wants("spec", { review: "fresh" }).kind).toBe("sign-off");
     expect(wants("spec", { review: "stale" }).kind).toBe("review-again");
@@ -108,9 +109,11 @@ describe("what an entry offers", () => {
     ]);
   });
 
-  it("gives other lanes only Good, Review, Sign off and the error line's actions, never Stop", () => {
-    expect(ids("your-turn", "refine")).toEqual(["good"]);
-    expect(ids("your-turn", "refine", { turnRunning: true })).toEqual(["good"]);
+  it("gives other lanes only their Goods, Review, Sign off and the error line's actions, never Stop", () => {
+    expect(ids("your-turn", "refine")).toEqual(["good", "skip-mockup"]);
+    expect(ids("your-turn", "refine", { turnRunning: true })).toEqual(["good", "skip-mockup"]);
+    expect(ids("your-turn", "mockup")).toEqual(["keep", "dont-keep"]);
+    expect(ids("stuck", "mockup", { lastChat: failed(["retry"]) })).toEqual(["keep", "dont-keep", "retry"]);
     expect(ids("your-turn", "spec", { spec: { review: "none", hasText: true } })).toEqual(["review", "signoff"]);
     expect(ids("stuck", "spec", { lastChat: failed(["retry"]) })).toEqual(["review", "signoff", "retry"]);
     expect(ids("stuck", "plan", { lastChat: failed(["retry", "back-to-spec"]) })).toEqual(["retry", "back-to-spec"]);
@@ -275,7 +278,7 @@ describe("Hive.forYou", () => {
     await po.request.hiveTools!.writeBrief!(brief);
     po.handlers.onSessionCreated();
     await po.end();
-    await hive.good(id);
+    await hive.good(id, { skipMockup: true });
     const writer = runner.last;
     const specFile = join(worktree, hive.card(id).spec!.path);
     writeFileSync(specFile, "# Printer font size\n");
@@ -306,7 +309,7 @@ describe("Hive.forYou", () => {
   /** A Spec card whose spec writer has written the spec, with no review yet. */
   async function writtenSpec() {
     const s = await waitingInRefine();
-    await hive.good(s.id);
+    await hive.good(s.id, { skipMockup: true });
     const writer = runner.last;
     writeFileSync(join(s.worktree, hive.card(s.id).spec!.path), "# Printer font size\n\nThe spec.\n");
     writer.handlers.onSessionCreated();
@@ -314,12 +317,32 @@ describe("Hive.forYou", () => {
     return s;
   }
 
-  it("offers Good on a Refine card waiting for your reply, and drops the card once Good moves it", async () => {
+  it("offers both Goods on a Refine card waiting for your reply, and drops the card once Good moves it", async () => {
     const { id } = await waitingInRefine();
-    expect(actionsOf(id)).toEqual([{ id: "good", label: "Good", primary: true, enabled: true, reason: null }]);
-    await hive.good(id);
+    expect(actionsOf(id)).toEqual([
+      { id: "good", label: "Good · on to Mockup", primary: true, enabled: true, reason: null },
+      { id: "skip-mockup", label: "Good · skip to Spec", primary: false, enabled: true, reason: null },
+    ]);
+    await hive.good(id, { skipMockup: true });
     expect(actionsOf(id)).toBeUndefined();
     expect(hive.card(id).lane).toBe("spec");
+  });
+
+  it("offers Keep and Don't keep on a Mockup card, greying Keep until the designer names a mockup", async () => {
+    const { id } = await waitingInRefine();
+    await hive.good(id);
+    const designer = runner.last;
+    designer.handlers.onSessionCreated();
+    await designer.end();
+    expect(actionsOf(id)).toEqual([
+      { id: "keep", label: "Good · keep in docs/mockups", primary: true, enabled: false,
+        reason: "Keep needs a mockup: the designer hasn't named one yet." },
+      { id: "dont-keep", label: "Good · don't keep", primary: false, enabled: true, reason: null },
+    ]);
+    const folder = hive.card(id).mockup!.folder;
+    writeFileSync(join(hive.card(id).worktreePath!, folder, "index.html"), "<p>x</p>");
+    await designer.request.hiveTools!.setMockup!({ page: `${folder}/index.html` });
+    expect(actionsOf(id)?.[0]).toMatchObject({ id: "keep", enabled: true, reason: null });
   });
 
   it("offers Review on a written spec with no review, greys Sign off, and drops the card while the review runs", async () => {

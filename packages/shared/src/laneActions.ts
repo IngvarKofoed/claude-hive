@@ -1,10 +1,10 @@
 // Lane actions: what you can do to a card in a lane (docs/specs/2026-11-28-for-you-actions.md). One definition that
 // the card page and For you both read, so the two can't disagree. It decides only what the page offers: the server's
 // own guards stay as they are and have the last word.
-import type { ChatItem, IssueStatus, Lane, ReviewState, ShipPlan } from "./index";
+import type { ChatItem, IssueStatus, Lane, MockupInfo, ReviewState, ShipPlan } from "./index";
 
 export type LaneActionId =
-  | "start" | "good" | "review" | "signoff" | "retry" | "back-to-spec" | "back-to-build" | "move-on"
+  | "start" | "good" | "skip-mockup" | "keep" | "dont-keep" | "review" | "signoff" | "retry" | "back-to-spec" | "back-to-build" | "move-on"
   | "send-to-build" | "accept" | "land" | "discard-and-land" | "back-to-tryit" | "stop";
 
 /**
@@ -13,8 +13,9 @@ export type LaneActionId =
  */
 export const LANE_ACTIONS = {
   ideas: ["start"],
-  refine: ["good", "retry", "stop"],
-  mockup: [], // comes with Mockup's slice
+  refine: ["good", "skip-mockup", "retry", "stop"],
+  // Mockup's Good is two buttons: keep the mockup in docs/mockups, or don't (docs/specs/2026-11-28-mockup-lane-and-designer-role.md)
+  mockup: ["keep", "dont-keep", "retry", "stop"],
   spec: ["review", "signoff", "retry", "stop"],
   plan: ["retry", "back-to-spec", "stop"],
   build: ["retry", "back-to-spec", "stop"],
@@ -27,7 +28,10 @@ export const LANE_ACTIONS = {
 /** Each action's one label, on the card page and For you alike. */
 export const LANE_ACTION_LABEL: Record<LaneActionId, string> = {
   start: "Start",
-  good: "Good",
+  good: "Good · on to Mockup",
+  "skip-mockup": "Good · skip to Spec",
+  keep: "Good · keep in docs/mockups",
+  "dont-keep": "Good · don't keep",
   review: "Review",
   signoff: "Sign off",
   retry: "Retry",
@@ -43,7 +47,7 @@ export const LANE_ACTION_LABEL: Record<LaneActionId, string> = {
 };
 
 /** The page's main button for its lane. */
-const PRIMARY: ReadonlySet<LaneActionId> = new Set<LaneActionId>(["good", "signoff", "send-to-build", "land"]);
+const PRIMARY: ReadonlySet<LaneActionId> = new Set<LaneActionId>(["good", "keep", "signoff", "send-to-build", "land"]);
 
 /** One action on offer, as a button shows it: greyed with its reason when it isn't enabled. */
 export interface LaneActionState {
@@ -83,6 +87,17 @@ export interface LaneActionInput {
   shipPlan: ShipPlan | null;
   /** Try it's feedback box has text. */
   hasFeedback: boolean;
+  /** The card's mockup, read in Mockup: Keep needs a named one, and pages in its folder. Missing reads as none. */
+  mockup?: MockupInfo | null;
+}
+
+/** Why Keep is greyed, first match winning, or null when it's enabled: the server's own refusals, said first. */
+function keepReason(input: LaneActionInput): string | null {
+  if (input.turnRunning || input.pending) return "Wait for the designer to finish";
+  const mockup = input.mockup ?? null;
+  if (!mockup?.current) return "Keep needs a mockup: the designer hasn't named one yet.";
+  if (mockup.current.kind === "pages" && mockup.files.length === 0) return "There's nothing to keep: the mockup's folder is empty.";
+  return null;
 }
 
 /** Why Sign off is greyed, or null when it is enabled. */
@@ -133,7 +148,12 @@ function rule(id: LaneActionId, input: LaneActionInput): Rule {
     case "start":
       return greyed(null);
     case "good":
+    case "skip-mockup":
       return greyed(input.turnRunning || input.pending ? "Wait for the product owner to finish" : null);
+    case "keep":
+      return greyed(keepReason(input));
+    case "dont-keep":
+      return greyed(input.turnRunning || input.pending ? "Wait for the designer to finish" : null);
     case "review":
       return greyed(reviewReason(input));
     case "signoff":

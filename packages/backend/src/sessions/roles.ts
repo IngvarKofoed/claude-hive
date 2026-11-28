@@ -50,11 +50,9 @@ export function listRoles(dir: string = ROLES_DIR): RoleEntry[] {
 
 /**
  * The roles ARCHITECTURE.md's Roles table names that have no file yet, listed greyed out on the Role prompts page.
- * Temporary, like `implemented: false` in LANES: the slice that writes a role's file removes its entry. A file of the
- * same name always wins.
+ * Temporary: the slice that writes a role's file removes its entry. A file of the same name always wins.
  */
 export const PLANNED_ROLES: readonly { name: string; lane: Lane | null }[] = [
-  { name: "designer", lane: "mockup" },
   { name: "tester", lane: "check" },
   { name: "manager", lane: null },
 ];

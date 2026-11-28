@@ -51,7 +51,37 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   r.post("/cards/:id/messages", route((req) => hive.sendMessage(param(req, "id"), body(req).text)));
   r.post("/cards/:id/stop", route((req) => hive.stop(param(req, "id"))));
   r.post("/cards/:id/retry", route((req) => hive.retry(param(req, "id"))));
-  r.post("/cards/:id/good", route((req) => hive.good(param(req, "id"))));
+  r.post("/cards/:id/good", route((req) => hive.good(param(req, "id"), body(req))));
+  r.post("/cards/:id/keep-mockup", route((req) => hive.keepMockup(param(req, "id"))));
+  // The card's mockup folder, served sandboxed (docs/specs/2026-11-28-mockup-lane-and-designer-role.md, Serving the
+  // pages). Not through route(): it would answer with JSON before sendFile has finished.
+  r.get("/cards/:id/mockup/*path", (req, res) => {
+    const notFound = () => {
+      if (!res.headersSent) res.status(404).json({ error: "No such file in the mockup." });
+    };
+    const segments = (req.params as Record<string, unknown>).path;
+    let target: { root: string; file: string };
+    try {
+      target = hive.mockupFile(param(req, "id"), Array.isArray(segments) ? segments.join("/") : String(segments ?? ""));
+    } catch {
+      return notFound();
+    }
+    res.sendFile(target.file, {
+      root: target.root,
+      dotfiles: "deny",
+      cacheControl: false,
+      headers: {
+        // The page's scripts run in an opaque origin and can't read the hive's API.
+        "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-modals",
+        // That origin makes the folder cross-origin to its own page: module scripts, fonts and fetch() need this.
+        "Access-Control-Allow-Origin": "*",
+        // A reload shows the designer's latest edit.
+        "Cache-Control": "no-store",
+      },
+    }, (error) => {
+      if (error) notFound();
+    });
+  });
   r.post("/cards/:id/review", route((req) => hive.review(param(req, "id"))));
   r.post("/cards/:id/signoff", route((req) => hive.signoff(param(req, "id"))));
   r.post("/cards/:id/back-to-spec", route((req) => hive.backToSpec(param(req, "id"))));

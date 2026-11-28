@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   LANE_ACTIONS, LANE_ACTION_LABEL, laneActions,
-  type ChatItem, type ErrorAction, type LaneActionId, type LaneActionInput, type LaneActionState, type ReviewState,
-  type ShipPlan,
+  type ChatItem, type ErrorAction, type LaneActionId, type LaneActionInput, type LaneActionState, type MockupInfo,
+  type ReviewState, type ShipPlan,
 } from "./index";
+
+/** A mockup the designer has named, with its pages in the folder. */
+const named: MockupInfo = {
+  folder: "docs/mockups/c1", current: { kind: "pages", page: "docs/mockups/c1/index.html" }, kept: null, files: ["index.html"],
+};
 
 const base: LaneActionInput = {
   lane: "refine",
@@ -44,8 +49,8 @@ describe("LANE_ACTIONS", () => {
   it("lists each lane's actions in the spec's order", () => {
     expect(LANE_ACTIONS).toEqual({
       ideas: ["start"],
-      refine: ["good", "retry", "stop"],
-      mockup: [],
+      refine: ["good", "skip-mockup", "retry", "stop"],
+      mockup: ["keep", "dont-keep", "retry", "stop"],
       spec: ["review", "signoff", "retry", "stop"],
       plan: ["retry", "back-to-spec", "stop"],
       build: ["retry", "back-to-spec", "stop"],
@@ -75,21 +80,45 @@ describe("laneActions", () => {
     expect(check.map((a) => a.label)).toEqual(["Retry", "Back to Build", "Move on", "Back to Spec", "Stop"]);
 
     const primary = (input: Partial<LaneActionInput>) => actions(input).filter((a) => a.primary).map((a) => a.label);
-    expect(primary({ lane: "refine" })).toEqual(["Good"]);
+    expect(primary({ lane: "refine" })).toEqual(["Good · on to Mockup"]);
+    expect(primary({ lane: "mockup", mockup: named })).toEqual(["Good · keep in docs/mockups"]);
     expect(primary({ lane: "spec" })).toEqual(["Sign off"]);
     expect(primary({ lane: "tryit" })).toEqual(["Send to Build"]);
     expect(primary({ lane: "ship" })).toEqual(["Land on main"]);
     expect(actions({ lane: "ideas" })).toEqual([
       { id: "start", label: "Start", primary: false, enabled: true, reason: null },
     ]);
-    expect(actions({ lane: "mockup" })).toEqual([]);
+    expect(actions({ lane: "refine" }).map((a) => a.label)).toEqual(["Good · on to Mockup", "Good · skip to Spec"]);
+    expect(actions({ lane: "mockup", mockup: named }).map((a) => a.label)).toEqual([
+      "Good · keep in docs/mockups", "Good · don't keep",
+    ]);
     expect(actions({ lane: "done" })).toEqual([]);
   });
 
-  it("greys Good while the product owner works or a question is open", () => {
-    expect(why("good", {})).toBe("enabled");
-    expect(why("good", { turnRunning: true })).toBe("Wait for the product owner to finish");
-    expect(why("good", { pending: true })).toBe("Wait for the product owner to finish");
+  it("greys both of Refine's Goods while the product owner works or a question is open", () => {
+    for (const id of ["good", "skip-mockup"] as const) {
+      expect(why(id, {})).toBe("enabled");
+      expect(why(id, { turnRunning: true })).toBe("Wait for the product owner to finish");
+      expect(why(id, { pending: true })).toBe("Wait for the product owner to finish");
+    }
+  });
+
+  it("greys Keep as the server refuses it: while the designer works, before a mockup is named, and with no pages", () => {
+    const mockup = (over: Partial<MockupInfo>): Partial<LaneActionInput> => ({ lane: "mockup", mockup: { ...named, ...over } });
+    expect(why("keep", mockup({}))).toBe("enabled");
+    expect(why("keep", { ...mockup({}), turnRunning: true })).toBe("Wait for the designer to finish");
+    expect(why("keep", { ...mockup({}), pending: true })).toBe("Wait for the designer to finish");
+    expect(why("keep", mockup({ current: null }))).toBe("Keep needs a mockup: the designer hasn't named one yet.");
+    expect(why("keep", { lane: "mockup" })).toBe("Keep needs a mockup: the designer hasn't named one yet.");
+    expect(why("keep", mockup({ files: [] }))).toBe("There's nothing to keep: the mockup's folder is empty.");
+    // A link needs no files: Keep writes its README.
+    expect(why("keep", mockup({ current: { kind: "link", url: "https://claude.ai/design/p/1" }, files: [] }))).toBe("enabled");
+  });
+
+  it("greys Don't keep only while the designer works or a question is open", () => {
+    expect(why("dont-keep", { lane: "mockup" })).toBe("enabled");
+    expect(why("dont-keep", { lane: "mockup", turnRunning: true })).toBe("Wait for the designer to finish");
+    expect(why("dont-keep", { lane: "mockup", pending: true })).toBe("Wait for the designer to finish");
   });
 
   it("greys Review with the first matching reason", () => {
@@ -136,7 +165,7 @@ describe("laneActions", () => {
     expect(actions({ lane: "build", lastChat: error(["retry", "back-to-spec"]) }).map((a) => a.id)).toEqual(["retry", "back-to-spec"]);
     expect(actions({ lane: "build", lastChat: error(["retry"]) }).map((a) => a.id)).toEqual(["retry"]);
     // Refine doesn't list Back to Spec, so a line that carries it offers nothing.
-    expect(actions({ lane: "refine", lastChat: error(["back-to-spec"]) }).map((a) => a.id)).toEqual(["good"]);
+    expect(actions({ lane: "refine", lastChat: error(["back-to-spec"]) }).map((a) => a.id)).toEqual(["good", "skip-mockup"]);
     expect(actions({ lane: "plan", lastChat: error(["move-on"]) })).toEqual([]);
   });
 

@@ -45,6 +45,8 @@ export interface HiveTools {
   writeBrief?(brief: Brief): Promise<string>;
   /** Copy git-ignored paths from the checkout into the card's worktree, under the hive's guards. */
   copyLocalFiles?(paths: string[]): Promise<string>;
+  /** Name the card's current mockup: a page in its folder, or an https link. Returns the text handed back. */
+  setMockup?(input: { page?: string; link?: string }): Promise<string>;
 }
 
 export interface TurnRequest {

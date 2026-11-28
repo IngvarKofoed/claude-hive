@@ -14,6 +14,8 @@ import type {
   NewCardBody,
   UpdateIdeaBody,
   DeleteResult,
+  GoodBody,
+  MockupInfo,
 } from "@hive/shared";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -36,6 +38,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+/** The URL the hive serves a mockup file at. `path` is relative to the mockup's folder, as the entries of `files` are. */
+export function mockupHref(cardId: string, path: string): string {
+  return `/api/cards/${encodeURIComponent(cardId)}/mockup/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** The same for a `MockupRef` page, which is relative to the worktree: the folder prefix is cut off first. */
+export function mockupPageHref(cardId: string, mockup: Pick<MockupInfo, "folder">, page: string): string {
+  const prefix = `${mockup.folder}/`;
+  return mockupHref(cardId, page.startsWith(prefix) ? page.slice(prefix.length) : page);
+}
+
 export const api = {
   board: () => request<BoardResponse>("GET", "/board"),
   forYou: () => request<ForYouResponse>("GET", "/for-you"),
@@ -54,7 +67,10 @@ export const api = {
   stop: (id: string) => request<unknown>("POST", `/cards/${encodeURIComponent(id)}/stop`),
   retry: (id: string) => request<unknown>("POST", `/cards/${encodeURIComponent(id)}/retry`),
   // Refine → Spec, Spec → Plan (refused unless the review is fresh), a blocked plan → Spec.
-  good: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/good`),
+  // Refine: { skipMockup }; Mockup: { keep }.
+  good: (id: string, body: GoodBody) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/good`, body),
+  // Spec: commit the mockup folder after all.
+  keepMockup: (id: string) => request<unknown>("POST", `/cards/${encodeURIComponent(id)}/keep-mockup`),
   review: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/review`),
   signoff: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/signoff`),
   backToSpec: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-spec`),

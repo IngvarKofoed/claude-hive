@@ -20,6 +20,7 @@ const detail: CardDetail = {
   branch: "hive/x",
   worktreePath: "/r/.claude/worktrees/x",
   brief: null,
+  mockup: null,
   spec: null,
   specPath: null,
   plan: null,
@@ -45,6 +46,18 @@ const detail: CardDetail = {
 const start: CardLive = { detail, streaming: "", activity: null };
 
 describe("applyCardEvent", () => {
+  it("applies mockup.updated to the card's mockup, and ignores other cards", () => {
+    const mockup = {
+      folder: "docs/mockups/x",
+      current: { kind: "pages" as const, page: "docs/mockups/x/index.html" },
+      kept: null,
+      files: ["index.html"],
+    };
+    const s = applyCardEvent(start, { type: "mockup.updated", cardId: "c1", mockup });
+    expect(s.detail.mockup).toEqual(mockup);
+    expect(applyCardEvent(start, { type: "mockup.updated", cardId: "other", mockup })).toBe(start);
+  });
+
   it("applies setup.updated to the card's setup and port, and ignores other cards", () => {
     const setup = {
       status: "done" as const,

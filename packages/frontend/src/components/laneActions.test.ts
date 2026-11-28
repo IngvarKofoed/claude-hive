@@ -16,6 +16,7 @@ const detail: CardDetail = {
   branch: "hive/x",
   worktreePath: "/r/.claude/worktrees/x",
   brief: null,
+  mockup: null,
   spec: null,
   specPath: null,
   plan: null,
@@ -126,8 +127,18 @@ describe("landActions", () => {
 });
 
 describe("LANE_ACTION_CALLS", () => {
+  it.each<[LaneActionCall, Parameters<typeof api.good>[1]]>([
+    ["good", { skipMockup: false }],
+    ["skip-mockup", { skipMockup: true }],
+    ["keep", { keep: true }],
+    ["dont-keep", { keep: false }],
+  ])("calls %s through api.good with its body", async (id, body) => {
+    const spy = vi.spyOn(api, "good").mockResolvedValue(undefined as never);
+    await LANE_ACTION_CALLS[id]("c1");
+    expect(spy).toHaveBeenCalledWith("c1", body);
+  });
+
   it.each<[LaneActionCall, keyof typeof api]>([
-    ["good", "good"],
     ["review", "review"],
     ["signoff", "signoff"],
     ["retry", "retry"],

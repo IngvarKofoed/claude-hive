@@ -102,7 +102,7 @@ describe("Build lane", () => {
     await po.request.hiveTools!.writeBrief!(brief);
     po.handlers.onSessionCreated();
     await po.end();
-    await hive.good(card.id);
+    await hive.good(card.id, { skipMockup: true });
     const writer = runner.last;
     const detail = hive.card(card.id);
     writeFileSync(join(detail.worktreePath!, detail.spec!.path), "# Printer font size\n\nThe spec.\n");

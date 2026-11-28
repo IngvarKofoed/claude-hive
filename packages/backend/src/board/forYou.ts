@@ -1,13 +1,13 @@
 // For you: which cards wait for you, and what each one wants (docs/specs/2026-11-27-for-you.md). Plain code from what
 // the card already stores; the one line is the hive's own sentence, never a reading of a session's prose.
-import { laneActions, laneImplemented } from "@hive/shared";
+import { laneActions } from "@hive/shared";
 import type {
   CardState, ChatItem, ForYouKind, Lane, LaneActionId, LaneActionInput, LaneActionState, PendingItem, ReviewState,
 } from "@hive/shared";
 
-/** A card waits for you when nothing runs on it, it's under way (Refine through Ship), and its lane is built. */
+/** A card waits for you when nothing runs on it and it's under way (Refine through Ship). */
 export function waitsForYou(card: { lane: Lane; state: CardState }): boolean {
-  return card.state === "needs-you" && card.lane !== "ideas" && card.lane !== "done" && laneImplemented(card.lane);
+  return card.state === "needs-you" && card.lane !== "ideas" && card.lane !== "done";
 }
 
 export interface WaitInput {
@@ -33,6 +33,8 @@ export function whatItWants(input: WaitInput): { kind: ForYouKind; text: string 
   switch (lane) {
     case "refine":
       return { kind: "your-turn", text: "Reply to the product owner, or say Good." };
+    case "mockup":
+      return { kind: "your-turn", text: "Reply to the designer, or say Good." };
     case "spec":
       if (review === "fresh") return { kind: "sign-off", text: "Reviewed. Sign off, or reply to the spec writer." };
       if (review === "stale") {
@@ -50,7 +52,7 @@ export function whatItWants(input: WaitInput): { kind: ForYouKind; text: string 
 
 /** The lane actions an entry offers outside Ship: those you press without the card page's forms or its Ship plan. */
 const ENTRY_ACTIONS: ReadonlySet<LaneActionId> = new Set<LaneActionId>([
-  "good", "review", "signoff", "retry", "back-to-spec", "back-to-build", "move-on",
+  "good", "skip-mockup", "keep", "dont-keep", "review", "signoff", "retry", "back-to-spec", "back-to-build", "move-on",
 ]);
 
 /**

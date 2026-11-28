@@ -29,7 +29,6 @@ describe("CardTile", () => {
   it("shows no badge for a landed card", () => {
     render(<CardTile card={{ ...base, lane: "done" }} />);
     expect(screen.queryByText("● needs you")).toBeNull();
-    expect(screen.queryByText("Not implemented yet")).toBeNull();
   });
 
     it("shows ▶ working", () => {
@@ -61,10 +60,9 @@ describe("CardTile", () => {
     expect(screen.getByText("▶ working")).toBeInTheDocument();
   });
 
-  it("shows Not implemented yet instead of a badge in a lane that isn't built", () => {
+  it("shows a Mockup card's state badge", () => {
     render(<CardTile card={{ ...base, lane: "mockup", state: "working" }} />);
-    expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
-    expect(screen.queryByText("▶ working")).not.toBeInTheDocument();
+    expect(screen.getByText("▶ working")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Seed price history" })).toBeInTheDocument();
   });
 
@@ -169,12 +167,11 @@ describe("CardTile, compact", () => {
     expect(screen.queryByText("● needs you")).toBeNull();
   });
 
-  it("shows ▶ for working, and keeps the words of a lane that isn't built", () => {
+  it("shows ▶ for working, and a Mockup card's state like any other lane's", () => {
     const { rerender } = render(<CardTile compact card={{ ...base, lane: "refine", state: "working" }} />);
     expect(screen.getByRole("img", { name: "working" })).toHaveTextContent("▶");
     rerender(<CardTile compact card={{ ...base, lane: "mockup" }} />);
-    expect(screen.getByText("Not implemented yet")).toBeInTheDocument();
-    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("img", { name: "needs you" })).toHaveTextContent("●");
   });
 
   it("carries the full title as its title and keeps it as the button's name", () => {

@@ -132,16 +132,16 @@ describe("ForYou page", () => {
   it("presses an action: disables the entry's buttons while it runs, reloads, and drops the entry", async () => {
     const spec = base("s", "your-turn", "refine", "Say Good");
     spec.actions = [
-      { id: "good", label: "Good", primary: true, enabled: true, reason: null },
+      { id: "good", label: "Good · on to Mockup", primary: true, enabled: true, reason: null },
       { id: "back-to-spec", label: "Back to Spec", primary: false, enabled: true, reason: null },
     ];
     const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [spec] });
     let finish!: () => void;
     const good = vi.spyOn(api, "good").mockImplementation(() => new Promise((r) => (finish = () => r({} as never))));
     show();
-    fireEvent.click(await screen.findByRole("button", { name: "Good" }));
-    expect(good).toHaveBeenCalledWith("s");
-    expect((screen.getByRole("button", { name: "Good" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Good · on to Mockup" }));
+    expect(good).toHaveBeenCalledWith("s", { skipMockup: false });
+    expect((screen.getByRole("button", { name: "Good · on to Mockup" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Back to Spec" }) as HTMLButtonElement).disabled).toBe(true);
     forYou.mockResolvedValue({ items: [] });
     finish();

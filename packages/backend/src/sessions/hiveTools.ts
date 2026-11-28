@@ -16,6 +16,13 @@ export const copyShape = {
   paths: z.array(z.string()).describe("Paths relative to the checkout, as the list gave them; a folder ends with /"),
 };
 
+export const mockupShape = {
+  page: z.string().optional().describe(
+    "The HTML page to open first, relative to your working folder, inside the card's mockup folder: " +
+      "docs/mockups/<card>/index.html"),
+  link: z.string().optional().describe("An https link to a mockup made elsewhere, such as a Claude Design link"),
+};
+
 export const HIVE_TOOLS = {
   write_brief: {
     description: "Replace the card's brief with this one. Send every section each time; lists may be empty.",
@@ -26,6 +33,13 @@ export const HIVE_TOOLS = {
       "Copy git-ignored files or folders from the person's checkout into this worktree. Existing files are kept; " +
       "folders are copied file by file. Returns one line per path: copied, kept, or refused with the reason.",
     shape: copyShape,
+  },
+  set_mockup: {
+    description:
+      "Name the card's current mockup, which the card page links to. Set exactly one of page and link. A page is a " +
+      ".html file relative to your working folder, inside the card's mockup folder; a link is an https URL. Each " +
+      "call replaces the current mockup. Call it again whenever the page to open changes.",
+    shape: mockupShape,
   },
 } as const;
 

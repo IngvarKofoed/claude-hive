@@ -57,9 +57,17 @@ describe("the spec keeper's routing (docs/specs/2026-11-28-spec-keeper.md)", () 
 });
 
 describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
-  it("Refine → Spec on Good, skipping Mockup", () => {
-    expect(laneAfter("refine", "good")).toBe("spec");
+  it("Refine → Mockup on Good, and Mockup → Spec on Good", () => {
+    expect(laneAfter("refine", "good")).toBe("mockup");
+    expect(laneAfter("mockup", "good")).toBe("spec");
     expect(laneAfter("spec", "good")).toBeNull();
+    expect(laneAfter("ideas", "good")).toBeNull();
+  });
+
+  it("Refine → Spec on Good · skip to Spec, and nowhere else", () => {
+    expect(laneAfter("refine", "skip-mockup")).toBe("spec");
+    expect(laneAfter("mockup", "skip-mockup")).toBeNull();
+    expect(laneAfter("spec", "skip-mockup")).toBeNull();
   });
 
   it("Spec → Plan on Sign off", () => {

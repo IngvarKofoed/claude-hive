@@ -119,7 +119,7 @@ describe("worktree setup and Try it", () => {
     await s.po.request.hiveTools!.writeBrief!(brief);
     s.po.handlers.onSessionCreated();
     await s.po.end();
-    await hive.good(s.id);
+    await hive.good(s.id, { skipMockup: true });
     const writer = runner.last;
     writeFileSync(join(s.worktree, hive.card(s.id).spec!.path), "# Printer font size\n\n## Outcome\n\n- It works.\n");
     writer.handlers.onSessionCreated();
