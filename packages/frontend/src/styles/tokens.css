@@ -70,6 +70,7 @@
   --lane-width: 210px;
   --board-panel-min-width: 400px;
   --popover-width: 420px;
+  --card-title-min-width: 320px;
 
   /* The lane strip on a By project card: lanes passed, the card's own lane, lanes still to come */
   --color-lane-past: #6b6a63;

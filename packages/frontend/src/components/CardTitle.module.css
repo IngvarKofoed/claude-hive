@@ -1,0 +1,82 @@
+.wrap {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+/* The title is the button, so it must look like the heading. The global focus ring stays. */
+.button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: copy;
+}
+
+/* The outer layer is transparent and carries the gap, so the pointer can cross it onto the card. */
+.box {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  padding-top: var(--space-3);
+  max-width: var(--popover-width);
+  width: max-content;
+  visibility: hidden;
+  transition: visibility 0s;
+}
+
+/* The pointer gets a short pause, so the box doesn't flash while it crosses the title. */
+.wrap:hover .box {
+  visibility: visible;
+  transition-delay: 0.3s;
+}
+
+/* Keyboard focus, and a copy's result, show it at once. Same specificity as the hover rule, and later, so it wins. */
+.wrap:has(:focus-visible) .box,
+.wrap .box[data-copied] {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-tile);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.card p {
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.path {
+  word-break: break-all;
+}
+
+.status {
+  color: var(--color-text-muted);
+}

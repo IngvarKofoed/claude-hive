@@ -369,6 +369,56 @@ describe("looking back at a finished lane", () => {
   });
 });
 
+describe("the card page's top band", () => {
+  const kept = { ...specCard, branch: "hive/bigger-font-1", worktreePath: "/repo/.claude/worktrees/bigger-font-1" };
+
+  it("has no breadcrumb, and keeps the branch and path inside the title's hover card", () => {
+    page(kept, "/cards/c1");
+    expect(screen.queryByRole("link", { name: "Board" })).toBeNull();
+    expect(screen.queryByText(/›/)).toBeNull();
+    const tooltip = screen.getByRole("tooltip");
+    expect(within(tooltip).getByText("hive/bigger-font-1")).toBeInTheDocument();
+    expect(within(tooltip).getByText("/repo/.claude/worktrees/bigger-font-1")).toBeInTheDocument();
+    expect(screen.getAllByText("hive/bigger-font-1")).toHaveLength(1);
+    expect(screen.getAllByText("/repo/.claude/worktrees/bigger-font-1")).toHaveLength(1);
+  });
+
+  it("puts the lane strip and Delete card in one group beside the title's, inside one band", () => {
+    page(kept, "/cards/c1");
+    const strip = screen.getByRole("list", { name: "Lanes" });
+    const del = screen.getByRole("button", { name: "Delete card" });
+    const endGroup = strip.parentElement!;
+    expect(del.parentElement).toBe(endGroup);
+    const titleGroup = screen.getByRole("heading", { level: 1, name: "T" }).closest("div")!.parentElement!;
+    expect(titleGroup).toContainElement(screen.getByText("● needs you"));
+    expect(titleGroup).not.toBe(endGroup);
+    expect(titleGroup.parentElement).toBe(endGroup.parentElement);
+  });
+
+  it("leaves the title plain on an idea and on a landed card", () => {
+    page({ ...specCard, lane: "ideas", pastChats: {} }, "/cards/c1");
+    expect(screen.getByRole("heading", { level: 1, name: "T" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "T" })).toBeNull();
+    expect(screen.queryByText("Click to copy the path")).toBeNull();
+  });
+
+  it("leaves the title plain on a landed card too", () => {
+    page(done({}), "/cards/c1");
+    expect(screen.queryByRole("button", { name: "T" })).toBeNull();
+    expect(screen.queryByText("Click to copy the path")).toBeNull();
+    expect(screen.queryByText("● needs you")).toBeNull();
+  });
+
+  it("opens the delete confirm in the strip's group, after the strip", () => {
+    page(kept, "/cards/c1");
+    const endGroup = screen.getByRole("list", { name: "Lanes" }).parentElement!;
+    fireEvent.click(screen.getByRole("button", { name: "Delete card" }));
+    const confirm = screen.getByRole("group", { name: "Delete this card" });
+    expect(confirm.parentElement).toBe(endGroup);
+    expect(endGroup.lastElementChild).toBe(confirm);
+  });
+});
+
 describe("the card page's chat panels", () => {
   it("frames the chat in a chat lane, with Good in Send's row in Refine", () => {
     show({ lane: "refine" });

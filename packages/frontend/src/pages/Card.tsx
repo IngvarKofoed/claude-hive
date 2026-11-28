@@ -7,6 +7,7 @@ import { BuildRoundView } from "../components/BuildRoundView";
 import { Rounds, roundNumber } from "../components/Rounds";
 import { CheckView } from "../components/CheckView";
 import { ChecklistView } from "../components/ChecklistView";
+import { CardTitle } from "../components/CardTitle";
 import { DeleteCard } from "../components/DeleteCard";
 import { Chat, PastChat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
@@ -22,7 +23,6 @@ import { SpecView } from "../components/SpecView";
 import { useCardLive } from "../components/useCardLive";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
-import { Chip } from "../components/ui/Chip";
 import { Panel } from "../components/ui/Panel";
 import type { CardLive } from "../components/cardState";
 import styles from "./Card.module.css";
@@ -420,26 +420,24 @@ export function Card() {
         {live ? (
           <>
             <div className={styles.top}>
-              <p className={styles.crumbs}>
-                <Link to="/">Board</Link> › {live.detail.projectName}
-              </p>
-              <div className={styles.titleRow}>
-                <h1 className={styles.title}>{live.detail.title}</h1>
+              <div className={styles.titleGroup}>
+                <CardTitle
+                  title={live.detail.title}
+                  projectName={live.detail.projectName}
+                  branch={live.detail.branch}
+                  worktreePath={live.detail.worktreePath}
+                />
                 {/* An idea waits for Start, and a landed card needs nothing from you: no badge, as on the board. */}
                 {live.detail.lane === "ideas" || live.detail.lane === "done" ? null : live.detail.state === "working" ? (
                   <Badge tone="working">▶ working</Badge>
                 ) : (
                   <Badge tone="needs-you">● needs you</Badge>
                 )}
+              </div>
+              <div className={styles.endGroup}>
+                <LaneSteps current={live.detail.lane} viewing={viewing} navigable />
                 <DeleteCard detail={live.detail} gone={gone} />
               </div>
-              {live.detail.branch || live.detail.worktreePath ? (
-                <p className={styles.where}>
-                  {live.detail.branch ? <Chip mono>{live.detail.branch}</Chip> : null}{" "}
-                  {live.detail.worktreePath ? <Chip mono>{live.detail.worktreePath}</Chip> : null}
-                </p>
-              ) : null}
-              <LaneSteps current={live.detail.lane} viewing={viewing} navigable />
             </div>
             {viewing ? (
               <>
