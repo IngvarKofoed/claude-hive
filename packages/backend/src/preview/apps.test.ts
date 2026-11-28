@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { processApps, runToEnd, type AppEntry, type AppRunner } from "./apps";
+import { openableUrl, processApps, runToEnd, type AppEntry, type AppRunner } from "./apps";
 import { waitFor } from "../testing";
 
 const listening = (port: number) =>
@@ -17,6 +17,17 @@ const server = (port: number, extra = ""): AppEntry => ({
   dir: "app",
   port,
   url: `http://127.0.0.1:${port}`,
+});
+
+describe("openableUrl", () => {
+  it("turns 127.0.0.1 and [::1] into localhost, keeping the port and path, and leaves anything else alone", () => {
+    expect(openableUrl("http://127.0.0.1:5231/")).toBe("http://localhost:5231/");
+    expect(openableUrl("http://[::1]:5230/api/health?x=1")).toBe("http://localhost:5230/api/health?x=1");
+    expect(openableUrl("http://localhost:5200")).toBe("http://localhost:5200");
+    expect(openableUrl("https://app.test:5201/")).toBe("https://app.test:5201/");
+    expect(openableUrl("not a url")).toBe("not a url");
+    expect(openableUrl(null)).toBeNull();
+  });
 });
 
 describe("the app runner", () => {

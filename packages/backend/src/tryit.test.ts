@@ -544,6 +544,26 @@ describe("worktree setup and Try it", () => {
       expect(apps.started[1]!.entries[0]).toMatchObject({ command: "npm run dev -- --port 5203", port: 5203 });
     });
 
+    it("links a loopback address as localhost, for a stored setup and a new one", async () => {
+      const { id } = await inTryIt();
+      await waitFor(() => apps.started.length === 1);
+      db.updateCard(id, {
+        setup: { ...hive.card(id).setup!, start: [{ what: "the app", command: "x", dir: ".", port: 5201, url: "http://127.0.0.1:5201/" }] },
+      });
+      await hive.appRestart(id);
+      expect(hive.card(id).apps[0]!.url).toBe("http://localhost:5201/");
+
+      hive.setupAgain(id);
+      await waitFor(() => runner.setupTurns.length === 2);
+      await lastSetup().end({
+        kind: "ok",
+        report: { ...setupDone, start: [{ what: "the app", command: "y", dir: ".", port: 5203, url: "http://[::1]:5203/app" }] },
+      });
+      await waitFor(() => apps.started.length === 3);
+      expect(hive.card(id).setup!.start[0]!.url).toBe("http://localhost:5203/app");
+      expect(apps.started[2]!.entries[0]!.url).toBe("http://localhost:5203/app");
+    });
+
     it("refuses Start, Stop and Restart outside Try it, and Start without a finished setup", async () => {
       const { id } = await inTryIt();
       db.updateCard(id, { setup: { ...hive.card(id).setup!, status: "failed", reason: "x" } });

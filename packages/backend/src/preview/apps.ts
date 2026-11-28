@@ -31,6 +31,23 @@ export interface AppRunner {
   killAll(): void;
 }
 
+/**
+ * A setup's link as the hive shows and passes it on: `127.0.0.1` and `[::1]` become `localhost`, which browsers, curl
+ * and Node try over both IPv6 and IPv4. Vite's default host listens on `[::1]` alone, and setups tend to write
+ * `127.0.0.1`, so the link they report can be refused while the app runs.
+ */
+export function openableUrl(url: string | null): string | null {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "[::1]") return url;
+    parsed.hostname = "localhost";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 const OUTPUT_LINES = 200;
 
 /** Terminal colour and cursor codes, which a dev server prints even into a pipe, and which the page would show. */

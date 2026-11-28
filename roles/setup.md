@@ -24,7 +24,8 @@ You run without the person: nobody chats with you, and nobody answers questions.
   - Each `start` entry is a long-running server the hive runs with `sh -c` in its folder and keeps running for Try
     it. Give the folder relative to the worktree (`.` for the root) and the one port of the card's block it listens
     on. One entry per process: a backend and a frontend are two entries on two ports.
-  - Check each start command by starting it briefly, then stop everything you started. Leave nothing running.
+  - Check each start command by starting it briefly and opening its URL exactly as you report it, then stop
+    everything you started. Leave nothing running.
   - Use only the card's ports, so nothing clashes with the person's own copy of the app.
 - **Never** edit a tracked file, commit, push, or switch branches. Don't change anything in the checkout itself.
 - **Shared:** report anything the worktree still shares with the checkout and you couldn't separate: a server

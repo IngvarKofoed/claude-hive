@@ -32,7 +32,7 @@ import {
   REVIEW_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
 import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, SquashResult } from "./git";
-import { fakeApps, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
+import { fakeApps, openableUrl, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
 import { cardPorts, fakePorts, type PortService } from "./preview/ports";
 
 /** The git service's API (packages/backend/src/git). */
@@ -234,7 +234,7 @@ function runningText(card: CardRow): string | null {
   ];
   const s = card.setup;
   if (s?.status === "done") {
-    for (const c of s.start) lines.push(`- Start ${c.what}: \`${c.command}\`${c.url ? ` (${c.url})` : ""}`);
+    for (const c of s.start) lines.push(`- Start ${c.what}: \`${c.command}\`${c.url ? ` (${openableUrl(c.url)})` : ""}`);
     if (s.test) lines.push(`- Tests: ${s.test}`);
     if (s.shared.length) lines.push(`- Still shared with the person's checkout: ${s.shared.join("; ")}`);
   }
@@ -270,7 +270,7 @@ function appEntries(card: CardRow): AppEntry[] {
   return (card.setup?.start ?? []).map((s): AppEntry => {
     const dir = s.dir ?? ".";
     const port = s.port ?? portFromUrl(s.url);
-    const entry: AppEntry = { what: s.what, command: s.command, dir, port, url: s.url };
+    const entry: AppEntry = { what: s.what, command: s.command, dir, port, url: openableUrl(s.url) };
     const folder = resolve(worktree, dir);
     if (port === null) return { ...entry, refused: "It has no port. Prepare it again." };
     if (card.port === null || port < card.port || port >= card.port + CARD_PORTS) {
@@ -1343,7 +1343,7 @@ export class Hive {
     const report = parseSetupReport(outcome.report);
     if (!report) return this.endSetup(cardId, { reason: "It didn't return a report." });
     if (report.status === "blocked") return this.endSetup(cardId, { reason: sentence(report.reason) });
-    this.endSetup(cardId, { done: report });
+    this.endSetup(cardId, { done: { ...report, start: report.start.map((s) => ({ ...s, url: openableUrl(s.url) })) } });
   }
 
   /** A setup ends done or failed: stored, noted in the card's current lane, and Build goes on if it was waiting. */
