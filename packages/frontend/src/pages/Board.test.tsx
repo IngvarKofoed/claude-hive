@@ -106,6 +106,15 @@ describe("Board", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This card is already moving.");
   });
 
+  it("shows each By lane header as the lane's name and who works in it, and nothing else", async () => {
+    await renderBoard();
+    const headRow = screen.getByText("Projects").parentElement!;
+    const laneCells = Array.from(headRow.children).slice(1);
+    expect(laneCells.map((cell) => ({ text: cell.textContent, spans: cell.children.length }))).toEqual(
+      LANES.map((lane) => ({ text: lane.name + lane.who, spans: lane.who ? 2 : 1 })),
+    );
+  });
+
   it("has bands that cover every lane once, in order", () => {
     expect(PHASE_BANDS.flatMap((band) => band.lanes)).toEqual(LANES.map((lane) => lane.id));
   });

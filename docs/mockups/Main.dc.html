@@ -71,7 +71,6 @@ a{color:#1849A9}a:hover{color:#0E3378}
 <div style="padding: 4px 8px; display: flex; flex-direction: column; gap: 2px">
 <span style="font-size: 13px; font-weight: 700">{{ lane.name }}</span>
 <span style="font-size: 11px; color: #5F5E57">{{ lane.who }}</span>
-<span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6B6A63">{{ lane.limit }}</span>
 </div>
 </sc-for>
 </div>
@@ -142,16 +141,16 @@ class Component extends DCLogic {
     const handsOff = [false, false, false, false, true, true, true, false, true];
     const cells = (cols) => cols.map((cards, i) => ({ cards: cards, bg: handsOff[i] ? '#F7F7F4' : '#FFFFFF' }));
     const lanes = [
-      { name: 'Ideas', who: 'you', limit: 'no limit' },
-      { name: 'Refine', who: 'you ⇄ product owner', limit: 'limit 3' },
-      { name: 'Mockup', who: 'you ⇄ designer', limit: 'limit 2' },
-      { name: 'Spec', who: 'spec writer, then you', limit: 'limit 2' },
-      { name: 'Plan', who: 'planner', limit: 'limit 2' },
-      { name: 'Build', who: 'developer', limit: 'limit 3' },
-      { name: 'Check', who: 'reviewer + tester', limit: 'limit 3' },
-      { name: 'Try it', who: 'you', limit: 'limit 2' },
-      { name: 'Ship', who: 'the hive', limit: 'limit 1' },
-      { name: 'Done', who: '', limit: '' }
+      { name: 'Ideas', who: 'you' },
+      { name: 'Refine', who: 'you ⇄ product owner' },
+      { name: 'Mockup', who: 'you ⇄ designer' },
+      { name: 'Spec', who: 'spec writer, then you' },
+      { name: 'Plan', who: 'planner' },
+      { name: 'Build', who: 'developer' },
+      { name: 'Check', who: 'reviewer + tester' },
+      { name: 'Try it', who: 'you' },
+      { name: 'Ship', who: 'the hive' },
+      { name: 'Done', who: '' }
     ];
     const projects = [
       {

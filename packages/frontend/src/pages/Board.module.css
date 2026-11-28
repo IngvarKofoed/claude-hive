@@ -150,8 +150,7 @@
   color: var(--color-text);
 }
 
-.who,
-.limit {
+.who {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-regular);

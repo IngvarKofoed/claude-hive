@@ -13,12 +13,11 @@ Claude Hive is a kanban board for Claude Code work, in one web page on your mach
 Claude's work is cheap and runs in parallel. Your attention is the scarce thing. So the hive puts your attention where it matters most, shaping the idea and trying the result, and runs everything in between without you.
 
 - **The board is the coordinator.** Each lane has a role and plain rules for when a card moves on. No Claude session sits in the middle passing messages between roles.
-- **Work-in-progress limits pace the hive to you.** If Try it is full, nothing new gets built. Meanwhile the lanes before the build (Refine, Mockup, Spec) keep cards ready for when you have time.
 - **The card carries everything.** Each role reads the card, does its work and writes back. Nothing important lives only inside one session.
 
 ## The Board
 
-Lanes are the columns, and projects are the rows (swimlanes). The page can also show the board by project, with the lane written on each card (see The Page). Each lane has a limit on how many cards it may hold.
+Lanes are the columns, and projects are the rows (swimlanes). The page can also show the board by project, with the lane written on each card (see The Page).
 
 | Lane | Who | What happens | Moves on when |
 | --- | --- | --- | --- |
@@ -178,7 +177,6 @@ It works down a ladder:
 - **Ideas have no worktree.** Entering Refine creates one at `<repo>/.claude/worktrees/<card>`, on a branch `hive/<card>` taken from the latest main.
 - **Setup starts at once,** in the background while you chat. A setup session picks the local files the app needs from your checkout, such as `.env` files and local databases, and the hive copies them. It installs dependencies, and works out how to start the app and its tests on the card's own ports.
 - **Refine reads the code from this clean copy,** never from your own checkout.
-- **The number of worktrees is bounded** by the lanes' work-in-progress limits.
 - **Mockup versions get worktrees of their own.** The designer builds them one after another. When you pick one, the others are deleted.
 - **Each card has its own ports,** so its app runs beside your own copy. When the card leaves Build, Check or Try it, whatever still listens on them from its worktree is stopped.
 - **Lanes commit checkpoints freely** on the card's branch. The card shows how far it is behind main, and Build starts by bringing in the latest main.
@@ -230,7 +228,7 @@ It also shows every judgment, manager action and "decided for you", the time spe
 One page, with several views:
 
 - **Board,** in two layouts, one click apart:
-  - **By lane:** lanes by projects. The lane headers show their work-in-progress limits.
+  - **By lane:** lanes by projects.
   - **By project:** a panel for each project, as many side by side as the screen fits, with no lane columns. Each card shows which lane it's in, and a project's cards stay in lane order, so a card only moves when it changes lane.
 
   In both, each card in progress shows a badge:

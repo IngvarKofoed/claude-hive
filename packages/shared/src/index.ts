@@ -22,8 +22,6 @@ export interface LaneInfo {
   name: string;
   /** Who works in the lane, as the board's lane header shows it. */
   who: string;
-  /** Work-in-progress limit shown in the header. Not enforced in this slice. */
-  limit: number | null;
   /** Lanes where you're in the conversation; the rest run hands off. */
   withYou: boolean;
   /**
@@ -35,16 +33,16 @@ export interface LaneInfo {
 
 /** The ten lanes, in board order (docs/CONCEPT.md, The Board). */
 export const LANES: readonly LaneInfo[] = [
-  { id: "ideas", name: "Ideas", who: "you", limit: null, withYou: true, implemented: true },
-  { id: "refine", name: "Refine", who: "you ⇄ product owner", limit: 3, withYou: true, implemented: true },
-  { id: "mockup", name: "Mockup", who: "you ⇄ designer", limit: 2, withYou: true, implemented: false },
-  { id: "spec", name: "Spec", who: "spec writer, then you", limit: 2, withYou: true, implemented: true },
-  { id: "plan", name: "Plan", who: "planner", limit: 2, withYou: false, implemented: true },
-  { id: "build", name: "Build", who: "developer", limit: 2, withYou: false, implemented: true },
-  { id: "check", name: "Check", who: "reviewer, tester", limit: 2, withYou: false, implemented: true },
-  { id: "tryit", name: "Try it", who: "you", limit: 2, withYou: true, implemented: true },
-  { id: "ship", name: "Ship", who: "the hive", limit: 1, withYou: false, implemented: true },
-  { id: "done", name: "Done", who: "", limit: null, withYou: false, implemented: true },
+  { id: "ideas", name: "Ideas", who: "you", withYou: true, implemented: true },
+  { id: "refine", name: "Refine", who: "you ⇄ product owner", withYou: true, implemented: true },
+  { id: "mockup", name: "Mockup", who: "you ⇄ designer", withYou: true, implemented: false },
+  { id: "spec", name: "Spec", who: "spec writer, then you", withYou: true, implemented: true },
+  { id: "plan", name: "Plan", who: "planner", withYou: false, implemented: true },
+  { id: "build", name: "Build", who: "developer", withYou: false, implemented: true },
+  { id: "check", name: "Check", who: "reviewer, tester", withYou: false, implemented: true },
+  { id: "tryit", name: "Try it", who: "you", withYou: true, implemented: true },
+  { id: "ship", name: "Ship", who: "the hive", withYou: false, implemented: true },
+  { id: "done", name: "Done", who: "", withYou: false, implemented: true },
 ];
 
 /** Whether a lane's slice is built yet (temporary, see LaneInfo.implemented). */

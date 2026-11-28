@@ -20,8 +20,8 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 │                                                                                                         │
 │ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
 │ │ Board engine         │  │ Question router      │  │ Spec keeper          │  │ Review gate          │  │
-│ │ lanes, limits,       │  │ chat lanes → page,   │  │ spec writer session, │  │ blind review,        │  │
-│ │ moves, loop guard    │  │ else manager ladder  │  │ one turn per batch   │  │ spec hash            │  │
+│ │ lanes, moves,        │  │ chat lanes → page,   │  │ spec writer session, │  │ blind review,        │  │
+│ │ loop guard           │  │ else manager ladder  │  │ one turn per batch   │  │ spec hash            │  │
 │ └───────────┬──────────┘  └───┬──────────────────┘  └──────────────────────┘  └──────────────────────┘  │
 │             │                 │                                                                         │
 │             ├─────────────────┘                     every session goes through                          │
@@ -44,7 +44,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 
 | Part | What it does |
 | --- | --- |
-| **Board engine** | Lanes, work-in-progress limits, card moves, round limits and the loop guard. It reads each role's fixed-format report and decides the next lane. |
+| **Board engine** | Lanes, card moves, round limits and the loop guard. It reads each role's fixed-format report and decides the next lane. |
 | **Session runner** | Starts, resumes and stops sessions. Applies each role's instructions and model, and runs every session with full access in auto mode. Catches questions through `canUseTool`. |
 | **Question router** | Questions in the chat lanes go straight to the page. Questions in hands-off lanes go to the manager ladder. |
 | **Spec keeper** | Judges each batch of spec issues as a new turn in the spec writer's session, which carries on after sign-off. |
@@ -67,7 +67,7 @@ claude-hive/
 │   │   └── src/
 │   │       ├── server.ts      # Express app: REST, SSE, serves the built page
 │   │       ├── routes/
-│   │       ├── board/         # Lanes, limits, moves, round limits, loop guard
+│   │       ├── board/         # Lanes, moves, round limits, loop guard
 │   │       ├── sessions/      # Session runner, role loading, canUseTool
 │   │       ├── questions/     # Question router and manager ladder
 │   │       ├── spec/          # Spec keeper, review gate, spec-format loading
@@ -327,7 +327,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 | Table | Key fields |
 | --- | --- |
-| **Project** | name, path, trustWarning, laneLimits. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
+| **Project** | name, path, trustWarning. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
 | **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers, and its issue ids), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |

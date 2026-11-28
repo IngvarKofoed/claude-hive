@@ -221,7 +221,6 @@ export function Board() {
                   <div key={lane.id} className={styles.headCell} data-hands-off={!lane.withYou || undefined}>
                     <span className={styles.laneName}>{lane.name}</span>
                     {lane.who ? <span className={styles.who}>{lane.who}</span> : null}
-                    {lane.limit !== null ? <span className={styles.limit}>limit {lane.limit}</span> : null}
                   </div>
                 ))}
               </div>
