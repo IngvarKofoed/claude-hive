@@ -24,13 +24,18 @@ export function readSpec(worktree: string, specPath: string): SpecFile {
 export function reviewState(input: {
   hash: string | null;
   reviewedSpecHash: string | null;
+  /** An open amendment's text its spec writer vouched for when it skipped the review; null otherwise. */
+  skippedHash?: string | null;
   reviewApplying: boolean;
   reviewerRunning: boolean;
   writerRunning: boolean;
 }): ReviewState {
   if (input.reviewerRunning) return "running";
   if (input.reviewApplying) return input.writerRunning ? "applying" : "unfinished";
-  if (input.reviewedSpecHash) return input.hash === input.reviewedSpecHash ? "fresh" : "stale";
+  if (input.reviewedSpecHash && input.hash === input.reviewedSpecHash) return "fresh";
+  // docs/specs/2026-11-28-try-it-send-back.md: Sign off is open on the text a skipped review vouched for.
+  if (input.skippedHash && input.hash === input.skippedHash) return "skipped";
+  if (input.reviewedSpecHash) return "stale";
   return "none";
 }
 

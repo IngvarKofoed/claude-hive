@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { titleFromIdea } from "./titleFromIdea";
 import type {
   Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, IssueAnswer, IssueJudgment, IssueStatus,
-  Landed, MockupRef, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Landed, MockupRef, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SendBackPoint, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -71,6 +71,23 @@ CREATE TABLE IF NOT EXISTS issues (
   flips INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS amendments (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL REFERENCES cards(id),
+  n INTEGER NOT NULL,
+  words TEXT NOT NULL,
+  points TEXT NOT NULL,
+  base TEXT NOT NULL,
+  step TEXT NOT NULL,
+  taken_over INTEGER NOT NULL DEFAULT 0,
+  summary TEXT,
+  review INTEGER,
+  reason TEXT,
+  skipped_hash TEXT,
+  signed_off TEXT,
+  reviewed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS decisions (
   id TEXT PRIMARY KEY,
   card_id TEXT NOT NULL REFERENCES cards(id),
@@ -106,6 +123,8 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "keeper_rounds", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "block_judged", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "mockup", type: "TEXT" },
+  { table: "cards", column: "send_back", type: "TEXT" },
+  { table: "cards", column: "amendment", type: "TEXT" },
   { table: "issues", column: "status", type: "TEXT NOT NULL DEFAULT 'open'" },
   { table: "issues", column: "recommendation", type: "TEXT" },
   { table: "issues", column: "repeats", type: "TEXT" },
@@ -117,9 +136,40 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
  * (docs/specs/2026-11-28-spec-keeper.md, The batch). `answers` changes the spec after your answers; the others judge.
  */
 export interface KeeperJudging {
-  kind: "batch" | "as-built" | "blocking" | "answers";
+  /** `send-back` reads your Try it feedback and picks its lane (docs/specs/2026-11-28-try-it-send-back.md). */
+  kind: "batch" | "as-built" | "blocking" | "answers" | "send-back";
   /** The issues the turn is about. */
   issueIds: string[];
+}
+
+/**
+ * Where an amendment is on its trip (docs/specs/2026-11-28-try-it-send-back.md): `amending` while the spec writer's
+ * amendment turn runs or waits for Retry; `spec` once it has reported, while a review runs or you have taken over;
+ * `plan` once it's signed off; `build` once its plan is done and the developer hasn't had it; `after` once it has.
+ */
+export type AmendmentStep = "amending" | "spec" | "plan" | "build" | "after";
+
+/** A change to a signed-off spec from your Send back: one row per amendment, kept after it's closed for Try it's history. */
+export interface AmendmentRow {
+  id: string;
+  cardId: string;
+  n: number;
+  /** Your Try it words. */
+  words: string;
+  points: SendBackPoint[];
+  /** The branch's head when the amendment started: diffs of the spec "since the amendment started" are taken from it. */
+  base: string;
+  step: AmendmentStep;
+  /** You wrote in the Spec chat while it was open: from then on Sign off is yours. */
+  takenOver: boolean;
+  summary: string | null;
+  /** The spec writer's choice in its report; null until it reports. */
+  review: boolean | null;
+  reason: string | null;
+  /** The spec's hash when the spec writer reported `review: false`: Sign off is open while the file matches it. */
+  skippedHash: string | null;
+  signedOff: "auto" | "you" | null;
+  reviewed: boolean;
 }
 
 /** Issues going to the developer as code fixes, and the lane they come from; cleared on its next `done` report. */
@@ -207,6 +257,10 @@ export interface CardRow {
   blockJudged: boolean;
   /** The card's mockup, set when it enters Mockup; null for a card that never did. */
   mockup: MockupState | null;
+  /** Your Send back words while the keeper reads them, or after its pick failed; cleared when the card leaves Try it. */
+  sendBack: { text: string } | null;
+  /** The id of the amendment the card carries, from Send back until it next enters Try it. */
+  amendment: string | null;
   /**
    * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
    * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
@@ -306,7 +360,10 @@ export class HiveDb {
 
   /** A new card has no checklist (only a developer session gives it one) and no mockup (only Mockup does). */
   insertCard(
-    c: Omit<CardRow, "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged" | "mockup">,
+    c: Omit<
+      CardRow,
+      "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged" | "mockup" | "sendBack" | "amendment"
+    >,
   ): void {
     const at = now();
     this.db
@@ -336,7 +393,7 @@ export class HiveDb {
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
       landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check", checklist: "checklist",
       judging: "judging", keeperFixes: "keeper_fixes", keeperRounds: "keeper_rounds", blockJudged: "block_judged",
-      mockup: "mockup",
+      mockup: "mockup", sendBack: "send_back", amendment: "amendment",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -344,8 +401,8 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist", "judging", "keeperFixes", "mockup"]
-        .includes(key)) {
+      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist", "judging", "keeperFixes", "mockup",
+        "sendBack"].includes(key)) {
         values.push(value ? JSON.stringify(value) : null);
       }
       else if (["reviewApplying", "appStopped", "shipAfterCheck", "blockJudged"].includes(key)) values.push(value ? 1 : 0);
@@ -371,11 +428,52 @@ export class HiveDb {
    */
   deleteCard(id: string): void {
     this.transaction(() => {
-      for (const table of ["pending_items", "events", "issues", "decisions", "sessions"]) {
+      for (const table of ["pending_items", "events", "issues", "amendments", "decisions", "sessions"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE card_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM cards WHERE id = ?").run(id);
     });
+  }
+
+  // ---------- amendments (docs/specs/2026-11-28-try-it-send-back.md) ----------
+
+  /** A new amendment, numbered after the card's earlier ones. Returns it. */
+  insertAmendment(a: { id: string; cardId: string; words: string; points: SendBackPoint[]; base: string }): AmendmentRow {
+    const { n } = this.db.prepare("SELECT COUNT(*) + 1 AS n FROM amendments WHERE card_id = ?").get(a.cardId) as { n: number };
+    this.db
+      .prepare(
+        `INSERT INTO amendments (id, card_id, n, words, points, base, step, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'amending', ?)`,
+      )
+      .run(a.id, a.cardId, n, a.words, JSON.stringify(a.points), a.base, now());
+    return this.getAmendment(a.id)!;
+  }
+
+  getAmendment(id: string): AmendmentRow | undefined {
+    const r = this.db.prepare("SELECT * FROM amendments WHERE id = ?").get(id);
+    return r ? toAmendment(r) : undefined;
+  }
+
+  /** The card's amendments, oldest first. */
+  amendmentsFor(cardId: string): AmendmentRow[] {
+    return (this.db.prepare("SELECT * FROM amendments WHERE card_id = ? ORDER BY n").all(cardId) as any[]).map(toAmendment);
+  }
+
+  updateAmendment(
+    id: string,
+    patch: Partial<Pick<AmendmentRow, "step" | "takenOver" | "summary" | "review" | "reason" | "skippedHash" | "signedOff" | "reviewed">>,
+  ): void {
+    const cols: Record<string, string> = {
+      step: "step", takenOver: "taken_over", summary: "summary", review: "review", reason: "reason",
+      skippedHash: "skipped_hash", signedOff: "signed_off", reviewed: "reviewed",
+    };
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, value] of Object.entries(patch)) {
+      sets.push(`${cols[key]} = ?`);
+      values.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+    }
+    if (sets.length) this.db.prepare(`UPDATE amendments SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
   }
 
   // ---------- sessions ----------
@@ -594,7 +692,16 @@ function toCard(r: any): CardRow {
     checklist: r.checklist ? JSON.parse(r.checklist) : null,
     judging: r.judging ? JSON.parse(r.judging) : null, keeperFixes: r.keeper_fixes ? JSON.parse(r.keeper_fixes) : null,
     keeperRounds: r.keeper_rounds ?? 0, blockJudged: !!r.block_judged, mockup: r.mockup ? JSON.parse(r.mockup) : null,
+    sendBack: r.send_back ? JSON.parse(r.send_back) : null, amendment: r.amendment ?? null,
     waitingSince: r.waiting_since ?? r.created_at,
+  };
+}
+
+function toAmendment(r: any): AmendmentRow {
+  return {
+    id: r.id, cardId: r.card_id, n: r.n, words: r.words, points: JSON.parse(r.points), base: r.base, step: r.step,
+    takenOver: !!r.taken_over, summary: r.summary ?? null, review: r.review === null || r.review === undefined ? null : !!r.review,
+    reason: r.reason ?? null, skippedHash: r.skipped_hash ?? null, signedOff: r.signed_off ?? null, reviewed: !!r.reviewed,
   };
 }
 

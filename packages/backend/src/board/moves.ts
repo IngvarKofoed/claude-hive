@@ -1,6 +1,6 @@
 // Card moves are plain code (docs/ARCHITECTURE.md, Card Moves). Every lane the hive moves a card to is decided
 // here, from what you did or from the fields of a role's report, never by reading prose.
-import type { IssueLevel, IssueVerdict, Lane } from "@hive/shared";
+import type { IssueLevel, IssueVerdict, Lane, SendBackPoint } from "@hive/shared";
 
 /** Dragging a card on the board: only Ideas → Refine so far. */
 export function canMove(from: Lane, to: Lane): boolean {
@@ -25,17 +25,19 @@ export function laneAfter(from: Lane, action: CardAction): Lane | null {
       return from === "spec" ? "plan" : null;
     case "back-to-spec":
       // A blocked plan or build, or a severe issue the spec keeper stopped the card on in Check
-      // (docs/specs/2026-11-28-spec-keeper.md, After the batch)
-      return from === "plan" || from === "build" || from === "check" ? "spec" : null;
+      // (docs/specs/2026-11-28-spec-keeper.md, After the batch), or a Send back whose pick failed, from Try it
+      // (docs/specs/2026-11-28-try-it-send-back.md)
+      return from === "plan" || from === "build" || from === "check" || from === "tryit" ? "spec" : null;
     case "back-to-build":
-      // One more round for a card that Check stopped (docs/specs/2026-11-27-check-lane-reviewer.md), or a landing whose
-      // tests failed on the squash (docs/specs/2026-11-27-ship-lane.md)
-      return from === "check" || from === "ship" ? "build" : null;
+      // One more round for a card that Check stopped (docs/specs/2026-11-27-check-lane-reviewer.md), a landing whose
+      // tests failed on the squash (docs/specs/2026-11-27-ship-lane.md), or a Send back whose pick failed
+      return from === "check" || from === "ship" || from === "tryit" ? "build" : null;
     case "move-on":
       // Try it as built, for a card that Check stopped or couldn't review
       return from === "check" ? "tryit" : null;
     case "feedback":
-      // Your words from Try it go to the same developer (docs/specs/2026-11-27-worktree-setup-and-try-it.md)
+      // Send back: your words from Try it go to Build or Spec, as laneAfterSendBack picks (or you, after a failed
+      // pick). This only says Try it is where they're sent from (docs/specs/2026-11-28-try-it-send-back.md).
       return from === "tryit" ? "build" : null;
     case "accept":
       return from === "tryit" ? "ship" : null;
@@ -43,6 +45,15 @@ export function laneAfter(from: Lane, action: CardAction): Lane | null {
       // Out of Ship, until Ship is built
       return from === "ship" ? "tryit" : null;
   }
+}
+
+/**
+ * Where your Send back goes, from the spec keeper's reading of it: Spec if any point changes the spec, which makes an
+ * amendment; otherwise Build. Mixed feedback goes to the earliest lane, and its bugs travel with the amendment
+ * (docs/specs/2026-11-28-try-it-send-back.md, The keeper reads, code picks).
+ */
+export function laneAfterSendBack(points: readonly Pick<SendBackPoint, "kind">[]): "build" | "spec" {
+  return points.some((p) => p.kind === "spec") ? "spec" : "build";
 }
 
 /** Where the planner's report leaves the card: a done plan moves it to Build; anything else keeps it in Plan. */

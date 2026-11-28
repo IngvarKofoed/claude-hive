@@ -53,6 +53,8 @@ const detail: CardDetail = {
   turnRunning: true,
   landed: null,
   landing: false,
+  sendBack: null,
+  amendment: null,
 };
 
 const emit = (event: HiveEvent) => listeners.forEach((l) => l(event));

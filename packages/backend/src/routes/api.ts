@@ -87,12 +87,13 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
       if (error) notFound();
     });
   });
-  r.post("/cards/:id/review", route((req) => hive.review(param(req, "id"))));
+  r.post("/cards/:id/review", route((req) => hive.reviewFromPage(param(req, "id"))));
   r.post("/cards/:id/signoff", route((req) => hive.signoff(param(req, "id"))));
   r.post("/cards/:id/back-to-spec", route((req) => hive.backToSpec(param(req, "id"))));
   r.post("/cards/:id/back-to-build", route((req) => hive.backToBuild(param(req, "id"))));
   r.post("/cards/:id/move-on", route((req) => hive.moveOn(param(req, "id"))));
   r.post("/cards/:id/feedback", route((req) => hive.feedback(param(req, "id"), req.body ?? {})));
+  r.delete("/cards/:id/send-back", route((req) => hive.editSendBack(param(req, "id"))));
   r.post("/cards/:id/accept", route((req) => hive.accept(param(req, "id"))));
   r.post("/cards/:id/back-to-tryit", route((req) => hive.backToTryIt(param(req, "id"))));
   r.get("/cards/:id/ship", route((req) => hive.shipPlan(param(req, "id"))));

@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { HiveEvent } from "@hive/shared";
+import type { FeedbackBody, HiveEvent } from "@hive/shared";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
@@ -11,7 +11,7 @@ import { Hive } from "./hive";
 import { fakeApps } from "./preview/apps";
 import { fakePorts } from "./preview/ports";
 import type { Role } from "./sessions/types";
-import { SETUP_SCHEMA } from "./spec/reports";
+import { SEND_BACK_SCHEMA, SETUP_SCHEMA } from "./spec/reports";
 import { FakeProbe, FakeRunner, type FakeTurn, keeperReport, makeRepo, makeSpecFormat, waitFor, type TempRepo } from "./testing";
 
 const brief = {
@@ -384,10 +384,21 @@ describe("worktree setup and Try it", () => {
   });
 
   describe("Try it", () => {
-    it("sends your words to the same developer, clearing the build report and Check, after stopping the card's servers", async () => {
+    it("sends a bug to the same developer once the keeper reads it, clearing the build report and Check, after stopping the card's servers", async () => {
       const { id, developer } = await inTryIt();
       const stops = ports.stopped.length;
       await hive.feedback(id, { text: "It crashes with no printers." });
+      // Send back: the spec keeper reads your words first (docs/specs/2026-11-28-try-it-send-back.md).
+      const reader = lastOf("spec-writer");
+      expect(reader.request.outputFormat).toBe(SEND_BACK_SCHEMA);
+      expect(hive.card(id)).toMatchObject({ lane: "tryit", sendBack: { text: "It crashes with no printers." } });
+      await reader.end({
+        kind: "ok",
+        report: {
+          status: "done", blockedReason: null, reason: "A crash is a bug.",
+          points: [{ what: "It crashes with no printers", kind: "bug", why: "The spec already covers no printers." }],
+        },
+      });
       await waitFor(() => turnsOf("developer").length === 2);
       expect(ports.stopped.length).toBe(stops + 1);
       const card = hive.card(id);
@@ -410,7 +421,7 @@ describe("worktree setup and Try it", () => {
     it("refuses empty feedback, another lane, and a card outside Try it", async () => {
       const { id } = await inTryIt();
       await expect(hive.feedback(id, { text: "  " })).rejects.toMatchObject({ status: 400 });
-      await expect(hive.feedback(id, { text: "Wrong look.", lane: "mockup" })).rejects.toMatchObject({ status: 400 });
+      await expect(hive.feedback(id, { text: "Wrong look.", lane: "mockup" } as unknown as FeedbackBody)).rejects.toMatchObject({ status: 400 });
       await hive.accept(id);
       await expect(hive.feedback(id, { text: "Late bug." })).rejects.toMatchObject({ status: 409 });
     });
@@ -429,7 +440,7 @@ describe("worktree setup and Try it", () => {
 
     it("clears the feedback when the developer's build goes back to Spec", async () => {
       const { id } = await inTryIt();
-      await hive.feedback(id, { text: "It crashes with no printers." });
+      await hive.feedback(id, { text: "It crashes with no printers.", lane: "build" });
       await waitFor(() => turnsOf("developer").length === 2);
       await lastOf("developer").end({ kind: "ok", report: { ...built, status: "blocked", blockedReason: "Needs a printers table." } });
       await keeperFallsBack(id);

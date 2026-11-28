@@ -25,6 +25,7 @@ export function laneActionsFor(detail: CardDetail, extras: LaneActionExtras = {}
     shipPlan: extras.shipPlan ?? null,
     hasFeedback: extras.hasFeedback ?? false,
     mockup: detail.mockup,
+    sendBack: detail.sendBack !== null,
   });
 }
 
@@ -48,8 +49,8 @@ export function landActions(plan: ShipPlan): LaneActionState[] {
   }).filter((action) => action.id === "land" || action.id === "discard-and-land");
 }
 
-/** The actions you press without filling anything in. Start and Send to Build keep their forms. */
-export type LaneActionCall = Exclude<LaneActionId, "start" | "send-to-build">;
+/** The actions you press without filling anything in. Start and Send back keep their forms. */
+export type LaneActionCall = Exclude<LaneActionId, "start" | "send-back">;
 
 /** Each such action's api call, the same route on the card page and For you. Wrapped, so a test's spy on `api` holds. */
 export const LANE_ACTION_CALLS: Record<LaneActionCall, (cardId: string) => Promise<unknown>> = {

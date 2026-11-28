@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { api } from "../api/client";
 import { LANES, lanesBefore, type CardDetail, type Lane, type LaneActionId } from "@hive/shared";
+import { AmendmentBand, AmendmentView } from "../components/AmendmentView";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
 import { BuildRoundView } from "../components/BuildRoundView";
@@ -172,11 +173,20 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
     case "tryit": {
       if (history.tryit.length > 0) {
         const accepted = history.tryit[0]?.kind === "accepted";
-        const feedback = history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
-        const rounds = feedback.map((text, i) => ({
-          heading: `Feedback ${roundNumber(feedback.length, i)}`,
-          content: <p className={styles.feedbackText}>{text}</p>,
-        }));
+        const feedback = history.tryit.flatMap((round) => (round.kind === "accepted" ? [] : [round]));
+        const feedbackTotal = feedback.filter((round) => round.kind === "feedback").length;
+        let feedbackSeen = 0;
+        const rounds = feedback.map((round) =>
+          round.kind === "amendment"
+            ? {
+                heading: `Amendment ${round.amendment.n}`,
+                content: <AmendmentView amendment={round.amendment} heading={false} />,
+              }
+            : {
+                heading: `Feedback ${roundNumber(feedbackTotal, feedbackSeen++)}`,
+                content: <p className={styles.feedbackText}>{round.text}</p>,
+              },
+        );
         return (
           <Panel title="Feedback">
             <div className={styles.stack}>
@@ -296,6 +306,7 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
         <Panel title="Spec" className={styles.specPanel}>
           <div className={styles.specHead}>
             <KeepMockupLine detail={detail} />
+            <AmendmentBand amendment={detail.amendment} />
             <ReviewBar detail={detail} onMoved={onMoved} />
           </div>
           <div className={styles.specBody}>

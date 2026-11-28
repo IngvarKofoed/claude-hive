@@ -53,6 +53,8 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
     turnRunning: false,
     landed: null,
     landing: false,
+    sendBack: null,
+    amendment: null,
     ...over,
   };
 }
@@ -219,11 +221,11 @@ describe("TryItPanel guide", () => {
 });
 
 describe("TryItPanel your call", () => {
-  it("disables Send to Build while empty, sends the text, then clears it", async () => {
+  it("disables Send back while empty, sends the text, then clears it", async () => {
     const feedback = vi.spyOn(api, "feedback").mockResolvedValue({} as never);
     const onMoved = vi.fn();
     render(<TryItPanel detail={detail()} onMoved={onMoved} />);
-    const send = screen.getByRole("button", { name: "Send to Build" });
+    const send = screen.getByRole("button", { name: "Send back" });
     expect(send).toBeDisabled();
     const box = screen.getByRole("textbox");
     await userEvent.type(box, "It crashes");
@@ -238,7 +240,7 @@ describe("TryItPanel your call", () => {
     vi.spyOn(api, "feedback").mockRejectedValue(new Error("Nothing may run"));
     render(<TryItPanel detail={detail()} onMoved={() => {}} />);
     await userEvent.type(screen.getByRole("textbox"), "bug");
-    await userEvent.click(screen.getByRole("button", { name: "Send to Build" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send back" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Nothing may run");
     expect(screen.getByRole("textbox")).toHaveValue("bug");
   });
@@ -268,7 +270,7 @@ const question: PendingItem = {
   issueIds: ["i1"],
 };
 const accept = () => screen.getByRole("button", { name: "Accept" });
-const send = () => screen.getByRole("button", { name: "Send to Build" });
+const send = () => screen.getByRole("button", { name: "Send back" });
 
 describe("TryItPanel spec keeper", () => {
   it("shows the question at the top and disables both buttons while it waits", () => {
@@ -279,13 +281,13 @@ describe("TryItPanel spec keeper", () => {
     expect(screen.getByText("Answer the spec keeper's question first.")).toBeInTheDocument();
   });
 
-  it("holds Accept but opens Send to Build, with an empty box, for a held issue", async () => {
+  it("holds Accept but opens Send back, with an empty box, for a held issue", async () => {
     const feedback = vi.spyOn(api, "feedback").mockResolvedValue({} as never);
     const onMoved = vi.fn();
     render(<TryItPanel detail={detail({ issues: [issueWith("held")] })} onMoved={onMoved} />);
     expect(accept()).toBeDisabled();
     expect(send()).toBeEnabled();
-    expect(screen.getByText("Changes you asked for go to Build with Send to Build.")).toBeInTheDocument();
+    expect(screen.getByText("Changes you asked for go to Build with Send back.")).toBeInTheDocument();
     await userEvent.click(send());
     expect(feedback).toHaveBeenCalledWith("c1", "");
     await waitFor(() => expect(onMoved).toHaveBeenCalled());
@@ -297,7 +299,7 @@ describe("TryItPanel spec keeper", () => {
     expect(send()).toBeDisabled();
   });
 
-  it("needs words for Send to Build when nothing is held, and Accept is open", async () => {
+  it("needs words for Send back when nothing is held, and Accept is open", async () => {
     render(<TryItPanel detail={detail({ issues: [issueWith("kept")] })} onMoved={() => {}} />);
     expect(accept()).toBeEnabled();
     expect(send()).toBeDisabled();
@@ -312,5 +314,71 @@ describe("TryItPanel spec keeper", () => {
     expect(screen.getByText("The spec keeper's turn failed")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledWith("c1");
+  });
+});
+
+describe("TryItPanel send back", () => {
+  it("posts the words without a lane", async () => {
+    const feedback = vi.spyOn(api, "feedback").mockResolvedValue({} as never);
+    render(<TryItPanel detail={detail()} onMoved={() => {}} />);
+    await userEvent.type(screen.getByLabelText("What you found"), "Not per printer");
+    await userEvent.click(send());
+    expect(feedback).toHaveBeenCalledTimes(1);
+    expect(feedback.mock.calls[0]).toEqual(["c1", "Not per printer"]);
+  });
+
+  it("shows the words and a reading line instead of the box while the pick runs", () => {
+    render(<TryItPanel detail={detail({ turnRunning: true, sendBack: { text: "Not per printer" } })} onMoved={() => {}} />);
+    expect(screen.queryByLabelText("What you found")).toBeNull();
+    expect(screen.getByText("Not per printer")).toBeInTheDocument();
+    expect(screen.getByText("The spec keeper is reading your feedback…")).toBeInTheDocument();
+    expect(send()).toBeDisabled();
+  });
+
+  describe("after a failed pick", () => {
+    const failedPick = () =>
+      detail({
+        sendBack: { text: "Not per printer" },
+        chat: [
+          {
+            kind: "error",
+            id: "e1",
+            at: "t",
+            message: "The pick failed",
+            actions: ["retry", "back-to-build", "back-to-spec"],
+          },
+        ],
+      });
+
+    it("offers Retry, Back to Build, Back to Spec and Edit, and greys Accept with its reason", () => {
+      render(<TryItPanel detail={failedPick()} onMoved={() => {}} />);
+      for (const name of ["Retry", "Back to Build", "Back to Spec", "Edit"]) {
+        expect(screen.getByRole("button", { name })).toBeEnabled();
+      }
+      expect(accept()).toBeDisabled();
+      expect(screen.getByText("Send your feedback, or edit it away first.")).toBeInTheDocument();
+      // The words the two backs would send are on the line.
+      expect(screen.getByText("Not per printer")).toBeInTheDocument();
+    });
+
+    it("Back to Build and Back to Spec call the generic calls and report onMoved", async () => {
+      const toBuild = vi.spyOn(api, "backToBuild").mockResolvedValue({} as never);
+      const toSpec = vi.spyOn(api, "backToSpec").mockResolvedValue({} as never);
+      const onMoved = vi.fn();
+      render(<TryItPanel detail={failedPick()} onMoved={onMoved} />);
+      await userEvent.click(screen.getByRole("button", { name: "Back to Build" }));
+      expect(toBuild).toHaveBeenCalledWith("c1");
+      await userEvent.click(screen.getByRole("button", { name: "Back to Spec" }));
+      expect(toSpec).toHaveBeenCalledWith("c1");
+      expect(onMoved).toHaveBeenCalledTimes(2);
+    });
+
+    it("Edit calls the client and puts your words back in the box", async () => {
+      const edit = vi.spyOn(api, "editSendBack").mockResolvedValue({} as never);
+      render(<TryItPanel detail={failedPick()} onMoved={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(edit).toHaveBeenCalledWith("c1");
+      await waitFor(() => expect(screen.getByLabelText("What you found")).toHaveValue("Not per printer"));
+    });
   });
 });

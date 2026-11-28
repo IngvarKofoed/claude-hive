@@ -42,6 +42,8 @@ const detail: CardDetail = {
   turnRunning: true,
   landed: null,
   landing: false,
+  sendBack: null,
+  amendment: null,
 };
 const start: CardLive = { detail, streaming: "", activity: null };
 

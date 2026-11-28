@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CHECK_ROUNDS, KEEPER_FIX_ROUNDS, afterBlocking, canMove, fateOf, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterJudging,
+  laneAfterSendBack,
   laneAfterPlan,
 } from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
@@ -84,7 +85,7 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
   it("Plan → Spec on Back to Spec", () => {
     expect(laneAfter("plan", "back-to-spec")).toBe("spec");
     expect(laneAfter("check", "back-to-spec")).toBe("spec");
-    expect(laneAfter("tryit", "back-to-spec")).toBeNull();
+    expect(laneAfter("refine", "back-to-spec")).toBeNull();
   });
 
   it("Build → Check when the developer's report is done, and stays in Build when it's blocked or missing", () => {
@@ -128,7 +129,19 @@ describe("card moves (docs/ARCHITECTURE.md, Card Moves)", () => {
     expect(laneAfter("build", "move-on")).toBeNull();
   });
 
-  it("Try it → Build on Send to Build, Try it → Ship on Accept, and Ship → Try it until Ship is built", () => {
+  it("Send back: Spec if any point changes the spec, otherwise Build (docs/specs/2026-11-28-try-it-send-back.md)", () => {
+    expect(laneAfterSendBack([{ kind: "bug" }])).toBe("build");
+    expect(laneAfterSendBack([{ kind: "bug" }, { kind: "bug" }])).toBe("build");
+    expect(laneAfterSendBack([{ kind: "spec" }])).toBe("spec");
+    expect(laneAfterSendBack([{ kind: "bug" }, { kind: "spec" }])).toBe("spec");
+  });
+
+  it("Try it → Build or Spec on a failed pick's Back to Build and Back to Spec", () => {
+    expect(laneAfter("tryit", "back-to-build")).toBe("build");
+    expect(laneAfter("tryit", "back-to-spec")).toBe("spec");
+  });
+
+  it("Try it → Build on Send back, Try it → Ship on Accept, and Ship → Try it until Ship is built", () => {
     expect(laneAfter("tryit", "feedback")).toBe("build");
     expect(laneAfter("tryit", "accept")).toBe("ship");
     expect(laneAfter("ship", "back-to-tryit")).toBe("tryit");

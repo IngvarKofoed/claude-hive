@@ -24,7 +24,7 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 | **Ideas** | you | You type an idea: a title, and a text of two sentences or so. You can edit both until it starts. | You drag it to Refine, or press Start. |
 | **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**: on to Mockup, or skip to Spec when there's nothing to show. |
 | **Mockup** | you ⇄ designer | A clickable mockup: plain HTML pages the designer makes in the card's own folder, never inside the app, or a mockup you make yourself in Claude Design and paste as a link. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. | You say **Good**, and choose whether to keep the mockup. |
-| **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. |
+| **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. An amendment signs off on its own unless you take over. |
 | **Plan** | planner | The build plan the spec deliberately leaves out: the steps in order, which chunk each agent owns, the tests, and how each step is checked. | The plan is written. |
 | **Build** | developer | Brings in the latest main first, then builds to the plan. One developer per card, which hands chunks to its own subagents when the spec's Implementation strategy calls for several agents. | It's built. |
 | **Check** | reviewer, tester | Read-only. They review the whole branch against main and compare the code with the spec (missing, different, extra). They run the spec's How-to-verify checks and compare the screens with the approved mockup. | Everything passes. |
@@ -36,7 +36,7 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 
 **Refine and Mockup** are back-and-forth chats that go on until you say Good. The agent may say it thinks the card is ready, but only you move it on.
 
-**Spec** is mostly reading. You press **Review** when you think the spec is ready. **Sign off** stays greyed out until a review has run, while it runs, and again if the spec has changed since the review read it.
+**Spec** is mostly reading. You press **Review** when you think the spec is ready. **Sign off** stays greyed out until a review has run, while it runs, and again if the spec has changed since the review read it. An amendment from Try it is the exception: it signs off on its own unless you write in its chat (see Amendment).
 
 **Try it** is prepared so your testing is quick:
 
@@ -46,17 +46,16 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 - every decision made without you, so you can ask for any of them the other way in your feedback;
 - any question about a spec change that waits for you, with the spec keeper's recommendation.
 
-Answering a question never moves the card, so you can keep trying it. A **Keep it as built** answer goes to the spec keeper at once, and it changes the spec. A **Change the code** answer is held. When you press **Send to Build**, the held answers go to the developer, together with your feedback. An answer in your own words counts as Change the code, and the keeper also writes your decision into the spec. Accept waits until every question is answered and no Change the code answer is held.
+Answering a question never moves the card, so you can keep trying it. A **Keep it as built** answer goes to the spec keeper at once, and it changes the spec. A **Change the code** answer is held. When you press **Send back**, the held answers go along with your feedback, to the developer. An answer in your own words counts as Change the code, and the keeper also writes your decision into the spec. Accept waits until every question is answered and no Change the code answer is held.
 
-Your feedback goes back to the lane it belongs to. The hive picks the lane and shows it, and you can change it with one click:
+You press **Send back** with your feedback. The spec keeper reads it, and the hive sends the card on without asking:
 
-| You write | Back to |
+| You write | Goes to |
 | --- | --- |
-| "I wanted this per printer, not for all printers" (the *what* was wrong) | **Refine**: the same product owner session, which still remembers your chat |
-| "The slider should be a dropdown" (the *look* was wrong) | **Mockup** |
-| "It crashes when there are no printers" (a bug) | **Build** |
+| "It crashes when there are no printers" (a bug) | **Build**: the same developer, and the spec stays as it is |
+| "The limit should be 32, not 24", "I wanted this per printer", "The slider should be a dropdown" (anything that changes the spec) | **Spec**, as an amendment |
 
-Feedback that changes the what or the look also changes the spec, so the card passes through Spec again, with a new review. A bug leaves the spec as it is.
+Feedback with both goes to Spec, and its bugs travel with the amendment to the developer. Feedback never goes back to Refine or Mockup: the spec writer already holds your Refine chat and the mockup comments. If the keeper can't read your feedback, the card waits in Try it, and you send it to Build or Spec yourself.
 
 ## Lane Actions
 
@@ -71,7 +70,7 @@ A **lane action** is something you can do to a card in a lane: a button that mov
 | **Plan** | Retry, Back to Spec, Stop, Park |
 | **Build** | Retry, Back to Spec, Stop, Park |
 | **Check** | Retry, Back to Build, Move on, Back to Spec, Stop, Park |
-| **Try it** | Send to Build, Accept, Retry, Park |
+| **Try it** | Send back, Accept, Retry, Back to Build, Back to Spec, Park |
 | **Ship** | Land on main, Discard them and land, Back to Try it, Retry, Back to Build, Stop |
 | **Done** | none |
 
@@ -108,7 +107,7 @@ One feature, from idea to Done. It carries everything:
 - the plan;
 - issues and their verdicts;
 - the decisions made for you;
-- the check rounds and your feedback rounds;
+- the check rounds, your feedback rounds and the amendments they started;
 - every lane's history, reached from the lane strip on its page.
 
 ### Role
@@ -122,8 +121,19 @@ Each lane's instructions and model. Every session has the same full access, in C
 ### Sessions
 
 - **A new session for each card in each lane,** started with the role's instructions and the card.
-- **Conversations continue the same session.** A card sent back to Refine resumes the product owner session that refined it. A card sent back to Build resumes the developer that built it.
+- **Conversations continue the same session.** A card sent back to Spec resumes the spec writer that wrote its spec. A card sent back to Build resumes the developer that built it.
 - **Nothing runs between turns.** A kept session costs nothing.
+
+### Amendment
+
+A change to a signed-off spec, made from your Try it feedback. It's a numbered round, Amendment 1, 2 and so on, that the card carries through Spec, Plan, Build, Check and Try it, and each role handles just that change:
+
+- **Spec:** the spec writer changes only what the amendment needs, and adds a line to `## Amendments`. It decides whether the change needs the blind review, and a review it asks for runs by itself.
+- **Sign-off:** the amendment signs off on its own once the spec writer's turns end. Answering its questions doesn't change that. Writing in the Spec chat yourself does: from then on Sign off is yours.
+- **Plan:** the planner plans only what's left to build, from the spec's diff since the amendment started.
+- **Build and Check:** the same developer builds it, together with any bugs from the same feedback. Check's reviewer and the spec keeper know what you asked for in Try it, so a change you asked for is written into the spec and never undone as a mismatch.
+
+An amendment stays open until the card is back in Try it, and a Back to Spec on the way is part of it. Only Send back makes one: Back to Spec from a blocked plan or build outside an amendment is a full revision, with your sign-off.
 
 ### Rulebook
 
@@ -138,7 +148,7 @@ What the hive knows about how you want things. Each project has one, plus one sh
 - **A mockup is plain HTML pages,** with their CSS and scripts, in the card's own folder, `docs/mockups/<card>/`. The designer makes them, copying the app's look, and edits them in place as you comment. It never builds the mockup inside the app, and changes no app code. The hive serves the pages itself, sandboxed, and the card links to them.
 - **Or you use Claude Design** on claude.ai yourself. The designer writes a starting prompt when you ask, and you paste the link back. No session can open it, so the designer asks for exported files or a description of the screens, and sums up the look in the chat for the spec writer.
 - **Good keeps the mockup, or doesn't.** Keep commits the folder on the card's branch, so the mockup lands on main with the card, at `docs/mockups/<card>/`. A Claude Design mockup is kept as a `README.md` with its link, beside any exported files. Don't keep leaves nothing on the branch: the pages stay in the worktree for the spec writer to read, and sign-off deletes them. Until then, **Keep it after all** in Spec still commits them.
-- **The approved mockup is the visual reference.** The tester compares the finished screens with it.
+- **The approved mockup is the visual reference.** The tester compares the finished screens with it. Where an amendment changes the look, the spec's words win over the mockup.
 
 ## Spec Issues During the Build
 
@@ -237,7 +247,7 @@ Clean history: one commit per card, no merge commits, no branches left behind.
 - **Plan:** the plan;
 - **Build:** what was built, and where it departed from the plan and why;
 - **Check:** each round's findings;
-- **Try it:** your feedback rounds.
+- **Try it:** your feedback rounds, and the amendments they started.
 
 It also shows every judgment, manager action and "decided for you", the time spent in each lane, and the commit the card landed as.
 

@@ -1,6 +1,6 @@
 // The fixed-format reports of the spec reviewer, the planner, the developer and Check's reviewer. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
-import type { Bug, Departure, IssueJudgment, Plan, ReportedDecision, ReportedIssue } from "@hive/shared";
+import type { Bug, Departure, IssueJudgment, Plan, ReportedDecision, ReportedIssue, SendBackPoint } from "@hive/shared";
 
 const blockable = {
   status: { type: "string", enum: ["done", "blocked"] },
@@ -164,6 +164,53 @@ export const KEEPER_SCHEMA = {
         },
       },
     },
+  },
+} as const;
+
+/**
+ * The spec keeper's reading of your Send back: each point of your feedback, a bug or a change to the spec. Code picks
+ * the lane from the points (docs/specs/2026-11-28-try-it-send-back.md, Send back and the pick).
+ */
+export const SEND_BACK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "reason", "points"],
+  properties: {
+    ...blockable,
+    reason: { type: "string", description: "Why the feedback goes where its points send it, in a sentence or two" },
+    points: {
+      type: "array",
+      description: "Each point the person made, in their order. At least one",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["what", "kind", "why"],
+        properties: {
+          what: { type: "string", description: "The point, in a short line of the person's own words" },
+          kind: {
+            type: "string", enum: ["bug", "spec"],
+            description: "bug: the code changes and the spec stays; spec: the point changes what the spec says",
+          },
+          why: { type: "string", description: "Why it's that kind, in a sentence" },
+        },
+      },
+    },
+  },
+} as const;
+
+/**
+ * The spec writer's report at the end of an amendment's turn: what it changed, and whether the change needs the blind
+ * review (docs/specs/2026-11-28-try-it-send-back.md, Into Spec: the amendment).
+ */
+export const AMENDMENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "blockedReason", "summary", "review", "reason"],
+  properties: {
+    ...blockable,
+    summary: { type: "string", description: "What you changed in the spec for this amendment, in a sentence or two" },
+    review: { type: "boolean", description: "true when the change needs the blind review before it's signed off" },
+    reason: { type: "string", description: "Why it does or doesn't need the review, in a sentence" },
   },
 } as const;
 
@@ -381,6 +428,42 @@ export function parseKeeperReport(raw: unknown, issueIds: string[]): KeeperRepor
       issueId: j.issueId, verdict: j.verdict, level: j.level, reason: j.reason,
       recommendation: j.recommendation ?? "", repeats: j.repeats ? j.repeats : null,
     })),
+  };
+}
+
+export type SendBackReport =
+  | { status: "done"; reason: string; points: SendBackPoint[] }
+  | { status: "blocked"; reason: string };
+
+/** The keeper's reading of your Send back, or null when there is none, or it has no points or a malformed one. */
+export function parseSendBackReport(raw: unknown): SendBackReport | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done" || !Array.isArray(raw.points) || raw.points.length === 0) return null;
+  const ok = raw.points.every((p: unknown) =>
+    isObject(p) && typeof p.what === "string" && (p.kind === "bug" || p.kind === "spec") && typeof p.why === "string");
+  if (!ok) return null;
+  return {
+    status: "done",
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    points: raw.points.map((p: any) => ({ what: p.what, kind: p.kind, why: p.why })),
+  };
+}
+
+export type AmendmentReport =
+  | { status: "done"; summary: string; review: boolean; reason: string }
+  | { status: "blocked"; reason: string };
+
+/** The spec writer's amendment report, or null when there is none or it doesn't have the expected shape. */
+export function parseAmendmentReport(raw: unknown): AmendmentReport | null {
+  if (!isObject(raw)) return null;
+  if (raw.status === "blocked") return blocked(raw);
+  if (raw.status !== "done" || typeof raw.review !== "boolean") return null;
+  return {
+    status: "done",
+    summary: typeof raw.summary === "string" ? raw.summary : "",
+    review: raw.review,
+    reason: typeof raw.reason === "string" ? raw.reason : "",
   };
 }
 

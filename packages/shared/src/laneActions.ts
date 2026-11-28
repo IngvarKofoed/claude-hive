@@ -5,7 +5,7 @@ import type { ChatItem, IssueStatus, Lane, MockupInfo, ReviewState, ShipPlan } f
 
 export type LaneActionId =
   | "start" | "good" | "skip-mockup" | "keep" | "dont-keep" | "review" | "signoff" | "retry" | "back-to-spec" | "back-to-build" | "move-on"
-  | "send-to-build" | "accept" | "land" | "discard-and-land" | "back-to-tryit" | "stop";
+  | "send-back" | "accept" | "land" | "discard-and-land" | "back-to-tryit" | "stop";
 
 /**
  * Each lane's actions, in display order. Every action an error line can carry is in its lane's list: an action left
@@ -20,7 +20,8 @@ export const LANE_ACTIONS = {
   plan: ["retry", "back-to-spec", "stop"],
   build: ["retry", "back-to-spec", "stop"],
   check: ["retry", "back-to-build", "move-on", "back-to-spec", "stop"],
-  tryit: ["send-to-build", "accept", "retry"],
+  // A Send back whose pick failed offers both lanes on its error line (docs/specs/2026-11-28-try-it-send-back.md)
+  tryit: ["send-back", "accept", "retry", "back-to-build", "back-to-spec"],
   ship: ["land", "discard-and-land", "back-to-tryit", "retry", "back-to-build", "stop"],
   done: [],
 } as const satisfies Record<Lane, readonly LaneActionId[]>;
@@ -38,7 +39,7 @@ export const LANE_ACTION_LABEL: Record<LaneActionId, string> = {
   "back-to-spec": "Back to Spec",
   "back-to-build": "Back to Build",
   "move-on": "Move on",
-  "send-to-build": "Send to Build",
+  "send-back": "Send back",
   accept: "Accept",
   land: "Land on main",
   "discard-and-land": "Discard them and land",
@@ -47,7 +48,7 @@ export const LANE_ACTION_LABEL: Record<LaneActionId, string> = {
 };
 
 /** The page's main button for its lane. */
-const PRIMARY: ReadonlySet<LaneActionId> = new Set<LaneActionId>(["good", "keep", "signoff", "send-to-build", "land"]);
+const PRIMARY: ReadonlySet<LaneActionId> = new Set<LaneActionId>(["good", "keep", "signoff", "send-back", "land"]);
 
 /** One action on offer, as a button shows it: greyed with its reason when it isn't enabled. */
 export interface LaneActionState {
@@ -61,7 +62,8 @@ export interface LaneActionState {
 
 /**
  * What an error line offers: retry the failed turn, run the review again, send a blocked plan or build back to Spec,
- * or, for a card that Check stopped, send it back to Build for one more round or move it on to Try it. Offered only
+ * or, for a card that Check stopped, send it back to Build for one more round or move it on to Try it. In Try it, a
+ * Send back whose pick failed offers Back to Build and Back to Spec, which send your stored words there. Offered only
  * while the line is its lane's last chat line, and only the ones its lane lists.
  */
 export type ErrorAction = Extract<LaneActionId, "retry" | "review" | "back-to-spec" | "back-to-build" | "move-on">;
@@ -87,6 +89,8 @@ export interface LaneActionInput {
   shipPlan: ShipPlan | null;
   /** Try it's feedback box has text. */
   hasFeedback: boolean;
+  /** Your Send back words are stored: the spec keeper is reading them, or its pick failed. Missing reads as none. */
+  sendBack?: boolean;
   /** The card's mockup, read in Mockup: Keep needs a named one, and pages in its folder. Missing reads as none. */
   mockup?: MockupInfo | null;
 }
@@ -102,7 +106,7 @@ function keepReason(input: LaneActionInput): string | null {
 
 /** Why Sign off is greyed, or null when it is enabled. */
 function signOffReason(review: ReviewState, turnRunning: boolean): string | null {
-  if (review === "fresh") return turnRunning ? "Wait for the spec writer to finish" : null;
+  if (review === "fresh" || review === "skipped") return turnRunning ? "Wait for the spec writer to finish" : null;
   if (review === "none") return "Run the review first";
   if (review === "stale") return "Review the changed spec again first";
   if (review === "unfinished") return "Finish the review first";
@@ -131,7 +135,7 @@ function landReason(input: LaneActionInput, uncommitted: boolean): string | null
   return null;
 }
 
-/** Try it's first two reasons, shared by Send to Build and Accept. */
+/** Try it's first two reasons, shared by Send back and Accept. */
 function tryItReason(input: LaneActionInput): string | null {
   if (input.pending || input.issues.includes("waiting")) return "Answer the spec keeper's question first.";
   if (input.turnRunning) return "The spec keeper is working. Wait for it to finish.";
@@ -165,7 +169,7 @@ function rule(id: LaneActionId, input: LaneActionInput): Rule {
       const listed = last?.kind === "error" && last.actions.includes(id);
       return { ...greyed(input.turnRunning ? "Wait for the running turn to finish" : null), offered: listed };
     }
-    case "send-to-build": {
+    case "send-back": {
       const held = input.issues.includes("held");
       const reason = tryItReason(input);
       if (reason) return greyed(reason);
@@ -173,7 +177,9 @@ function rule(id: LaneActionId, input: LaneActionInput): Rule {
     }
     case "accept":
       return greyed(
-        tryItReason(input) ?? (input.issues.includes("held") ? "Changes you asked for go to Build with Send to Build." : null),
+        tryItReason(input) ??
+          (input.sendBack ? "Send your feedback, or edit it away first." : null) ??
+          (input.issues.includes("held") ? "Changes you asked for go to Build with Send back." : null),
       );
     case "land":
       return greyed(landReason(input, true));

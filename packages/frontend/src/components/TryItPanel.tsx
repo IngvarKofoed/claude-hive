@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CardDetail, LaneActionId } from "@hive/shared";
 import { api } from "../api/client";
-import { actionOf, laneActionsFor, useLaneActionDone } from "./laneActions";
+import { actionOf, LANE_ACTION_CALLS, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { outcomeSection } from "./outcome";
 import { PendingCard } from "./PendingCard";
 import { Badge } from "./ui/Badge";
@@ -12,7 +12,7 @@ import styles from "./TryItPanel.module.css";
 
 interface Props {
   detail: CardDetail;
-  /** Called after Send to Build or Accept succeeds, so the page can load the card in its new lane. */
+  /** Called after Send back, Accept or a move succeeds, so the page can load the card in its new lane. */
   onMoved: () => void;
 }
 
@@ -164,14 +164,19 @@ export function TryItPanel({ detail, onMoved }: Props) {
   const laneActionDone = useLaneActionDone();
   const guide = outcomeSection(detail.spec?.text ?? null);
   const actions = laneActionsFor(detail, { hasFeedback: text.trim() !== "" });
-  const sendToBuild = actionOf(actions, "send-to-build");
+  const sendBack = actionOf(actions, "send-back");
+  const backToBuild = actionOf(actions, "back-to-build");
+  const backToSpec = actionOf(actions, "back-to-spec");
   const accept = actionOf(actions, "accept");
   const retry = actionOf(actions, "retry");
   const lastChat = detail.chat[detail.chat.length - 1];
   const failed = retry && lastChat?.kind === "error" ? lastChat : null;
   const question = detail.pending?.kind === "question" ? detail.pending : null;
-  const whyDisabled = sendToBuild?.reason ?? accept?.reason ?? null;
-  const earlier = detail.history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
+  const whyDisabled = sendBack?.reason ?? accept?.reason ?? null;
+  const reading = detail.turnRunning && detail.sendBack !== null;
+  // Feedback that started an amendment is still feedback you sent: its words are listed too.
+  const earlier = detail.history.tryit.flatMap((round) =>
+    round.kind === "feedback" ? [round.text] : round.kind === "amendment" ? [round.amendment.words] : []);
 
   async function run(id: LaneActionId, action: () => Promise<unknown>, after?: () => void) {
     setError(null);
@@ -188,6 +193,23 @@ export function TryItPanel({ detail, onMoved }: Props) {
     }
   }
 
+  // Edit is a form control, not a lane action: it reports nothing to the page but reloads the card.
+  async function edit() {
+    const words = detail.sendBack?.text ?? "";
+    setError(null);
+    setBusy(true);
+    try {
+      await api.editSendBack(detail.id);
+      // Words typed into the box since the failed pick are kept, not replaced by the old ones.
+      setText((typed) => (typed.trim() ? typed : words));
+      onMoved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Panel title="Try it">
       <div className={styles.panel}>
@@ -197,6 +219,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
             <p className={styles.error} role="alert">
               {failed.message}
             </p>
+            {detail.sendBack && !reading ? <p className={styles.feedbackText}>{detail.sendBack.text}</p> : null}
             <div className={styles.actions}>
               <Button
                 compact
@@ -206,6 +229,28 @@ export function TryItPanel({ detail, onMoved }: Props) {
               >
                 {retry?.label}
               </Button>
+              {[backToBuild, backToSpec].map((action) =>
+                action ? (
+                  <Button
+                    key={action.id}
+                    compact
+                    disabled={busy || !action.enabled}
+                    title={action.reason ?? undefined}
+                    onClick={() => run(action.id, () => LANE_ACTION_CALLS[action.id as "back-to-build" | "back-to-spec"](detail.id))}
+                  >
+                    {action.label}
+                  </Button>
+                ) : null,
+              )}
+              {detail.sendBack ? (
+                <Button
+                  compact
+                  disabled={busy}
+                  onClick={edit}
+                >
+                  Edit
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -220,27 +265,36 @@ export function TryItPanel({ detail, onMoved }: Props) {
         </div>
         <div className={styles.section}>
           <h3 className={styles.heading}>Your call</h3>
-          <textarea
-            className={styles.feedback}
-            aria-label="What you found"
-            placeholder="What you found, if anything"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
+          {reading ? (
+            <>
+              <p className={styles.feedbackText}>{detail.sendBack?.text}</p>
+              <p className={styles.muted} role="status">
+                The spec keeper is reading your feedback…
+              </p>
+            </>
+          ) : (
+            <textarea
+              className={styles.feedback}
+              aria-label="What you found"
+              placeholder="What you found, if anything"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          )}
           <div className={styles.actions}>
             <Button
               variant="primary"
-              disabled={busy || !sendToBuild?.enabled}
-              title={sendToBuild?.reason ?? undefined}
+              disabled={busy || !sendBack?.enabled}
+              title={sendBack?.reason ?? undefined}
               onClick={() =>
                 run(
-                  "send-to-build",
+                  "send-back",
                   () => api.feedback(detail.id, text.trim()),
                   () => setText(""),
                 )
               }
             >
-              {sendToBuild?.label}
+              {sendBack?.label}
             </Button>
             <Button
               disabled={busy || !accept?.enabled}

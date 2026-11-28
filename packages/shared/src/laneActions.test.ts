@@ -55,7 +55,7 @@ describe("LANE_ACTIONS", () => {
       plan: ["retry", "back-to-spec", "stop"],
       build: ["retry", "back-to-spec", "stop"],
       check: ["retry", "back-to-build", "move-on", "back-to-spec", "stop"],
-      tryit: ["send-to-build", "accept", "retry"],
+      tryit: ["send-back", "accept", "retry", "back-to-build", "back-to-spec"],
       ship: ["land", "discard-and-land", "back-to-tryit", "retry", "back-to-build", "stop"],
       done: [],
     });
@@ -83,7 +83,7 @@ describe("laneActions", () => {
     expect(primary({ lane: "refine" })).toEqual(["Good · on to Mockup"]);
     expect(primary({ lane: "mockup", mockup: named })).toEqual(["Good · keep in docs/mockups"]);
     expect(primary({ lane: "spec" })).toEqual(["Sign off"]);
-    expect(primary({ lane: "tryit" })).toEqual(["Send to Build"]);
+    expect(primary({ lane: "tryit" })).toEqual(["Send back"]);
     expect(primary({ lane: "ship" })).toEqual(["Land on main"]);
     expect(actions({ lane: "ideas" })).toEqual([
       { id: "start", label: "Start", primary: false, enabled: true, reason: null },
@@ -135,13 +135,17 @@ describe("laneActions", () => {
     expect(why("review", spec("applying"))).toBe("Wait for the review");
     expect(why("review", spec("unfinished"))).toBe("Finish the review first");
     expect(why("review", spec("fresh"))).toBe("Already reviewed");
+    // An amendment's spec writer skipped the review: you may still run one (docs/specs/2026-11-28-try-it-send-back.md).
+    expect(why("review", spec("skipped"))).toBe("enabled");
   });
 
   it("greys Sign off with the card page's old sentences", () => {
-    const spec = (review: "none" | "stale" | "unfinished" | "running" | "applying" | "fresh", turnRunning = false) => ({
+    const spec = (review: "none" | "stale" | "unfinished" | "running" | "applying" | "fresh" | "skipped", turnRunning = false) => ({
       lane: "spec" as const, turnRunning, spec: { review, hasText: true },
     });
     expect(why("signoff", spec("fresh"))).toBe("enabled");
+    expect(why("signoff", spec("skipped"))).toBe("enabled");
+    expect(why("signoff", spec("skipped", true))).toBe("Wait for the spec writer to finish");
     expect(why("signoff", spec("fresh", true))).toBe("Wait for the spec writer to finish");
     expect(why("signoff", spec("none"))).toBe("Run the review first");
     expect(why("signoff", { lane: "spec", spec: null })).toBe("Run the review first");
@@ -184,27 +188,33 @@ describe("laneActions", () => {
     expect(one("stop", { lane: "ideas", turnRunning: true })).toBeUndefined();
   });
 
-  it("greys Send to Build and Accept with Try it's reasons", () => {
+  it("greys Send back and Accept with Try it's reasons", () => {
     const tryit = (input: Partial<LaneActionInput>) => ({ lane: "tryit" as const, ...input });
-    expect(why("send-to-build", tryit({ pending: true, hasFeedback: true }))).toBe("Answer the spec keeper's question first.");
-    expect(why("send-to-build", tryit({ issues: ["waiting"], hasFeedback: true }))).toBe("Answer the spec keeper's question first.");
-    expect(why("send-to-build", tryit({ turnRunning: true, hasFeedback: true }))).toBe("The spec keeper is working. Wait for it to finish.");
-    expect(why("send-to-build", tryit({ pending: true, turnRunning: true }))).toBe("Answer the spec keeper's question first.");
+    expect(why("send-back", tryit({ pending: true, hasFeedback: true }))).toBe("Answer the spec keeper's question first.");
+    expect(why("send-back", tryit({ issues: ["waiting"], hasFeedback: true }))).toBe("Answer the spec keeper's question first.");
+    expect(why("send-back", tryit({ turnRunning: true, hasFeedback: true }))).toBe("The spec keeper is working. Wait for it to finish.");
+    expect(why("send-back", tryit({ pending: true, turnRunning: true }))).toBe("Answer the spec keeper's question first.");
     // An empty box with nothing held: greyed like any empty form, with no reason.
-    expect(one("send-to-build", tryit({}))).toMatchObject({ enabled: false, reason: null });
-    expect(why("send-to-build", tryit({ hasFeedback: true }))).toBe("enabled");
-    expect(why("send-to-build", tryit({ issues: ["held"] }))).toBe("enabled");
+    expect(one("send-back", tryit({}))).toMatchObject({ enabled: false, reason: null });
+    expect(why("send-back", tryit({ hasFeedback: true }))).toBe("enabled");
+    expect(why("send-back", tryit({ issues: ["held"] }))).toBe("enabled");
+    // New words after a failed pick start a new one.
+    expect(why("send-back", tryit({ hasFeedback: true, sendBack: true }))).toBe("enabled");
 
     expect(why("accept", tryit({}))).toBe("enabled");
     expect(why("accept", tryit({ hasFeedback: true }))).toBe("enabled");
     expect(why("accept", tryit({ issues: ["waiting", "held"] }))).toBe("Answer the spec keeper's question first.");
     expect(why("accept", tryit({ turnRunning: true, issues: ["held"] }))).toBe("The spec keeper is working. Wait for it to finish.");
-    expect(why("accept", tryit({ issues: ["held"] }))).toBe("Changes you asked for go to Build with Send to Build.");
+    expect(why("accept", tryit({ issues: ["held"] }))).toBe("Changes you asked for go to Build with Send back.");
+    expect(why("accept", tryit({ sendBack: true, issues: ["held"] }))).toBe("Send your feedback, or edit it away first.");
   });
 
-  it("offers Try it's Retry from the error line", () => {
-    expect(actions({ lane: "tryit" }).map((a) => a.id)).toEqual(["send-to-build", "accept"]);
-    expect(actions({ lane: "tryit", lastChat: error(["retry"]) }).map((a) => a.id)).toEqual(["send-to-build", "accept", "retry"]);
+  it("offers Try it's Retry from the error line, and a failed pick's Back to Build and Back to Spec", () => {
+    expect(actions({ lane: "tryit" }).map((a) => a.id)).toEqual(["send-back", "accept"]);
+    expect(actions({ lane: "tryit", lastChat: error(["retry"]) }).map((a) => a.id)).toEqual(["send-back", "accept", "retry"]);
+    const failed = actions({ lane: "tryit", sendBack: true, lastChat: error(["retry", "back-to-build", "back-to-spec"]) });
+    expect(failed.map((a) => a.label)).toEqual(["Send back", "Accept", "Retry", "Back to Build", "Back to Spec"]);
+    expect(failed.find((a) => a.id === "back-to-spec")).toMatchObject({ enabled: true, primary: false });
   });
 
   it("greys Land on main with the first matching reason", () => {

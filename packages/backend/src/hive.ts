@@ -1,7 +1,8 @@
 // The hive's orchestration: projects, cards and their moves, and every session's turns, from Ideas through Refine,
 // Spec, Plan, Build, Check and Try it, with each card's worktree setup (docs/specs/2026-11-26-board-refine-chat.md,
 // docs/specs/2026-11-26-spec-lane-review-gate.md, docs/specs/2026-11-26-build-lane-developer.md,
-// docs/specs/2026-11-27-check-lane-reviewer.md, docs/specs/2026-11-27-worktree-setup-and-try-it.md).
+// docs/specs/2026-11-27-check-lane-reviewer.md, docs/specs/2026-11-27-worktree-setup-and-try-it.md,
+// docs/specs/2026-11-28-try-it-send-back.md).
 // Plain code decides; Claude sessions only do the work (packages/backend/CLAUDE.md, Rules).
 import { randomUUID } from "node:crypto";
 import {
@@ -10,18 +11,20 @@ import {
 import { homedir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import type {
-  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
+  AmendmentInfo, AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
   FeedbackBody, FileChange, ForYouItem, ForYouResponse, GoodBody, IssueAnswer, IssueJudgment, IssueStatus, Landed, LandBody, Lane,
   LaneActionInput, LaneErrorAction, MockupInfo, MockupRef, PendingItem, Plan, Question, RoleInfo, RolesResponse, SetupReport,
-  ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
+  SendBackPoint, ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
 } from "@hive/shared";
 import { CARD_PORTS, LANES, lanesBefore } from "@hive/shared";
 import {
   CHECK_ROUNDS, afterBlocking, canMove, fateOf, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterJudging,
-  laneAfterLanding, laneAfterPlan, type IssueFate,
+  laneAfterLanding, laneAfterPlan, laneAfterSendBack, type IssueFate,
 } from "./board/moves";
 import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
-import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type MockupState, type SessionRow } from "./db";
+import {
+  HiveDb, projectSummary, type AmendmentRow, type CardRow, type KeeperJudging, type MockupState, type SessionRow,
+} from "./db";
 import type { EventHub } from "./events";
 import { classifyFolder, type FolderClass } from "./projects/folders";
 import { applyChecklistChange } from "./sessions/checklist";
@@ -32,9 +35,9 @@ import type {
 } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
-  CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, KEEPER_SCHEMA, parseCheckReport, parseCommitReport,
-  parseDeveloperReport, parseKeeperReport, parsePlanReport, parseReviewReport, parseSetupReport, PLAN_SCHEMA,
-  REVIEW_SCHEMA, SETUP_SCHEMA,
+  AMENDMENT_SCHEMA, CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, KEEPER_SCHEMA, parseAmendmentReport,
+  parseCheckReport, parseCommitReport, parseDeveloperReport, parseKeeperReport, parsePlanReport, parseReviewReport,
+  parseSendBackReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SEND_BACK_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
 import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, RepoAt, SquashResult } from "./git";
 import { fakeApps, openableUrl, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
@@ -70,6 +73,8 @@ export interface GitService {
   discardChanges(worktree: string): Promise<void>;
   switchWorktree(worktree: string, target: { commit: string } | { branch: string }): Promise<void>;
   fileAt(root: string, commit: string, path: string): Promise<string>;
+  headCommit(worktree: string): Promise<string>;
+  diffFile(worktree: string, commit: string, path: string): Promise<string>;
   removeCardWorktree(root: string, worktree: string, branch: string): Promise<void>;
   removeWorktree(root: string, worktree: string): Promise<void>;
   pruneWorktrees(root: string): Promise<void>;
@@ -163,6 +168,13 @@ const SETUP = "setup";
  * holds the instructions sent at the top of each keeper message (docs/specs/2026-11-28-spec-keeper.md, Key decisions).
  */
 const SPEC_KEEPER = "spec-keeper";
+/**
+ * Two more sets of instructions that ride in the spec writer's session, as the keeper's do
+ * (docs/specs/2026-11-28-try-it-send-back.md): the feedback reader reads your Send back and says where each point goes;
+ * the spec amender makes an amendment and says whether it needs the blind review.
+ */
+const FEEDBACK_READER = "feedback-reader";
+const SPEC_AMENDER = "spec-amender";
 const CHAT_LANES: Lane[] = ["refine", "mockup", "spec"];
 
 /** The options of a spec keeper question in Try it, and on a blocked build; the keeper's choice goes first. */
@@ -197,6 +209,8 @@ const ROLE_TURNS: Record<string, RoleTurn> = {
   setup: { report: SETUP_SCHEMA, tools: ["copy_local_files"] },
   "spec-writer": { specFormat: ["format.md"] },
   "spec-keeper": { report: KEEPER_SCHEMA },
+  "feedback-reader": { report: SEND_BACK_SCHEMA },
+  "spec-amender": { report: AMENDMENT_SCHEMA },
   "spec-reviewer": { report: REVIEW_SCHEMA },
   planner: { specFormat: ["format.md"], report: PLAN_SCHEMA },
   developer: { report: DEVELOPER_SCHEMA, taskTools: true },
@@ -398,6 +412,18 @@ interface Waiter {
 
 const localDate = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD in local time
 
+/** An amendment as the page shows it. */
+function amendmentInfo(a: AmendmentRow): AmendmentInfo {
+  return { n: a.n, words: a.words, points: a.points, summary: a.summary, signedOff: a.signedOff, reviewed: a.reviewed };
+}
+
+/** The spec keeper's reading of your Send back, as a one-paragraph chat note: its reason, then each point with its kind. */
+function readingNote(reason: string, points: SendBackPoint[]): string {
+  const point = (p: SendBackPoint) =>
+    `${p.kind === "spec" ? "Spec change" : "Bug"}: ${p.what.trim().replace(/[.!?]$/, "")} (${p.why.trim().replace(/[.!?]$/, "")}).`;
+  return [`The spec keeper read your feedback: ${sentence(reason)}`, ...points.map(point)].join(" ");
+}
+
 export class Hive {
   private turns = new Map<string, RunningTurn>(); // session id → running turn
   private waiters = new Map<string, Waiter>(); // pending item id → live turn waiting on it
@@ -475,6 +501,8 @@ export class Hive {
       port: card.port,
       feedback: card.feedback,
       shipAfterCheck: card.shipAfterCheck,
+      sendBack: card.sendBack,
+      amendment: this.openAmendment(card) ? amendmentInfo(this.openAmendment(card)!) : null,
       checklist: card.checklist,
       apps: card.lane === "tryit" ? this.apps.status(card.id) : [],
       appStopped: card.appStopped,
@@ -563,7 +591,12 @@ export class Hive {
   private history(cardId: string): CardHistory {
     const rows = this.db.eventsOf(cardId, ["plan", "build", "check", "feedback", "accept"]);
     const newestFirst = (type: string) => rows.filter((r) => r.type === type).map((r) => r.data).reverse();
-    const feedback: TryItRound[] = newestFirst("feedback").map((d) => ({ kind: "feedback", text: String(d.text) }));
+    // Feedback that started an amendment shows as that amendment's round (docs/specs/2026-11-28-try-it-send-back.md).
+    const amendments = new Map(this.db.amendmentsFor(cardId).map((a) => [a.id, a]));
+    const feedback: TryItRound[] = newestFirst("feedback").map((d): TryItRound => {
+      const amendment = typeof d.amendment === "string" ? amendments.get(d.amendment) : undefined;
+      return amendment ? { kind: "amendment", amendment: amendmentInfo(amendment) } : { kind: "feedback", text: String(d.text) };
+    });
     // One acceptance, on top, and only while it's the last word: one that Back to Try it undid isn't shown.
     const lastTryIt = rows.filter((r) => r.type === "feedback" || r.type === "accept").at(-1);
     return {
@@ -726,6 +759,7 @@ export class Hive {
           landing: this.landingProjects.get(card.projectId) === card.id,
           shipPlan: null,
           hasFeedback: false,
+          sendBack: card.sendBack !== null,
           mockup: this.mockupInfo(card),
         };
         return {
@@ -935,22 +969,30 @@ export class Hive {
     this.startTurn(cardId, sessionId, this.specFirstMessage(cardId, specPath), options);
   }
 
-  /** Spec → Plan, only while the spec on disk is the text the last finished review produced. */
-  async signoff(cardId: string): Promise<CardSummary> {
+  /**
+   * Spec → Plan, only while the spec on disk is the text the last finished review produced, or, during an amendment,
+   * the text its spec writer vouched for when it skipped the review. `auto` is an amendment signing off on its own
+   * (docs/specs/2026-11-28-try-it-send-back.md).
+   */
+  async signoff(cardId: string, opts: { auto?: boolean } = {}): Promise<CardSummary> {
     const card = this.requireCard(cardId);
     const to = laneAfter(card.lane, "signoff");
     if (!to || !card.specPath) throw new HttpError(409, "Sign off moves a card on from Spec.");
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
     if (card.reviewApplying) throw new HttpError(409, "The review wasn't finished. Retry it first.");
-    if (!card.reviewedSpecHash) throw new HttpError(409, "Run the review first.");
+    const amendment = this.openAmendment(card);
     const { hash } = readSpec(card.worktreePath!, card.specPath);
-    if (hash !== card.reviewedSpecHash) {
+    const reviewed = !!card.reviewedSpecHash && hash === card.reviewedSpecHash;
+    const skipped = !!amendment?.skippedHash && hash === amendment.skippedHash;
+    if (!reviewed && !skipped) {
+      if (!card.reviewedSpecHash && !amendment?.skippedHash) throw new HttpError(409, "Run the review first.");
       this.refreshSpec(cardId);
       throw new HttpError(409, "The spec changed since the review. Review it again first.");
     }
     return this.oneMoveAtATime(cardId, async () => {
       try {
-        await this.deps.git.commitFile(card.worktreePath!, card.specPath!, `Spec: ${card.title}`);
+        await this.deps.git.commitFile(card.worktreePath!, card.specPath!,
+          amendment ? `Spec: ${card.title}, amendment ${amendment.n}` : `Spec: ${card.title}`);
       } catch (error) {
         throw new HttpError(409, (error as Error).message);
       }
@@ -967,11 +1009,27 @@ export class Hive {
             `The mockup you didn't keep couldn't be deleted from ${mockup.folder}/: ${(error as Error).message}`);
         }
       }
+      // An amendment's planner plans only what's left, from the spec's diff since the amendment started.
+      let diff: string | null = null;
+      if (amendment) {
+        try {
+          diff = await this.deps.git.diffFile(card.worktreePath!, amendment.base, card.specPath!);
+        } catch (error) {
+          throw new HttpError(409, `The amendment's changes couldn't be read: ${(error as Error).message}`);
+        }
+      }
       this.watch.unwatch(cardId);
       // Keeper fix rounds count from sign-off (docs/specs/2026-11-28-spec-keeper.md, After the batch).
       this.db.updateCard(cardId, { lane: to, keeperRounds: 0 });
+      if (amendment) {
+        this.db.updateAmendment(amendment.id, { step: "plan", signedOff: opts.auto ? "auto" : "you", reviewed });
+        if (opts.auto) {
+          this.addNote(cardId, "spec", `Amendment ${amendment.n} signed off on its own, ` +
+            (reviewed ? "reviewed." : `review skipped: ${sentence(amendment.reason ?? "the spec writer saw no need")}`));
+        }
+      }
       if (deleted) this.emitMockup(cardId);
-      this.startPlanner(cardId);
+      this.startPlanner(cardId, amendment && diff !== null ? { amendment, diff } : null);
       return cardSummary(this.requireCard(cardId));
     });
   }
@@ -985,6 +1043,11 @@ export class Hive {
     const from = card.lane;
     const to = laneAfter(from, "back-to-spec");
     if (!to) throw new HttpError(409, "Only a card in Plan, Build or Check can go back to Spec.");
+    // A Send back whose pick failed: your stored words go to Spec, as an amendment.
+    if (from === "tryit") {
+      this.requireOffered(cardId, "tryit", "back-to-spec");
+      return this.feedback(cardId, { text: card.sendBack?.text ?? "", lane: "spec" });
+    }
     const who = from === "build" ? "developer" : from === "check" ? "spec keeper" : "planner";
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, `Wait for the ${who} to finish.`);
     const last = this.db.lastChatItem(cardId, from);
@@ -997,6 +1060,8 @@ export class Hive {
     if (!writer) throw new HttpError(409, "This card has no spec writer to go back to.");
     // The keeper stopped the card on a severe issue: its own finding goes back to it, as the spec writer.
     const severe = this.db.issuesFor(cardId).some((i) => i.status === "severe");
+    // An open amendment stays open: this trip back to Spec is part of it (docs/specs/2026-11-28-try-it-send-back.md).
+    const amendment = this.openAmendment(card);
     return this.oneMoveAtATime(cardId, async () => {
       if (from === "check") await this.stopCardServers(cardId, "check");
       if (from === "build") {
@@ -1016,17 +1081,24 @@ export class Hive {
       const open = this.db.openPendingFor(cardId);
       const question = open?.item.kind === "question" && open.item.issueIds ? open : null;
       // Stored Try it feedback goes with it: the developer's reason carries it to the spec writer, and after the new
-      // sign-off the developer must get the new plan.
+      // sign-off the developer must get the new plan. During an amendment your words and held answers stay for the
+      // developer, who gets them with the amendment's plan.
       this.db.transaction(() => {
         this.db.setIssueStatus(settled.map((i) => i.id), "settled");
         if (question) this.db.setPendingAnswer(question.id, { withdrawn: true });
         this.db.updateCard(cardId, {
-          lane: to, reviewedSpecHash: null, reviewApplying: false, feedback: null, shipAfterCheck: false,
-          judging: null, keeperFixes: null,
+          lane: to, reviewedSpecHash: null, reviewApplying: false, shipAfterCheck: false, judging: null,
+          ...(amendment ? {} : { feedback: null, keeperFixes: null }),
         });
       });
       if (question) this.deps.hub.emit({ type: "pending.updated", cardId, pending: null });
       this.watchSpec(cardId);
+      if (amendment) {
+        this.db.updateAmendment(amendment.id, { summary: null, review: null, reason: null, skippedHash: null, signedOff: null, reviewed: false });
+        this.addNote(cardId, "spec", `Back to Spec, still Amendment ${amendment.n}.`);
+        this.startAmendment(cardId, this.db.getAmendment(amendment.id)!, { kind: "stopped", from, reason: last.message, settled });
+        return cardSummary(this.requireCard(cardId));
+      }
       const opening = severe
         ? [`As the spec keeper, you stopped the card on a severe issue:`, "", last.message, "",
           "The person sent the card back to Spec. Revise the spec with them, then say briefly what you changed. It " +
@@ -1048,6 +1120,11 @@ export class Hive {
     const card = this.requireCard(cardId);
     const to = laneAfter(card.lane, "back-to-build");
     if (!to) throw new HttpError(409, "Only a card in Check or Ship can go back to Build.");
+    // A Send back whose pick failed: your stored words go to Build (docs/specs/2026-11-28-try-it-send-back.md).
+    if (card.lane === "tryit") {
+      this.requireOffered(cardId, "tryit", "back-to-build");
+      return this.feedback(cardId, { text: card.sendBack?.text ?? "", lane: "build" });
+    }
     this.requireOffered(cardId, card.lane, "back-to-build");
     if (card.lane === "ship") {
       // A Retry's landing runs with the old error line still last until its first note: it mustn't be pulled from under it.
@@ -1108,7 +1185,8 @@ export class Hive {
    */
   private async moveToTryIt(cardId: string, from: Lane): Promise<void> {
     await this.stopCardServers(cardId, from);
-    this.db.updateCard(cardId, { lane: "tryit", shipAfterCheck: false });
+    // The amendment's trip ends here: it's no longer open (docs/specs/2026-11-28-try-it-send-back.md).
+    this.db.updateCard(cardId, { lane: "tryit", shipAfterCheck: false, amendment: null });
     this.askWaitingIssues(cardId);
     this.emitCard(cardId);
     void this.startApp(cardId).catch((error: unknown) => this.log(`Starting the app of card ${cardId} failed: ${String(error)}`));
@@ -1264,6 +1342,18 @@ export class Hive {
       this.answer(open.id, { answers }, { alreadyInChat: true });
       return;
     }
+    // Writing in the Spec chat takes an open amendment over: from now on Sign off is yours. Answering its questions,
+    // above, doesn't (docs/specs/2026-11-28-try-it-send-back.md, After the amendment turn).
+    const amendment = card.lane === "spec" ? this.openAmendment(card) : null;
+    // With no amendment turn running (its turn failed and waits for Retry), this message starts an ordinary Spec turn:
+    // the amendment leaves `amending`, so that turn's end, and a review applied after it, aren't read as the amendment's.
+    const idleAmending = !!amendment && amendment.step === "amending" && !this.turns.has(session.id);
+    if (amendment && (!amendment.takenOver || idleAmending)) {
+      this.db.updateAmendment(amendment.id, { takenOver: true, ...(idleAmending ? { step: "spec" as const } : {}) });
+      if (!amendment.takenOver) {
+        this.addNote(cardId, "spec", `You're in the chat, so Sign off is yours for Amendment ${amendment.n}.`);
+      }
+    }
     this.deliver(cardId, session.id, text.trim());
   }
 
@@ -1336,7 +1426,11 @@ export class Hive {
       const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
       const { kind, issueIds } = card.judging;
       // A keeper message that couldn't be built (a broken role file): build it again.
-      if (writer && !writer.lastMessage && kind !== "answers") {
+      if (writer && !writer.lastMessage && kind === "send-back") {
+        this.startSendBack(cardId, card.sendBack?.text ?? "");
+        return;
+      }
+      if (writer && !writer.lastMessage && kind !== "answers" && kind !== "send-back") {
         return this.startKeeper(cardId, kind, this.db.issuesFor(cardId).filter((i) => issueIds.includes(i.id)));
       }
       if (!writer?.lastMessage) throw new HttpError(409, "There is no spec keeper turn to retry.");
@@ -1345,6 +1439,15 @@ export class Hive {
     }
     // Every Retry in Ship starts the landing over (docs/specs/2026-11-27-ship-lane.md).
     if (card.lane === "ship") return this.land(cardId, {});
+    // An amendment turn that failed: the same message again, with the amendment report (or built again, when it
+    // couldn't be built the first time).
+    const amendment = this.amending(card);
+    if (amendment) {
+      const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!)!;
+      if (!writer.lastMessage) return this.startAmendment(cardId, amendment, { kind: "tryit", settled: [] });
+      this.startTurn(cardId, writer.id, writer.lastMessage, this.amendmentOptions());
+      return;
+    }
     if (card.lane === "check") {
       // A review is a fresh read: Retry starts a new reviewer for the same round.
       this.startReviewer(cardId);
@@ -1372,8 +1475,11 @@ export class Hive {
 
   // ---------- the review gate ----------
 
-  /** Start the blind review of the spec as it is on disk now (spec: Review). */
-  review(cardId: string): void {
+  /**
+   * Start the blind review of the spec as it is on disk now (spec: Review). During an amendment, `amendmentDiff` is the
+   * spec's diff since it started, and the reviewer reports only on that change and what it breaks.
+   */
+  review(cardId: string, amendmentDiff?: string): void {
     const card = this.requireCard(cardId);
     if (card.lane !== "spec" || !card.specPath) throw new HttpError(409, "Only a spec can be reviewed.");
     this.refuseWhileMoving(cardId);
@@ -1388,12 +1494,23 @@ export class Hive {
     const sessionId = randomUUID();
     this.db.insertSession({ id: sessionId, cardId, lane: "spec", role: SPEC_REVIEWER, kind: role.kind });
     this.reviews.set(cardId, { sessionId, hash });
-    this.startTurn(
-      cardId,
-      sessionId,
+    const amendment = this.openAmendment(card);
+    const brief = [
       `Review the spec at ${join(card.worktreePath!, card.specPath)}. Read ${reviewMd} and follow its "For the reviewer" part.`,
-      this.turnOptions(SPEC_REVIEWER),
-    );
+      ...(amendment && amendmentDiff !== undefined
+        ? [
+            "",
+            `This is Amendment ${amendment.n} to a signed-off spec. What the spec writer changed: ` +
+              `${sentence(amendment.summary ?? "(no summary)")} Report only on this change and on anything it breaks. ` +
+              "The spec's diff since the amendment started:",
+            "",
+            "```diff",
+            amendmentDiff.trim() || "(no change)",
+            "```",
+          ]
+        : []),
+    ].join("\n");
+    this.startTurn(cardId, sessionId, brief, this.turnOptions(SPEC_REVIEWER));
     this.refreshSpec(cardId);
   }
 
@@ -1416,7 +1533,7 @@ export class Hive {
     if (report.findings.length === 0) {
       this.db.updateCard(cardId, { reviewedSpecHash: hash });
       this.addNote(cardId, "spec", "The review found nothing to change. You can sign off.");
-      return;
+      return this.afterReviewFresh(cardId);
     }
     const fixes = report.findings.filter((f) => f.kind === "fix").length;
     const decisions = report.findings.length - fixes;
@@ -1450,6 +1567,7 @@ export class Hive {
       const { hash } = readSpec(card.worktreePath!, card.specPath!);
       this.db.updateCard(cardId, { reviewApplying: false, reviewedSpecHash: hash });
       this.addNote(cardId, "spec", "The review is applied. You can sign off.");
+      this.afterReviewFresh(cardId);
     } else {
       const why = outcome.kind === "error" ? `: ${outcome.message}` : ".";
       this.addError(cardId, "spec", `The review wasn't finished${why} Retry sends its findings again.`, ["retry"]);
@@ -1458,7 +1576,7 @@ export class Hive {
 
   // ---------- the planner ----------
 
-  private startPlanner(cardId: string): void {
+  private startPlanner(cardId: string, amending: { amendment: AmendmentRow; diff: string } | null = null): void {
     const card = this.requireCard(cardId);
     let planner = this.db.getSessionFor(cardId, "plan", LANE_ROLE.plan!);
     const again = !!planner;
@@ -1468,9 +1586,21 @@ export class Hive {
       this.db.insertSession({ id, cardId, lane: "plan", role: LANE_ROLE.plan!, kind: role.kind });
       planner = this.db.getSession(id)!;
     }
-    const message = again
-      ? `The spec was revised and signed off again: ${card.specPath}. Read it again and write the build plan as your report.`
-      : `The spec for this card is signed off: ${card.specPath}. Read it and the code, and write the build plan as your report.`;
+    // An amendment is planned as what's left to build (docs/specs/2026-11-28-try-it-send-back.md, Plan and Build).
+    const message = amending
+      ? [
+          `This is Amendment ${amending.amendment.n} to the spec at ${card.specPath}: ` +
+            `${sentence(amending.amendment.summary ?? "(no summary)")} The spec's diff since the amendment started is ` +
+            "below. The branch already builds the spec as it was before it. Plan only what's left to bring the branch " +
+            "in line with the amended spec, and write that plan as your report.",
+          "",
+          "```diff",
+          amending.diff.trim() || "(no change)",
+          "```",
+        ].join("\n")
+      : again
+        ? `The spec was revised and signed off again: ${card.specPath}. Read it again and write the build plan as your report.`
+        : `The spec for this card is signed off: ${card.specPath}. Read it and the code, and write the build plan as your report.`;
     this.startTurn(cardId, planner.id, message, this.turnOptions(LANE_ROLE.plan!));
   }
 
@@ -1483,7 +1613,9 @@ export class Hive {
     if (report.status === "blocked") {
       return fail(`The planner couldn't plan from this spec: ${report.reason}`, ["retry", "back-to-spec"]);
     }
-    // A new plan starts Check's rounds over.
+    // A new plan starts Check's rounds over. An amendment's plan goes to the developer as the amendment's.
+    const amendment = this.openAmendment(this.requireCard(cardId));
+    if (amendment?.step === "plan") this.db.updateAmendment(amendment.id, { step: "build" });
     this.db.updateCard(cardId, { plan: report.plan, lane: laneAfterPlan("done"), check: null });
     this.db.addEvent(cardId, "plan", report.plan, randomUUID());
     this.deps.hub.emit({ type: "plan.updated", cardId, plan: report.plan });
@@ -1764,36 +1896,312 @@ export class Hive {
 
   // ---------- Try it ----------
 
-  /** Your words from Try it go to the same developer; Check then starts over (spec: Try it, Send to Build). */
+  /**
+   * Send back (docs/specs/2026-11-28-try-it-send-back.md). Without a lane, the spec keeper reads your words and code
+   * picks Build or Spec from its reading; with one, the card goes there at once. Your held Change the code answers go
+   * along either way, and alone they need nothing read, so they go straight to Build.
+   */
   async feedback(cardId: string, body: FeedbackBody): Promise<CardSummary> {
-    const text = typeof body?.text === "string" ? body.text.trim() : "";
-    if (body.lane !== undefined && body.lane !== "build") throw new HttpError(400, "Only Build takes feedback for now.");
+    const typed = typeof body?.text === "string" ? body.text.trim() : "";
+    const lane = body?.lane;
+    if (lane !== undefined && lane !== "build" && lane !== "spec") throw new HttpError(400, "Send back goes to Build or Spec.");
     const card = this.requireCard(cardId);
-    const to = laneAfter(card.lane, "feedback");
-    if (!to) throw new HttpError(409, "Only a card in Try it can be sent back with feedback.");
+    if (!laneAfter(card.lane, "feedback")) throw new HttpError(409, "Only a card in Try it can be sent back with feedback.");
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
     this.refuseWhileKeeperAsks(cardId);
-    // Your Change the code answers wait for Send to Build, and go with your feedback
-    // (docs/specs/2026-11-28-spec-keeper.md, Your answer in Try it).
+    // A lane after a failed pick sends the words that pick was reading.
+    const text = typed || (lane ? card.sendBack?.text ?? "" : "");
+    const held = this.db.issuesFor(cardId).some((i) => i.status === "held");
+    if (!text && !held) throw new HttpError(400, "Write what's wrong first.");
+    if (lane === "spec" && !text) throw new HttpError(400, "Write what should change in the spec first.");
+    if (lane) return this.sendBackTo(cardId, lane, text, null);
+    if (!text) return this.sendBackTo(cardId, "build", "", null);
+    return this.startSendBack(cardId, text);
+  }
+
+  /** The pick: a keeper turn that reads your words and edits nothing. The card stays in Try it until it ends. */
+  private startSendBack(cardId: string, text: string): CardSummary {
+    const card = this.requireCard(cardId);
+    const judging: KeeperJudging = { kind: "send-back", issueIds: [] };
+    this.db.updateCard(cardId, { sendBack: { text }, judging });
+    this.emitCard(cardId);
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+    let built = false;
+    try {
+      if (!writer) throw new Error("This card has no spec writer to read your feedback.");
+      const role = this.deps.role(FEEDBACK_READER); // a broken role file fails here, before the turn
+      const message = [
+        role.instructions,
+        "",
+        "The person tried the card's build in Try it and pressed Send back with this feedback:",
+        "",
+        text,
+        "",
+        `The spec is ${card.specPath}. Read it, and the code where a point needs it, then end with your report.`,
+      ].join("\n");
+      built = true;
+      this.addNote(cardId, "tryit", "The spec keeper is reading your feedback.");
+      this.startTurn(cardId, writer.id, message, this.keeperOptions(judging));
+    } catch (error) {
+      if (writer) this.db.updateSession(writer.id, { turnRunning: false, ...(built ? {} : { lastMessage: null }) });
+      this.setState(cardId, "needs-you");
+      this.keeperFailed(cardId, `The spec keeper couldn't read your feedback: ${sentence((error as Error).message)}`);
+    }
+    return cardSummary(this.requireCard(cardId));
+  }
+
+  /** The pick's report: code picks the lane from its points, and the card goes there without asking. */
+  private async onSendBackEnded(cardId: string, raw: unknown): Promise<void> {
+    const report = parseSendBackReport(raw);
+    if (!report) return this.keeperFailed(cardId, "The spec keeper didn't say where your feedback goes.");
+    if (report.status === "blocked") return this.keeperFailed(cardId, `The spec keeper couldn't read your feedback: ${report.reason}`);
+    const text = this.requireCard(cardId).sendBack?.text ?? "";
+    try {
+      await this.sendBackTo(cardId, laneAfterSendBack(report.points), text, report);
+    } catch (error) {
+      if (!this.gone(cardId)) this.keeperFailed(cardId, `Your feedback couldn't be sent on: ${sentence((error as Error).message)}`);
+    }
+  }
+
+  /**
+   * Edit: your stored Send back words go back to the box, and the failed pick with them, so Accept is open again. The
+   * page keeps the words; this only clears them on the card.
+   */
+  editSendBack(cardId: string): CardSummary {
+    const card = this.requireCard(cardId);
+    if (card.lane !== "tryit") throw new HttpError(409, "Only a card in Try it has feedback to edit.");
+    if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the spec keeper to finish reading.");
+    // Without stored words there's nothing to edit, and the note below would bury another failed turn's Retry.
+    if (!card.sendBack) throw new HttpError(409, "There is no sent feedback to edit.");
+    this.db.updateCard(cardId, { sendBack: null, ...(card.judging?.kind === "send-back" ? { judging: null } : {}) });
+    // A line after the failed pick's error, so its Retry and Back buttons, which would send nothing now, go with it.
+    this.addNote(cardId, "tryit", "Your feedback is back in the box.");
+    this.emitCard(cardId);
+    return cardSummary(this.requireCard(cardId));
+  }
+
+  /** Your feedback goes to Build, as Send to Build used to, or to Spec, where it opens an amendment. */
+  private async sendBackTo(
+    cardId: string, to: "build" | "spec", text: string, reading: { reason: string; points: SendBackPoint[] } | null,
+  ): Promise<CardSummary> {
+    if (to === "spec") return this.amend(cardId, text, reading);
     const held = this.db.issuesFor(cardId).filter((i) => i.status === "held");
-    if (!text && held.length === 0) throw new HttpError(400, "Write what's wrong first.");
     return this.oneMoveAtATime(cardId, async () => {
       await this.apps.clear(cardId);
       const developer = this.db.getSessionFor(cardId, "build", LANE_ROLE.build!);
       this.db.transaction(() => {
         this.db.updateCard(cardId, {
-          lane: to, build: null, check: null, feedback: text || null, appStopped: false, shipAfterCheck: false,
-          keeperFixes: held.length ? { from: "tryit", ids: held.map((i) => i.id) } : null,
+          lane: "build", build: null, check: null, feedback: text || null, appStopped: false, shipAfterCheck: false,
+          keeperFixes: held.length ? { from: "tryit", ids: held.map((i) => i.id) } : null, sendBack: null, judging: null,
         });
         this.db.setIssueStatus(held.map((i) => i.id), "sent");
         if (developer) this.db.updateSession(developer.id, { lastMessage: null });
         if (text) this.db.addEvent(cardId, "feedback", { text }, randomUUID());
       });
+      if (reading) this.addNote(cardId, "build", readingNote(reading.reason, reading.points));
       this.emitCard(cardId);
       void this.startDeveloper(cardId)
         .catch((error: unknown) => this.log(`Starting the developer of card ${cardId} failed: ${String(error)}`));
       return cardSummary(this.requireCard(cardId));
     });
+  }
+
+  // ---------- amendments (docs/specs/2026-11-28-try-it-send-back.md) ----------
+
+  /** The amendment the card carries, from Send back until it's next in Try it. */
+  private openAmendment(card: CardRow): AmendmentRow | null {
+    return card.amendment ? this.db.getAmendment(card.amendment) ?? null : null;
+  }
+
+  /**
+   * Into Spec with an amendment: Back to Spec's way in, except that held Change the code answers aren't settled but
+   * wait for the developer with your words. The spec writer then makes the amendment in a turn that ends with a report.
+   */
+  private async amend(cardId: string, text: string, reading: { reason: string; points: SendBackPoint[] } | null): Promise<CardSummary> {
+    const card = this.requireCard(cardId);
+    if (!card.specPath || !card.worktreePath) throw new HttpError(409, "This card has no spec to amend.");
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!);
+    if (!writer) throw new HttpError(409, "This card has no spec writer to amend its spec.");
+    return this.oneMoveAtATime(cardId, async () => {
+      await this.apps.clear(cardId);
+      await this.stopCardServers(cardId, "tryit");
+      let base: string;
+      try {
+        base = await this.deps.git.headCommit(card.worktreePath!);
+      } catch (error) {
+        throw new HttpError(409, `The card's branch couldn't be read: ${(error as Error).message}`);
+      }
+      const issues = this.db.issuesFor(cardId);
+      const unsettled: IssueStatus[] = ["open", "judged", "severe", "waiting"];
+      const settled = issues.filter((i) => unsettled.includes(i.status));
+      const held = issues.filter((i) => i.status === "held");
+      const id = randomUUID();
+      let amendment!: AmendmentRow;
+      this.db.transaction(() => {
+        this.db.setIssueStatus(settled.map((i) => i.id), "settled");
+        this.db.setIssueStatus(held.map((i) => i.id), "sent");
+        amendment = this.db.insertAmendment({ id, cardId, words: text, points: reading?.points ?? [], base });
+        this.db.updateCard(cardId, {
+          lane: "spec", reviewedSpecHash: null, reviewApplying: false, judging: null, sendBack: null, amendment: id,
+          feedback: text || null, keeperFixes: held.length ? { from: "tryit", ids: held.map((i) => i.id) } : null,
+          appStopped: false, shipAfterCheck: false,
+        });
+        this.db.addEvent(cardId, "feedback", { text, amendment: id }, randomUUID());
+      });
+      this.emitIssues(cardId);
+      this.emitCard(cardId);
+      this.watchSpec(cardId);
+      this.addNote(cardId, "spec", `Amendment ${amendment.n}, from your Try it feedback: ${text}`);
+      if (reading) this.addNote(cardId, "spec", readingNote(reading.reason, reading.points));
+      this.startAmendment(cardId, amendment, { kind: "tryit", settled });
+      return cardSummary(this.requireCard(cardId));
+    });
+  }
+
+  /** The spec writer's amendment turn: its message, and a report that says what changed and whether to review. */
+  private startAmendment(
+    cardId: string, amendment: AmendmentRow,
+    cause: { kind: "tryit"; settled: SpecIssue[] } | { kind: "stopped"; from: Lane; reason: string; settled: SpecIssue[] },
+  ): void {
+    const card = this.requireCard(cardId);
+    const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!)!;
+    this.db.updateAmendment(amendment.id, { step: "amending" });
+    let built = false;
+    try {
+      const role = this.deps.role(SPEC_AMENDER); // a broken role file fails here, before the turn
+      const point = (p: SendBackPoint) => `- ${p.kind}: ${p.what} (${p.why})`;
+      const opening = cause.kind === "tryit"
+        ? [
+            `This is Amendment ${amendment.n} to the signed-off spec at ${card.specPath}. The person tried the build in ` +
+              "Try it and sent it back with this feedback:",
+            "",
+            amendment.words,
+            ...(amendment.points.length
+              ? ["", "The spec keeper read it as:", ...amendment.points.map(point), "",
+                "Change the spec for the `spec` points only. The `bug` points go to the developer as they are."]
+              : []),
+          ]
+        : [
+            `Amendment ${amendment.n} to the spec at ${card.specPath} couldn't go on: the ` +
+              `${cause.from === "plan" ? "planner" : cause.from === "build" ? "developer" : "spec keeper"} stopped. ` +
+              "What it reported:",
+            "",
+            cause.reason,
+            "",
+            "The person sent the card back to Spec. Change the spec so the amendment can go on. The amendment began with " +
+              `this feedback from Try it: ${amendment.words}`,
+          ];
+      const message = [
+        role.instructions,
+        "",
+        ...opening,
+        ...(cause.settled.length
+          ? ["", "These spec issues were still open on the card. They're closed now; settle in the spec what needs it:",
+            issueList(cause.settled)]
+          : []),
+        "",
+        `Today is ${(this.deps.today ?? localDate)()}, for the Amendments line.`,
+        "",
+        "End with your report.",
+      ].join("\n");
+      built = true;
+      this.startTurn(cardId, writer.id, message, this.amendmentOptions());
+    } catch (error) {
+      this.db.updateSession(writer.id, { turnRunning: false, ...(built ? {} : { lastMessage: null }) });
+      this.setState(cardId, "needs-you");
+      this.addError(cardId, "spec", `The amendment couldn't start: ${sentence((error as Error).message)}`, ["retry"]);
+    }
+  }
+
+  /** The spec writer's options for an amendment turn: its own, plus the amendment report. */
+  private amendmentOptions(): TurnOptions {
+    return { ...this.turnOptions(LANE_ROLE.spec!), outputFormat: ROLE_TURNS[SPEC_AMENDER]!.report };
+  }
+
+  /** The card is in Spec and its amendment's turn is the spec writer's current one, or failed and waits for Retry. */
+  private amending(card: CardRow): AmendmentRow | null {
+    const amendment = card.lane === "spec" ? this.openAmendment(card) : null;
+    return amendment?.step === "amending" ? amendment : null;
+  }
+
+  /**
+   * The amendment turn ended. Its report says what changed and whether to review; plain code then decides: a review
+   * the writer skipped counts for the text it vouched for, you who took over sign off yourself, otherwise the blind
+   * review runs or the amendment signs off on its own.
+   */
+  private async onAmendmentEnded(cardId: string, outcome: TurnOutcome, stopped: boolean, withdrew: boolean): Promise<void> {
+    const amendment = this.openAmendment(this.requireCard(cardId))!;
+    const fail = (message: string) => this.addError(cardId, "spec", message, ["retry"]);
+    if (stopped || withdrew || (outcome.kind === "ok" && outcome.interrupted)) {
+      return fail("The amendment was stopped. Retry carries on with it.");
+    }
+    if (outcome.kind === "error") return fail(`The amendment failed: ${outcome.message}`);
+    const report = parseAmendmentReport(outcome.report);
+    if (!report) {
+      // A turn you started in the chat after the amendment's own turn failed has no report: that's your Spec visit now.
+      if (amendment.takenOver) {
+        this.db.updateAmendment(amendment.id, { step: "spec" });
+        return;
+      }
+      return fail("The spec writer didn't report on the amendment. Retry asks it again.");
+    }
+    if (report.status === "blocked") return fail(`The spec writer couldn't make the amendment: ${report.reason}`);
+    const card = this.requireCard(cardId);
+    const { hash } = readSpec(card.worktreePath!, card.specPath!);
+    this.db.updateAmendment(amendment.id, {
+      step: "spec", summary: report.summary, review: report.review, reason: report.reason,
+      skippedHash: report.review ? null : hash,
+    });
+    this.addNote(cardId, "spec", `Amendment ${amendment.n}: ${sentence(report.summary)} ` +
+      (report.review ? `It goes to the blind review: ${sentence(report.reason)}` : `No review needed: ${sentence(report.reason)}`));
+    this.emitCard(cardId);
+    this.refreshSpec(cardId);
+    if (amendment.takenOver) {
+      this.addNote(cardId, "spec", "You wrote in the chat, so Sign off is yours for this amendment.");
+      return;
+    }
+    if (!report.review) return this.autoSignoff(cardId);
+    let diff: string;
+    try {
+      diff = await this.deps.git.diffFile(card.worktreePath!, amendment.base, card.specPath!);
+      this.review(cardId, diff);
+    } catch (error) {
+      this.addError(cardId, "spec", `The blind review couldn't start: ${sentence((error as Error).message)}`, ["review"]);
+    }
+  }
+
+  /** The review is fresh during an open amendment: unless you took over, it signs off on its own. */
+  private afterReviewFresh(cardId: string): void {
+    const card = this.requireCard(cardId);
+    const amendment = card.lane === "spec" ? this.openAmendment(card) : null;
+    if (!amendment || amendment.takenOver || amendment.signedOff) return;
+    void this.autoSignoff(cardId);
+  }
+
+  /** Sign off on the amendment's behalf. A sign-off that fails leaves the card in Spec for you to press Sign off. */
+  private async autoSignoff(cardId: string): Promise<void> {
+    try {
+      await this.signoff(cardId, { auto: true });
+    } catch (error) {
+      if (this.gone(cardId)) return;
+      const n = this.openAmendment(this.requireCard(cardId))?.n;
+      this.addError(cardId, "spec",
+        `Amendment ${n} couldn't sign off on its own: ${sentence((error as Error).message)} Press Sign off.`, []);
+    }
+  }
+
+  /** The Review button: during an amendment, the blind reviewer is told what the amendment changed. */
+  async reviewFromPage(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    const amendment = card.lane === "spec" ? this.openAmendment(card) : null;
+    if (!amendment || !card.worktreePath || !card.specPath) return this.review(cardId);
+    let diff: string;
+    try {
+      diff = await this.deps.git.diffFile(card.worktreePath, amendment.base, card.specPath);
+    } catch (error) {
+      throw new HttpError(409, `The amendment's changes couldn't be read: ${(error as Error).message}`);
+    }
+    this.review(cardId, diff);
   }
 
   /** You accept the card: it goes on to Ship. */
@@ -1802,6 +2210,7 @@ export class Hive {
     const to = laneAfter(card.lane, "accept");
     if (!to) throw new HttpError(409, "Only a card in Try it can be accepted.");
     if (this.anyTurnRunning(cardId)) throw new HttpError(409, "Wait for the running turn to finish.");
+    if (card.sendBack) throw new HttpError(409, "Send your feedback, or edit it away first.");
     this.refuseWhileKeeperAsks(cardId);
     if (this.db.issuesFor(cardId).some((i) => i.status === "held")) {
       throw new HttpError(409, "You asked for code changes. Send them to Build first.");
@@ -2144,7 +2553,7 @@ export class Hive {
    * Each entry to Build: stop what the lane being left still runs on the card's ports, wait for the worktree's setup,
    * bring in main, then start the developer, or resume it with your Try it feedback, the bugs Check found, or the
    * revised spec and plan. Why the card is entering Build is read from what's stored, so Retry and a restart get it
-   * right too: `Card.feedback` is set only between Send to Build and the developer's next `done` report, and
+   * right too: `Card.feedback` is set only between Send back (or Ship sending the card back) and the developer's next `done` report, and
    * `Card.check` holding bugs only ever means the card came back from Check, since a new plan and your feedback clear
    * it and a round without bugs moves the card on. Whatever bringing in main did is told to the developer; there is no
    * separate error path for it.
@@ -2157,10 +2566,16 @@ export class Hive {
     this.deps.hub.emit({ type: "turn.started", cardId }); // so a start with no lane change shows the line during the merge
     try {
       const entering = this.requireCard(cardId);
-      const feedback = entering.feedback;
+      // An amendment's first Build visit gets its new plan, with your Try it feedback and held answers in the same
+      // message, ahead of the plain feedback branch (docs/specs/2026-11-28-try-it-send-back.md, Plan and Build).
+      const amendment = this.openAmendment(entering);
+      const viaAmendment = amendment?.step === "build" ? amendment : null;
+      const amendFixes = viaAmendment && entering.keeperFixes
+        ? this.db.issuesFor(cardId).filter((i) => entering.keeperFixes!.ids.includes(i.id)) : [];
+      const feedback = viaAmendment ? null : entering.feedback;
       // Code fixes from the spec keeper, or your held Change the code answers (docs/specs/2026-11-28-spec-keeper.md,
       // Back to the developer).
-      const fixes = entering.keeperFixes;
+      const fixes = viaAmendment ? null : entering.keeperFixes;
       const fixIssues = fixes ? this.db.issuesFor(cardId).filter((i) => fixes.ids.includes(i.id)) : [];
       const fromCheck = !feedback && !fixes && entering.check && entering.check.bugs.length > 0 ? entering.check : null;
       if (feedback || fromCheck || fixes) {
@@ -2223,7 +2638,31 @@ export class Hive {
         "whole build as it stands now. List only the issues and decisions that are new since your last report.";
       const keepChecklist = "Keep a task list as you work, one item per piece of the work, and keep its statuses " +
         "current: the person follows the build from it on the card page.";
-      const message = feedback && entering.shipAfterCheck
+      const message = viaAmendment
+        ? [
+            `This is Amendment ${viaAmendment.n}: ${sentence(viaAmendment.summary ?? "the spec was amended")} The spec ` +
+              `was amended and signed off again: ${card.specPath}, and the planner planned what's left. Bring your work ` +
+              "in line with the amended spec and the plan below, then end with your report.",
+            "",
+            ...(entering.feedback
+              ? ["The person's Try it feedback, which also had these points:", "", entering.feedback, ""]
+              : []),
+            ...(amendFixes.length
+              ? ["They also asked for these code changes, on spec issues the spec keeper raised:", keeperFixList(amendFixes), ""]
+              : []),
+            `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
+            "",
+            "`git status` may show files left from trying the app. Remove what doesn't belong before you report.",
+            "",
+            wholeBuild,
+            "",
+            keepChecklist,
+            "",
+            "The plan:",
+            "",
+            planText(card.plan),
+          ]
+        : feedback && entering.shipAfterCheck
         ? [
             "Landing the card on main stopped:",
             "",
@@ -2307,6 +2746,7 @@ export class Hive {
               planText(card.plan),
             ];
       this.startTurn(cardId, developer.id, withRunning(card, message).join("\n"), this.turnOptions(roleName));
+      if (viaAmendment) this.db.updateAmendment(viaAmendment.id, { step: "after" });
     } catch (error) {
       if (!this.gone(cardId)) this.addError(cardId, "build", `Build couldn't start: ${(error as Error).message}`, ["retry"]);
     } finally {
@@ -2422,6 +2862,7 @@ export class Hive {
       "",
       "Decisions made without the person. They aren't bugs unless they break something:",
       list(this.db.decisionsFor(card.id).map((d) => d.what)),
+      ...this.askedInTryIt(card, "reviewer"),
     ];
     if (card.check && card.check.bugs.length > 0) {
       parts.push(
@@ -2482,7 +2923,8 @@ export class Hive {
           this.db.updateCard(cardId, { check });
         } else {
           this.addNote(cardId, "check", to === "ship" ? `Round ${check.round}: no bugs. Back to Ship.` : `Round ${check.round}: no bugs.`);
-          this.db.updateCard(cardId, { check, lane: to, shipAfterCheck: false });
+          // Reaching Try it ends an open amendment's trip (docs/specs/2026-11-28-try-it-send-back.md).
+          this.db.updateCard(cardId, { check, lane: to, shipAfterCheck: false, ...(to === "tryit" ? { amendment: null } : {}) });
         }
       } else if (to === "build") {
         this.addNote(cardId, "check", `Round ${check.round} found ${bugs}. Back to the developer.`);
@@ -2514,10 +2956,14 @@ export class Hive {
 
   // ---------- the spec keeper (docs/specs/2026-11-28-spec-keeper.md) ----------
 
-  /** A keeper turn's options: the spec writer's, plus the keeper's report on a turn that judges. */
+  /**
+   * A keeper turn's options: the spec writer's, plus the report its kind ends with: the keeper's on a turn that judges,
+   * the feedback reader's on a Send back pick, none on an `answers` turn.
+   */
   private keeperOptions(judging: KeeperJudging): TurnOptions {
     const options = this.turnOptions(LANE_ROLE.spec!);
-    return judging.kind === "answers" ? options : { ...options, outputFormat: ROLE_TURNS[SPEC_KEEPER]!.report };
+    if (judging.kind === "answers") return options;
+    return { ...options, outputFormat: ROLE_TURNS[judging.kind === "send-back" ? FEEDBACK_READER : SPEC_KEEPER]!.report };
   }
 
   /**
@@ -2576,9 +3022,32 @@ export class Hive {
       `The spec is ${card.specPath}. Read the branch against the base it was built on, in your working folder: ` +
         "`git diff origin/main...HEAD` if the repo has an origin remote, otherwise `git diff main...HEAD`.",
       `Today is ${(this.deps.today ?? localDate)()}, for the Amendments lines.`,
+      ...(kind === "blocking" ? [] : this.askedInTryIt(card, "keeper")),
       "",
       "End with your report: one judgment for each issue above, by its id.",
     ].join("\n");
+  }
+
+  /**
+   * What you asked for in Try it, for Check's reviewer and the keeper, so a change you asked for isn't undone as a
+   * mismatch: every piece of feedback on the card, oldest first, and the amendment under way
+   * (docs/specs/2026-11-28-try-it-send-back.md, What the reviewer and the keeper are told).
+   */
+  private askedInTryIt(card: CardRow, who: "reviewer" | "keeper"): string[] {
+    const asked = this.db.eventsOf(card.id, ["feedback"]).map((r) => String(r.data.text ?? "")).filter(Boolean);
+    if (asked.length === 0) return [];
+    const amendment = this.openAmendment(card);
+    return [
+      "",
+      who === "reviewer"
+        ? "What the person asked for in Try it, oldest first; later words win over earlier ones. A difference from the " +
+          "spec that they asked for is still a spec issue, so the spec catches up: say in it that they asked for it."
+        : "What the person asked for in Try it, oldest first; later words win over earlier ones. It stands where the " +
+          "spec doesn't already settle the point: an issue that is one of these is `spec-wrong` and `minor`. Where an " +
+          "amendment or a later answer settled a point differently, the spec wins.",
+      list(asked),
+      ...(amendment ? [`This round carries Amendment ${amendment.n}: ${sentence(amendment.summary ?? amendment.words)}`] : []),
+    ];
   }
 
   /** The end of a keeper turn, whichever kind it was. */
@@ -2587,6 +3056,7 @@ export class Hive {
     if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return this.keeperFailed(cardId, "The spec keeper was stopped.");
     if (outcome.kind === "error") return this.keeperFailed(cardId, `The spec keeper failed: ${outcome.message}`);
     if (judging.kind === "answers") return this.onAnswersEnded(cardId, judging);
+    if (judging.kind === "send-back") return this.onSendBackEnded(cardId, outcome.report);
     const report = parseKeeperReport(outcome.report, judging.issueIds);
     if (!report) return this.keeperFailed(cardId, "The spec keeper didn't judge every issue.");
     if (report.status === "blocked") return this.keeperFailed(cardId, `The spec keeper couldn't judge: ${report.reason}`);
@@ -2601,8 +3071,11 @@ export class Hive {
    * takes the card on past it, its issues not judged; in Build, Back to Spec stays the way out of a blocked build.
    */
   private keeperFailed(cardId: string, message: string): void {
-    const lane = this.requireCard(cardId).lane;
-    const actions: ErrorAction[] = lane === "check" ? ["retry", "move-on"] : lane === "build" ? ["retry", "back-to-spec"] : ["retry"];
+    const card = this.requireCard(cardId);
+    const lane = card.lane;
+    // A failed Send back pick offers both lanes for your words (docs/specs/2026-11-28-try-it-send-back.md).
+    const actions: ErrorAction[] = lane === "check" ? ["retry", "move-on"] : lane === "build" ? ["retry", "back-to-spec"]
+      : card.judging?.kind === "send-back" ? ["retry", "back-to-build", "back-to-spec"] : ["retry"];
     this.addError(cardId, lane, message, actions);
   }
 
@@ -2746,7 +3219,7 @@ export class Hive {
       ? [{ label: CHANGE_THE_SPEC, description: "The spec keeper changes the spec, and the developer carries on." },
         { label: KEEP_THE_SPEC, description: "The developer carries on with the spec as it is." }]
       : [{ label: KEEP_AS_BUILT, description: "The spec changes to describe what was built." },
-        { label: CHANGE_THE_CODE, description: "The code changes to match the spec, when you press Send to Build." }];
+        { label: CHANGE_THE_CODE, description: "The code changes to match the spec, when you press Send back." }];
     const specFirst = j.verdict !== "code-wrong";
     const options = (specFirst ? [spec, code] : [code, spec])
       .map((o, i) => (i === 0 ? { ...o, description: `${recommended} ${o.description}` } : o));
@@ -2789,7 +3262,7 @@ export class Hive {
   /**
    * Your answers to a keeper question, routed by plain code (Your answer in Try it, A blocked build). Answering never
    * moves the card: Keep it as built and your own words go to the keeper to change the spec at once; Change the code
-   * and your own words are held for Send to Build. On a blocked build, Change the spec (or your words) goes to the keeper
+   * and your own words are held for Send back. On a blocked build, Change the spec (or your words) goes to the keeper
    * and Keep the spec straight back to the developer.
    */
   private answerKeeper(cardId: string, questions: Question[], issueIds: string[], answers: Record<string, string>): void {
@@ -2873,10 +3346,13 @@ export class Hive {
     ].join("\n"));
   }
 
-  /** Send to Build and Accept wait for the spec keeper: a question to answer, or a turn of its that failed. */
+  /** Send back and Accept wait for the spec keeper: a question to answer, or a turn of its that failed. */
   private refuseWhileKeeperAsks(cardId: string): void {
     const card = this.requireCard(cardId);
-    if (card.judging) throw new HttpError(409, "The spec keeper's last turn didn't finish. Retry it first.");
+    // A failed pick doesn't block: Send back with a lane is the way past it, and Accept refuses on `sendBack` itself.
+    if (card.judging && card.judging.kind !== "send-back") {
+      throw new HttpError(409, "The spec keeper's last turn didn't finish. Retry it first.");
+    }
     const open = this.db.openPendingFor(cardId);
     const asking = open?.item.kind === "question" && !!open.item.issueIds;
     if (asking || this.db.issuesFor(cardId).some((i) => i.status === "waiting")) {
@@ -2926,12 +3402,26 @@ export class Hive {
           this.startTurn(card.id, session.id,
             resend || (judging.kind === "answers"
               ? "Your last turn was cut off when the hive stopped. Finish changing the spec to match the person's answers."
-              : "Your last turn was cut off when the hive stopped. Finish judging the issues, then end with your report."),
+              : judging.kind === "send-back"
+                ? "Your last turn was cut off when the hive stopped. Finish reading the person's feedback, then end with your report."
+                : "Your last turn was cut off when the hive stopped. Finish judging the issues, then end with your report."),
             this.keeperOptions(judging));
         } catch (error) {
           this.db.updateSession(session.id, { turnRunning: false });
           this.db.updateCard(card.id, { state: "needs-you" });
           this.keeperFailed(card.id, `The spec keeper couldn't restart: ${(error as Error).message}`);
+        }
+      } else if (session.role === LANE_ROLE.spec && this.amending(card) && !this.amending(card)!.takenOver) {
+        // An amendment's turn runs without you, unless you took over: resumed once, like a keeper turn.
+        try {
+          const resend = !session.existsYet && session.lastMessage;
+          this.startTurn(card.id, session.id,
+            resend || "Your last turn was cut off when the hive stopped. Finish the amendment, then end with your report.",
+            this.amendmentOptions());
+        } catch (error) {
+          this.db.updateSession(session.id, { turnRunning: false });
+          this.db.updateCard(card.id, { state: "needs-you" });
+          this.addError(card.id, "spec", `The amendment couldn't restart: ${(error as Error).message}`, ["retry"]);
         }
       } else if (session.role === LANE_ROLE.spec && card.reviewApplying) {
         this.addError(card.id, "spec",
@@ -3121,7 +3611,9 @@ export class Hive {
         else if (session.role === LANE_ROLE.check) this.onReviewerEnded(cardId, outcome, stopped);
         else if (session.role === SETUP) this.onSetupEnded(cardId, sessionId, outcome, stopped);
         else if (keeper) await this.onKeeperEnded(cardId, outcome, stopped);
-        else if (session.role === LANE_ROLE.spec && this.requireCard(cardId).reviewApplying) {
+        else if (session.role === LANE_ROLE.spec && this.amending(this.requireCard(cardId))) {
+          await this.onAmendmentEnded(cardId, outcome, stopped, withdrew);
+        } else if (session.role === LANE_ROLE.spec && this.requireCard(cardId).reviewApplying) {
           this.onWriterEnded(cardId, outcome, stopped, withdrew);
         } else if (outcome.kind === "error" && !stopped) {
           this.addError(cardId, session.lane, outcome.message, ["retry"]);
@@ -3438,6 +3930,7 @@ export class Hive {
       review: reviewState({
         hash,
         reviewedSpecHash: card.reviewedSpecHash,
+        skippedHash: card.lane === "spec" ? this.openAmendment(card)?.skippedHash ?? null : null,
         reviewApplying: card.reviewApplying,
         reviewerRunning: this.reviews.has(cardId),
         writerRunning: !!writer && this.turns.has(writer.id),

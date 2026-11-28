@@ -180,6 +180,23 @@ export async function fileAt(root: string, commit: string, path: string): Promis
   return show.stdout;
 }
 
+/** The commit the worktree's branch is at: `git rev-parse HEAD`. */
+export async function headCommit(worktree: string): Promise<string> {
+  const head = await git(worktree, ["rev-parse", "HEAD"]);
+  if (!head.ok) throw new GitError(reason(head.stderr));
+  return head.stdout.trim();
+}
+
+/**
+ * One file's changes since a commit, as it is on disk now: `git diff <commit> -- <path>`. An amendment's spec diff
+ * (docs/specs/2026-11-28-try-it-send-back.md); empty when the file hasn't changed.
+ */
+export async function diffFile(worktree: string, commit: string, path: string): Promise<string> {
+  const diff = await git(worktree, ["diff", commit, "--", path]);
+  if (!diff.ok) throw new GitError(reason(diff.stderr));
+  return diff.stdout;
+}
+
 /** What bringing in main did (docs/specs/2026-11-26-build-lane-developer.md, Starting the developer). */
 export type MergeResult =
   | { kind: "clean"; commits: number }

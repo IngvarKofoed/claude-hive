@@ -82,6 +82,8 @@ export const api = {
   // Try it: send your words to Build, accept into Ship, bring a Ship card back, and run the worktree setup.
   feedback: (id: string, text: string) =>
     request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/feedback`, { text } satisfies FeedbackBody),
+  // Try it: take your words back after a failed pick, so Accept and the box are yours again.
+  editSendBack: (id: string) => request<CardSummary>("DELETE", `/cards/${encodeURIComponent(id)}/send-back`),
   accept: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/accept`),
   deleteCard: (id: string) => request<DeleteResult>("DELETE", `/cards/${encodeURIComponent(id)}`),
   backToTryIt: (id: string) => request<CardSummary>("POST", `/cards/${encodeURIComponent(id)}/back-to-tryit`),

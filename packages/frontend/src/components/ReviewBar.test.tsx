@@ -41,6 +41,8 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     turnRunning: false,
     landed: null,
     landing: false,
+    sendBack: null,
+    amendment: null,
     ...over,
   };
 }
@@ -55,6 +57,7 @@ const cases: Array<[ReviewState, string, boolean, boolean]> = [
   ["unfinished", "Review not finished: retry", false, false],
   ["fresh", "Reviewed: you can sign off", false, true],
   ["stale", "Changed since the review", true, false],
+  ["skipped", "Review skipped by the spec writer: you can sign off", true, true],
 ];
 
 describe("ReviewBar", () => {

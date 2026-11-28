@@ -38,6 +38,8 @@ const detail: CardDetail = {
   turnRunning: false,
   landed: null,
   landing: false,
+  sendBack: null,
+  amendment: null,
 };
 
 const plan: ShipPlan = {
@@ -82,10 +84,10 @@ describe("laneActionsFor", () => {
 
   it("reads the issues' statuses and Try it's feedback box", () => {
     const tryit = { ...detail, lane: "tryit" as const };
-    expect(actionOf(laneActionsFor(tryit), "send-to-build")?.enabled).toBe(false);
-    expect(actionOf(laneActionsFor(tryit, { hasFeedback: true }), "send-to-build")?.enabled).toBe(true);
+    expect(actionOf(laneActionsFor(tryit), "send-back")?.enabled).toBe(false);
+    expect(actionOf(laneActionsFor(tryit, { hasFeedback: true }), "send-back")?.enabled).toBe(true);
     expect(actionOf(laneActionsFor({ ...tryit, issues: [issue("held")] }), "accept")?.reason).toBe(
-      "Changes you asked for go to Build with Send to Build.",
+      "Changes you asked for go to Build with Send back.",
     );
     expect(actionOf(laneActionsFor({ ...tryit, issues: [issue("waiting")] }), "accept")?.reason).toBe(
       "Answer the spec keeper's question first.",

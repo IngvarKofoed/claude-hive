@@ -295,7 +295,7 @@ describe("the spec keeper", () => {
       await turn.end();
       await waitFor(() => hive.card(id).state === "needs-you");
 
-      await hive.feedback(id, { text: "Also the label overlaps." });
+      await hive.feedback(id, { text: "Also the label overlaps.", lane: "build" });
       await waitFor(() => turnsOf("developer").length === 2);
       const message = lastOf("developer").request.message;
       expect(message).toContain("Also the label overlaps.");

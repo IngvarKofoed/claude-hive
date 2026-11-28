@@ -12,6 +12,7 @@ export const REVIEW_TEXT: Record<ReviewState, string> = {
   unfinished: "Review not finished: retry",
   fresh: "Reviewed: you can sign off",
   stale: "Changed since the review",
+  skipped: "Review skipped by the spec writer: you can sign off",
 };
 
 interface Props {

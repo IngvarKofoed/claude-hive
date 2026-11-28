@@ -40,6 +40,8 @@ const base: CardDetail = {
   turnRunning: false,
   landed: null,
   landing: false,
+  sendBack: null,
+  amendment: null,
 };
 const message = (id: string) => ({ kind: "message", id, at: "t", from: "product-owner", text: `msg ${id}` }) as const;
 const withChat = (...ids: string[]): CardDetail => ({ ...base, chat: ids.map(message) });

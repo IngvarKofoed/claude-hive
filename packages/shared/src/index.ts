@@ -90,9 +90,11 @@ export interface MockupInfo {
  * Where the spec stands with the review gate (docs/specs/2026-11-26-spec-lane-review-gate.md):
  * none: no review yet · running: the blind reviewer is reading · applying: the spec writer is applying its findings ·
  * unfinished: the review turn ended without finishing (Retry re-sends the findings) ·
- * fresh: the file is the reviewed text, so Sign off is enabled · stale: the file changed since the review.
+ * fresh: the file is the reviewed text, so Sign off is enabled · stale: the file changed since the review ·
+ * skipped: an amendment's spec writer chose no review, and the file is the text it vouched for, so Sign off is enabled
+ * (docs/specs/2026-11-28-try-it-send-back.md).
  */
-export type ReviewState = "none" | "running" | "applying" | "unfinished" | "fresh" | "stale";
+export type ReviewState = "none" | "running" | "applying" | "unfinished" | "fresh" | "stale" | "skipped";
 
 export interface SpecInfo {
   /** Relative to the card's worktree, e.g. docs/specs/2026-11-26-printer-font-size.md. */
@@ -193,7 +195,7 @@ export interface IssueJudgment {
  * - `judged`: judged in a batch that stopped on a severe issue, and not acted on yet;
  * - `severe`: the severe issue that stopped the card;
  * - `waiting`: waits for your answer;
- * - `held`: you answered Change the code (or in your own words); it goes to Build when you press Send to Build;
+ * - `held`: you answered Change the code (or in your own words); it goes to Build when you press Send back;
  * - `kept`: you answered Keep it as built (or Change the spec, for a blocked build); the spec changes to match;
  * - `settled`: closed by Back to Spec.
  */
@@ -284,8 +286,37 @@ export interface CheckRecord extends CheckRound {
   issues: ReportedIssue[];
 }
 
-/** One of Try it's rounds: a piece of your feedback, or your acceptance. */
-export type TryItRound = { kind: "feedback"; text: string } | { kind: "accepted" };
+/** One point of your Try it feedback, as the spec keeper read it: a bug for Build, or a change to the spec. */
+export interface SendBackPoint {
+  what: string;
+  kind: "bug" | "spec";
+  why: string;
+}
+
+/**
+ * A change to a signed-off spec, made from your Try it feedback: a numbered round the card carries through Spec, Plan,
+ * Build, Check and Try it (docs/specs/2026-11-28-try-it-send-back.md).
+ */
+export interface AmendmentInfo {
+  /** Amendment 1, 2, … on this card. */
+  n: number;
+  /** Your words from Try it. */
+  words: string;
+  /** How the spec keeper read them. */
+  points: SendBackPoint[];
+  /** What the spec writer changed; null until its amendment turn reports. */
+  summary: string | null;
+  /** Who signed it off; null while it's still in Spec. */
+  signedOff: "auto" | "you" | null;
+  /** A blind review read it before sign-off. */
+  reviewed: boolean;
+}
+
+/** One of Try it's rounds: a piece of your feedback, an amendment it started, or your acceptance. */
+export type TryItRound =
+  | { kind: "feedback"; text: string }
+  | { kind: "amendment"; amendment: AmendmentInfo }
+  | { kind: "accepted" };
 
 /**
  * What the later lanes produced, newest round first, from the card's event rows
@@ -557,6 +588,13 @@ export interface CardDetail extends CardSummary {
   feedback: string | null;
   /** Ship sent the card back to Build, so `feedback` is Ship's reason and the card returns to Ship after Check. */
   shipAfterCheck: boolean;
+  /**
+   * Your Send back words while the spec keeper reads them, or after a pick that failed, until the card leaves Try it
+   * or you edit them (docs/specs/2026-11-28-try-it-send-back.md).
+   */
+  sendBack: { text: string } | null;
+  /** The amendment the card is carrying, from Send back until it's next in Try it; null when none is open. */
+  amendment: AmendmentInfo | null;
   /** The developer session's own task list, live in Build; null until it starts one. */
   checklist: ChecklistItem[] | null;
   /** The card's app as the hive runs it in Try it; empty elsewhere. */
@@ -642,9 +680,10 @@ export interface LandBody {
 
 /** Try it feedback (POST /api/cards/:id/feedback). Only `build` is accepted as the lane for now. */
 export interface FeedbackBody {
-  /** May be empty when Change the code answers are held: Send to Build then carries only those. */
+  /** May be empty when Change the code answers are held: Send back then carries only those, to Build. */
   text: string;
-  lane?: Lane;
+  /** Without it, the spec keeper reads the words and picks the lane; with it, the card goes there at once. */
+  lane?: "build" | "spec";
 }
 
 export interface MessageBody {

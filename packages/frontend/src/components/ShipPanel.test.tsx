@@ -9,6 +9,8 @@ const detail = {
   id: "c1",
   lane: "ship",
   landing: false,
+  sendBack: null,
+  amendment: null,
   chat: [],
   issues: [],
   pending: null,

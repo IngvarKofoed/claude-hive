@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CardDetail, ErrorAction, ForYouItem, PendingItem, ShipPlan } from "@hive/shared";
+import type { AmendmentInfo, CardDetail, ErrorAction, ForYouItem, PendingItem, ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
 import type { CardLive } from "../components/cardState";
 import { ForYouProvider, useForYou } from "../components/forYou";
@@ -54,6 +54,8 @@ const detail: CardDetail = {
   turnRunning: false,
   landed: null,
   landing: false,
+  sendBack: null,
+  amendment: null,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -76,6 +78,14 @@ describe("LaneView", () => {
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
     expect(headings.indexOf("Mockup")).toBeGreaterThan(-1);
     expect(headings.indexOf("Mockup")).toBeLessThan(headings.indexOf("Brief"));
+  });
+
+  it("shows the amendment band above the Spec when the card carries one", () => {
+    show({ lane: "spec", amendment: { ...amendment, summary: null, signedOff: null } });
+    const band = screen.getByRole("note");
+    expect(within(band).getByText("Amendment 1")).toBeInTheDocument();
+    expect(within(band).getByText("Make it per printer")).toBeInTheDocument();
+    expect(within(band).queryByText("Settings are now per printer.")).toBeNull();
   });
 
   it("gives Refine two Good buttons", () => {
@@ -199,6 +209,14 @@ function page(card: CardDetail, url: string) {
   );
 }
 
+const amendment: AmendmentInfo = {
+  n: 1,
+  words: "Make it per printer",
+  points: [{ what: "Per printer", kind: "spec", why: "the what was wrong" }],
+  summary: "Settings are now per printer.",
+  signedOff: "auto",
+  reviewed: false,
+};
 const emptyHistory = { plans: [], builds: [], checks: [], tryit: [] };
 const done = (history: Partial<CardDetail["history"]>, over: Partial<CardDetail> = {}): CardDetail => ({
   ...specCard,
@@ -298,6 +316,23 @@ describe("looking back at the later lanes' rounds", () => {
     expect(screen.getAllByText(/^Feedback \d$/).map((h) => h.textContent)).toEqual(["Feedback 2", "Feedback 1"]);
     expect(screen.getByText(/second line one/).textContent).toBe("second line one\nsecond line two");
     expect(foldOf("Feedback 1")).not.toHaveAttribute("open");
+  });
+
+  it("shows an amendment round with its words, summary and sign-off, apart from the feedback count", () => {
+    page(
+      done({
+        tryit: [
+          { kind: "amendment", amendment },
+          { kind: "feedback", text: "first" },
+        ],
+      }),
+      "/cards/c1?lane=tryit",
+    );
+    expect(screen.getByRole("heading", { name: "Amendment 1" })).toBeInTheDocument();
+    expect(screen.getByText("Make it per printer")).toBeInTheDocument();
+    expect(screen.getByText("Settings are now per printer.")).toBeInTheDocument();
+    expect(screen.getByText("signed off on its own, review skipped")).toBeInTheDocument();
+    expect(foldOf("Feedback 1")).not.toBeNull();
   });
 
   it("shows no Accepted when the card wasn't accepted", () => {
@@ -672,7 +707,7 @@ describe("back to For you after a lane action", () => {
     { action: "Good · don't keep", card: mockupCard, call: "good", args: ["c1", { keep: false }] },
     { action: "Sign off", card: { ...specCard, spec: { ...specCard.spec!, review: "fresh" } }, call: "signoff", args: ["c1"] },
     {
-      action: "Send to Build",
+      action: "Send back",
       card: tryItCard,
       call: "feedback",
       args: ["c1", "The label overlaps."],
