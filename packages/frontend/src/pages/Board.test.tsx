@@ -50,6 +50,7 @@ describe("Board", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.spyOn(api, "board").mockResolvedValue(board);
+    vi.spyOn(api, "folders").mockResolvedValue({ folders: [], more: 0 });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -208,5 +209,71 @@ describe("Board", () => {
 
   it("has bands that cover every lane once, in order", () => {
     expect(PHASE_BANDS.flatMap((band) => band.lanes)).toEqual(LANES.map((lane) => lane.id));
+  });
+
+  describe("adding a project", () => {
+    const NEW_BOARD: BoardResponse = {
+      projects: [...board.projects, { id: "p2", name: "newdir", path: "/tmp/newdir", trustWarning: false }],
+      cards: board.cards,
+    };
+
+    async function typeMissing(post = vi.spyOn(api, "addProject")) {
+      post.mockResolvedValue({ missing: "/tmp/newdir" });
+      await renderBoard();
+      await userEvent.type(screen.getByLabelText("Project path"), "/tmp/newdir");
+      await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+      await screen.findByRole("group", { name: "Create this folder" });
+      return post;
+    }
+
+    it("asks before creating a missing folder, and Cancel, Escape and editing each drop the row", async () => {
+      const post = await typeMissing();
+      expect(screen.getByText("/tmp/newdir doesn't exist. Create it and make it a git repo?")).toBeInTheDocument();
+      expect(screen.getByLabelText("Project path")).toHaveValue("/tmp/newdir");
+
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+      await screen.findByRole("group", { name: "Create this folder" });
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+      await screen.findByRole("group", { name: "Create this folder" });
+      await userEvent.type(screen.getByLabelText("Project path"), "x");
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+      expect(post).toHaveBeenCalledTimes(3);
+    });
+
+    it("Create folder posts the same path with create: true, then shows the new project", async () => {
+      const post = await typeMissing();
+      post.mockResolvedValue(NEW_BOARD);
+      await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
+      expect(post).toHaveBeenLastCalledWith({ path: "/tmp/newdir", create: true });
+      await screen.findByText(/2 projects/);
+      expect(screen.getByLabelText("Project path")).toHaveValue("");
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+    });
+
+    it("shows a refusal in the error line in place of the row", async () => {
+      const post = await typeMissing();
+      post.mockRejectedValue(new Error("Permission denied"));
+      await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Permission denied");
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+    });
+
+    it("an Escape that closes the folder list leaves the row in place", async () => {
+      vi.spyOn(api, "folders").mockResolvedValue({ folders: [{ name: "newdir/", value: "/tmp/newdir/" }], more: 0 });
+      await typeMissing();
+      await userEvent.click(screen.getByLabelText("Project path"));
+      await screen.findByRole("listbox");
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(screen.getByRole("group", { name: "Create this folder" })).toBeInTheDocument();
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("group", { name: "Create this folder" })).toBeNull();
+    });
   });
 });

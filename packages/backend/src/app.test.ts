@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -85,8 +85,35 @@ describe("the API's local-only guard", () => {
     const json = { host: `127.0.0.1:${port}`, "content-type": "application/json" };
     const foreign = await send("POST", "/api/projects", { ...json, origin: "https://evil.example" }, '{"path":"/"}');
     expect(foreign.status).toBe(403);
-    const dev = await send("POST", "/api/projects", { ...json, origin: "http://localhost:5173" }, '{"path":"/nope"}');
+    const dev = await send("POST", "/api/projects", { ...json, origin: "http://localhost:5173" }, '{"path":"nope"}');
     expect(dev.status).toBe(400); // past the guard, refused by the hive itself
+  });
+
+  // docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md
+  describe("folders for a project", () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = realpathSync(mkdtempSync(join(tmpdir(), "hive-api-folders-")));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("completes a typed path with folder names only, behind the guard", async () => {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "secret.txt"), "x");
+      const path = `/api/folders?path=${encodeURIComponent(`${dir}/`)}`;
+      const r = await send("GET", path, { host: `127.0.0.1:${port}` });
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual({ folders: [{ name: "src", value: `${dir}/src/` }], more: 0 });
+      expect((await send("GET", path, { host: `evil.example:${port}` })).status).toBe(403);
+    });
+
+    it("answers 200 { missing } for a project path that doesn't exist", async () => {
+      const missing = join(dir, "new");
+      const json = { host: `127.0.0.1:${port}`, "content-type": "application/json" };
+      const r = await send("POST", "/api/projects", json, JSON.stringify({ path: missing }));
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual({ missing });
+    });
   });
 
   it("refuses a body that isn't JSON", async () => {

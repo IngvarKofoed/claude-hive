@@ -312,7 +312,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 
 | When | What the git service does |
 | --- | --- |
-| Project added | A folder that isn't a repo gets `git init` and a first commit of what's in it |
+| Project added | Only a repo's top folder is added as it is. An empty folder (`.DS_Store` doesn't count), a new one you confirmed, or a repo's top with no commits and no files gets `git init -b main` (skipped when there's already a `.git`, where `HEAD` is pointed at `main`) and an empty first commit in your own git identity; a failed commit leaves the folder as it was. A folder with files that isn't a repo, a folder inside a repo, a worktree and git's own data are refused, naming the repo by its main checkout (by its bare repo or git dir when git knows no checkout) |
 | Card enters Refine | `git worktree add <repo>/.claude/worktrees/<card> -b hive/<card> <base>`, where the base is a freshly fetched `origin/main`, or main without a remote; then the worktree's setup in the background. A setup session picks the git-ignored local files the app needs, and the hive copies them: never over an existing file, as copy-on-write clones, never from outside the checkout. The session installs dependencies and works out how to start the app and its tests on the card's ports. |
 | Card enters Mockup | The card's folder `docs/mockups/<card>/` is made, named after the worktree. Keep commits it alone with `commitFile`; sign-off deletes one you didn't keep. |
 | Mockup versions | One worktree per version, branched from the card's. The designer builds them one after another. The ones you don't pick are removed. |
@@ -381,8 +381,9 @@ GET    /api/roles                         Every role: its file, and what its ses
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards
 GET    /api/rules  · POST · PATCH         Rulebooks and suggested rules
-GET    /api/projects · POST · PATCH       Projects and their settings
+GET    /api/projects · POST · PATCH       Projects and their settings; POST { path, create? } answers { missing } for a folder that doesn't exist
 POST   /api/projects/:id/check            Run the trust probe again
+GET    /api/folders?path=                 The folder names that complete a typed path, as whole field values
 GET    /api/usage                         Plan usage: 5-hour and 7-day windows
 GET    /api/health                        Status and the app's version
 GET    /api/events                        SSE stream

@@ -104,21 +104,30 @@
   color: var(--color-text-secondary);
 }
 
-.input {
-  min-height: var(--target-min);
-  min-width: var(--project-col-width);
-  padding: 0 var(--space-5);
-  border: var(--border-width) solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-}
-
 .error {
   padding: var(--space-3) var(--space-5);
   border: var(--border-width) solid var(--color-stopped-border);
   border-radius: var(--radius-sm);
   background: var(--color-stopped-bg);
   color: var(--color-stopped-text);
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-5);
+  border: var(--border-width) solid var(--color-stopped-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-stopped-bg);
+  color: var(--color-stopped-text);
+  overflow-wrap: anywhere;
+}
+
+.confirmActions {
+  display: flex;
+  gap: var(--space-3);
 }
 
 .scroll {

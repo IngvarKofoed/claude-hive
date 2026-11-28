@@ -6,6 +6,7 @@ import { useHiveEvents, useStreamOpen } from "../api/events";
 import { boardSummary } from "../components/cardBadge";
 import { Header } from "../components/Header";
 import { ProjectPanel } from "../components/ProjectPanel";
+import { ProjectPathInput } from "../components/ProjectPathInput";
 import { ProjectRow } from "../components/ProjectRow";
 import { Button } from "../components/ui/Button";
 import styles from "./Board.module.css";
@@ -90,6 +91,8 @@ export function Board() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [path, setPath] = useState("");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [missing, setMissing] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [layout, setLayout] = useState<Layout>(readLayout);
   const [compact, setCompact] = useState(readCompact);
 
@@ -133,17 +136,38 @@ export function Board() {
     storeCompact(next);
   }
 
-  async function addProject() {
+  async function addProject(create = false) {
     const value = path.trim();
     if (!value) return;
     setProjectError(null);
+    if (create) setCreating(true);
     try {
-      applyBoard(await api.addProject({ path: value }));
-      setPath("");
+      const answer = await api.addProject({ path: value, create });
+      if ("missing" in answer) {
+        setMissing(answer.missing);
+      } else {
+        applyBoard(answer);
+        setPath("");
+        setMissing(null);
+      }
     } catch (err) {
       setProjectError(err instanceof Error ? err.message : "Could not add the project.");
+      setMissing(null);
+    } finally {
+      setCreating(false);
     }
   }
+
+  // Escape cancels the confirm row, unless the folder list took it first (it calls preventDefault).
+  useEffect(() => {
+    if (missing === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") setMissing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [missing]);
 
   // A drop on Refine and Start make the same move, so a failure shows the same way: in the error line above the
   // board, and on the tile when the backend stored a move error.
@@ -204,20 +228,33 @@ export function Board() {
             <label className={styles.label} htmlFor="project-path">
               Project path
             </label>
-            <input
+            <ProjectPathInput
               id="project-path"
-              className={styles.input}
-              type="text"
-              placeholder="/path/to/your/repo"
               value={path}
-              onChange={(event) => setPath(event.target.value)}
+              placeholder="~/path/to/a/repo or an empty folder"
+              onChange={(value) => {
+                setPath(value);
+                setMissing(null);
+              }}
             />
             <Button type="submit" variant="primary" disabled={!path.trim()}>
               Add project
             </Button>
           </form>
         </div>
-        {projectError ? (
+        {missing !== null ? (
+          <div className={styles.confirm} role="group" aria-label="Create this folder">
+            <p>{missing} doesn't exist. Create it and make it a git repo?</p>
+            <div className={styles.confirmActions}>
+              <Button compact variant="primary" disabled={creating} onClick={() => void addProject(true)}>
+                Create folder
+              </Button>
+              <Button compact onClick={() => setMissing(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : projectError ? (
           <p className={styles.error} role="alert">
             {projectError}
           </p>

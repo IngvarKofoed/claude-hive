@@ -1,5 +1,7 @@
 import type {
   AddProjectBody,
+  AddProjectResponse,
+  FolderCompletions,
   AnswerBody,
   ApiError,
   BoardResponse,
@@ -54,7 +56,8 @@ export const api = {
   forYou: () => request<ForYouResponse>("GET", "/for-you"),
   roles: () => request<RolesResponse>("GET", "/roles"),
   // Both return the whole board, with the project as it now stands.
-  addProject: (body: AddProjectBody) => request<BoardResponse>("POST", "/projects", body),
+  addProject: (body: AddProjectBody) => request<AddProjectResponse>("POST", "/projects", body),
+  folders: (path: string) => request<FolderCompletions>("GET", `/folders?path=${encodeURIComponent(path)}`),
   checkProject: (id: string) => request<BoardResponse>("POST", `/projects/${encodeURIComponent(id)}/check`),
   newCard: (body: NewCardBody) => request<CardSummary | undefined>("POST", "/cards", body),
   updateIdea: (id: string, body: UpdateIdeaBody) =>

@@ -1,4 +1,7 @@
-import { realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HiveEvent } from "@hive/shared";
 import { HiveDb } from "./db";
@@ -22,7 +25,8 @@ describe("Hive", () => {
   let events: HiveEvent[];
   let repos: TempRepo[];
 
-  const newHive = () => new Hive({ db, hub, git, runner, probe, role, log: () => {}, specFormatDir: "/nonexistent" });
+  const newHive = (extra: { home?: string } = {}) =>
+    new Hive({ db, hub, git, runner, probe, role, log: () => {}, specFormatDir: "/nonexistent", ...extra });
 
   beforeEach(() => {
     brokenRoles.clear();
@@ -62,19 +66,169 @@ describe("Hive", () => {
   }
 
   describe("projects", () => {
-    it("adds a repo by any path inside it, resolved to its root", async () => {
+    // Adding a project (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). The hive's own first
+    // commit uses the user's identity, so the tests give git one without the machine's global config.
+    let home: string;
+    const temps: string[] = [];
+    const temp = () => {
+      const d = realpathSync(mkdtempSync(join(tmpdir(), "hive-add-")));
+      temps.push(d);
+      return d;
+    };
+    const gitIn = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    /** Every path under `dir` with its contents, to show a refusal left the folder as it was. */
+    const contents = (dir: string) =>
+      (readdirSync(dir, { recursive: true }) as string[]).sort().map((f) => {
+        const p = join(dir, f);
+        try {
+          return `${f}:${readFileSync(p, "utf8")}`;
+        } catch {
+          return `${f}/`;
+        }
+      });
+    const expectOneEmptyCommitOnMain = (dir: string) => {
+      expect(gitIn(dir, "symbolic-ref", "HEAD")).toBe("refs/heads/main");
+      expect(gitIn(dir, "log", "--oneline").split("\n")).toHaveLength(1);
+      expect(gitIn(dir, "show", "--stat", "--format=", "HEAD")).toBe("");
+    };
+
+    beforeEach(() => {
+      vi.stubEnv("GIT_AUTHOR_NAME", "Test");
+      vi.stubEnv("GIT_AUTHOR_EMAIL", "test@example.com");
+      vi.stubEnv("GIT_COMMITTER_NAME", "Test");
+      vi.stubEnv("GIT_COMMITTER_EMAIL", "test@example.com");
+      home = temp();
+      hive = newHive({ home });
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      while (temps.length) rmSync(temps.pop()!, { recursive: true, force: true });
+    });
+
+    it("adds a repo's top folder given as <repo>/., with its real path and name", async () => {
       const r = repo();
-      await hive.addProject(r.root + "/.");
+      expect(await hive.addProject(r.root + "/.")).toBeNull();
       const [p] = hive.board().projects;
       expect(p).toMatchObject({ path: realpathSync(r.root), name: "repo", trustWarning: false });
     });
 
-    it("refuses a non-repo, a repo without main, and the same root twice", async () => {
-      await expect(hive.addProject("/definitely/not/here")).rejects.toThrow(HttpError);
+    it("refuses a repo without main, and the same repo twice", async () => {
       await expect(hive.addProject(repo({ branch: "trunk" }).root)).rejects.toThrow(/no main branch/);
       const r = repo();
       await hive.addProject(r.root);
       await expect(hive.addProject(r.root)).rejects.toMatchObject({ status: 409 });
+    });
+
+    it("resolves ~/x against home", async () => {
+      mkdirSync(join(home, "x"));
+      await hive.addProject("~/x");
+      expect(hive.board().projects[0]).toMatchObject({ path: join(home, "x"), name: "x" });
+    });
+
+    it("adds an empty folder holding only .DS_Store, and a git init-only folder, each with one empty commit on main", async () => {
+      const empty = temp();
+      writeFileSync(join(empty, ".DS_Store"), "x");
+      expect(await hive.addProject(empty)).toBeNull();
+      expectOneEmptyCommitOnMain(empty);
+      expect(gitIn(empty, "status", "--porcelain")).toBe("?? .DS_Store");
+
+      const fresh = temp();
+      gitIn(fresh, "init", "-q", "-b", "master");
+      expect(await hive.addProject(fresh)).toBeNull();
+      expectOneEmptyCommitOnMain(fresh);
+
+      expect(hive.board().projects.map((p) => p.path).sort()).toEqual([empty, fresh].sort());
+    });
+
+    it("answers { missing } for a path that doesn't exist and creates nothing, then creates it with create", async () => {
+      const base = temp();
+      const missing = join(base, "new/project");
+      expect(await hive.addProject(missing)).toEqual({ missing });
+      expect(existsSync(join(base, "new"))).toBe(false);
+      expect(hive.board().projects).toHaveLength(0);
+
+      expect(await hive.addProject(missing, true)).toBeNull();
+      expectOneEmptyCommitOnMain(missing);
+      expect(hive.board().projects[0]).toMatchObject({ path: realpathSync(missing), name: "project" });
+    });
+
+    it("names the bare repo or separate git dir for their worktrees, without telling you to add it", async () => {
+      const d = temp();
+      const bare = join(d, "bare.git");
+      gitIn(d, "init", "-q", "--bare", "-b", "main", bare);
+      const emptyTree = gitIn(bare, "hash-object", "-t", "tree", "-w", "/dev/null");
+      gitIn(bare, "update-ref", "refs/heads/main", gitIn(bare, "commit-tree", "-m", "init", emptyTree));
+      gitIn(bare, "worktree", "add", "-q", join(d, "bare-wt"), "main");
+      const gitDir = join(d, "gitdir");
+      gitIn(d, "init", "-q", "-b", "main", "--separate-git-dir", gitDir, join(d, "checkout"));
+      gitIn(join(d, "checkout"), "commit", "-q", "--allow-empty", "-m", "init");
+      gitIn(join(d, "checkout"), "worktree", "add", "-q", join(d, "sep-wt"), "-b", "other");
+
+      await expect(hive.addProject(join(d, "bare-wt"))).rejects.toMatchObject({
+        status: 400, message: `${d}/bare-wt is a worktree of the git repo ${bare}.`,
+      });
+      await expect(hive.addProject(join(d, "sep-wt"))).rejects.toMatchObject({
+        status: 400, message: `${d}/sep-wt is a worktree of the git repo ${gitDir}.`,
+      });
+      await expect(hive.addProject(join(d, "sep-wt/new"), true)).rejects.toMatchObject({
+        status: 400, message: `${d}/sep-wt/new is inside the git repo ${gitDir}. Pick a folder outside it.`,
+      });
+      expect(existsSync(join(d, "sep-wt/new"))).toBe(false);
+      expect(hive.board().projects).toHaveLength(0);
+    });
+
+    it("refuses with 409 a missing path that is already a project, whose folder was removed, creating nothing", async () => {
+      const base = temp();
+      const gone = join(base, "gone");
+      mkdirSync(gone);
+      await hive.addProject(gone);
+      rmSync(gone, { recursive: true, force: true });
+      const message = `${gone} is already a project.`;
+      await expect(hive.addProject(gone)).rejects.toMatchObject({ status: 409, message });
+      await expect(hive.addProject(gone, true)).rejects.toMatchObject({ status: 409, message });
+      expect(existsSync(gone)).toBe(false);
+      expect(hive.board().projects).toHaveLength(1);
+    });
+
+    it("refuses a missing path under a repo as inside the git repo, with or without create, creating nothing", async () => {
+      const r = repo();
+      const root = realpathSync(r.root);
+      const missing = join(root, "new/thing");
+      const message = `${missing} is inside the git repo ${root}. Add ${root} itself, or pick a folder outside it.`;
+      await expect(hive.addProject(missing)).rejects.toMatchObject({ status: 400, message });
+      await expect(hive.addProject(missing, true)).rejects.toMatchObject({ status: 400, message });
+      expect(existsSync(join(root, "new"))).toBe(false);
+      expect(hive.board().projects).toHaveLength(0);
+    });
+
+    it("refuses folders that can't be a project with the spec's message, adding nothing and changing nothing", async () => {
+      const r = repo();
+      const root = realpathSync(r.root);
+      mkdirSync(join(root, "sub"));
+      writeFileSync(join(root, "sub/f.txt"), "f\n");
+      const worktree = join(root, ".claude/worktrees/x");
+      r.git("worktree", "add", "-q", worktree, "-b", "hive/x", "main");
+      const plain = temp();
+      writeFileSync(join(plain, "notes.txt"), "keep me\n");
+      const refusals: [string, string][] = [
+        [join(root, "sub"), `${root}/sub is inside the git repo ${root}. Add ${root} itself, or pick a folder outside it.`],
+        [worktree, `${worktree} is a worktree of the git repo ${root}. Add ${root} itself.`],
+        [plain, `${plain} isn't a git repo and has files in it. The hive runs git init only in an empty folder: commit it as a repo yourself, or pick an empty folder.`],
+        ["some/relative/path", "Give a full path, starting with / or ~."],
+        ["", "Give a full path, starting with / or ~."],
+        [join(plain, "notes.txt"), `${plain}/notes.txt is a file, not a folder.`],
+        [join(root, ".git"), `${root}/.git is inside git's own data, not a work tree.`],
+      ];
+      const before = { repo: contents(root), plain: contents(plain) };
+      for (const [path, message] of refusals) {
+        await expect(hive.addProject(path), path).rejects.toMatchObject({ status: 400, message });
+      }
+      await expect(hive.addProject(42 as unknown as string)).rejects.toMatchObject({ status: 400 });
+      expect(hive.board().projects).toHaveLength(0);
+      expect(contents(root)).toEqual(before.repo);
+      expect(contents(plain)).toEqual(before.plain);
+      expect(existsSync(join(plain, ".git"))).toBe(false);
+      expect(existsSync(join(root, "sub/.git"))).toBe(false);
     });
 
     it("warns when the repo has a CLAUDE.md that Claude Code doesn't load", async () => {

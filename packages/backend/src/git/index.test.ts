@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GitError,
   abortMerge,
@@ -14,9 +14,10 @@ import {
   ensureWorktreesExcluded,
   fileAt,
   hasBranch,
+  initEmptyRepo,
   mergeInProgress,
   mergeMain,
-  resolveRepoRoot,
+  repoAt,
 } from "./index.js";
 
 const dirs: string[] = [];
@@ -43,16 +44,121 @@ afterEach(() => {
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
-describe("resolveRepoRoot", () => {
-  it("resolves from a subfolder", async () => {
+describe("repoAt", () => {
+  it("is null outside a repo", async () => {
+    expect(await repoAt(tmp())).toBeNull();
+  });
+  it("answers the top, from the top and from a subfolder, with real paths", async () => {
     const root = makeRepo();
     mkdirSync(join(root, "sub/deep"), { recursive: true });
-    expect(await resolveRepoRoot(join(root, "sub/deep"))).toBe(root);
+    const top = { insideGitDir: false, top: root, mainCheckout: root, mainIsWorkTree: true, linked: false, hasCommits: true };
+    expect(await repoAt(root)).toEqual(top);
+    expect(await repoAt(join(root, "sub/deep"))).toEqual(top);
   });
-  it("throws GitError for a non-repo and a missing path", async () => {
+  it("marks a linked worktree, naming the main checkout, from its top and from inside it", async () => {
+    const root = makeRepo();
+    const linked = join(tmp(), "linked");
+    git(root, "worktree", "add", "-q", linked, "-b", "other", "main");
+    mkdirSync(join(linked, "inner"));
+    const answer = { insideGitDir: false, top: linked, mainCheckout: root, mainIsWorkTree: true, linked: true, hasCommits: true };
+    expect(await repoAt(linked)).toEqual(answer);
+    expect(await repoAt(join(linked, "inner"))).toEqual(answer);
+  });
+  it("names the bare repo, not the worktree, for a worktree of a bare repo, and says it isn't a work tree", async () => {
     const d = tmp();
-    await expect(resolveRepoRoot(d)).rejects.toBeInstanceOf(GitError);
-    await expect(resolveRepoRoot(join(d, "nope"))).rejects.toThrow(/is not a git repository/);
+    const bare = join(d, "bare.git");
+    git(d, "init", "-q", "--bare", "-b", "main", bare);
+    const emptyTree = git(bare, "hash-object", "-t", "tree", "-w", "/dev/null").trim();
+    const commit = git(bare, "commit-tree", "-m", "init", emptyTree).trim();
+    git(bare, "update-ref", "refs/heads/main", commit);
+    const wt = join(d, "wt");
+    git(bare, "worktree", "add", "-q", wt, "main");
+    expect(await repoAt(wt)).toEqual({
+      insideGitDir: false, top: wt, mainCheckout: bare, mainIsWorkTree: false, linked: true, hasCommits: true,
+    });
+  });
+  it("names the separate git dir for a worktree of a --separate-git-dir repo, whose checkout git can't find", async () => {
+    const d = tmp();
+    const gitDir = join(d, "gitdir");
+    const checkout = join(d, "checkout");
+    git(d, "init", "-q", "-b", "main", "--separate-git-dir", gitDir, checkout);
+    git(checkout, "commit", "-q", "--allow-empty", "-m", "init");
+    const wt = join(d, "wt");
+    git(checkout, "worktree", "add", "-q", wt, "-b", "other");
+    expect(await repoAt(wt)).toEqual({
+      insideGitDir: false, top: wt, mainCheckout: gitDir, mainIsWorkTree: false, linked: true, hasCommits: true,
+    });
+    // The main checkout itself is still its own top.
+    expect(await repoAt(checkout)).toMatchObject({ top: checkout, mainCheckout: checkout, mainIsWorkTree: true, linked: false });
+  });
+  it("is insideGitDir in .git itself, below it, and in a bare repo", async () => {
+    const root = makeRepo();
+    expect(await repoAt(join(root, ".git"))).toEqual({ insideGitDir: true });
+    expect(await repoAt(join(root, ".git/refs"))).toEqual({ insideGitDir: true });
+    const bare = tmp();
+    git(bare, "init", "-q", "--bare");
+    expect(await repoAt(bare)).toEqual({ insideGitDir: true });
+  });
+  it("says hasCommits false in a repo with no commits", async () => {
+    const d = tmp();
+    git(d, "init", "-q", "-b", "main");
+    expect(await repoAt(d)).toEqual({
+      insideGitDir: false, top: d, mainCheckout: d, mainIsWorkTree: true, linked: false, hasCommits: false,
+    });
+  });
+});
+
+describe("initEmptyRepo", () => {
+  beforeEach(() => {
+    vi.stubEnv("GIT_AUTHOR_NAME", "T");
+    vi.stubEnv("GIT_AUTHOR_EMAIL", "t@example.com");
+    vi.stubEnv("GIT_COMMITTER_NAME", "T");
+    vi.stubEnv("GIT_COMMITTER_EMAIL", "t@example.com");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  function failingHook(): void {
+    const hooks = tmp();
+    writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\necho nope >&2\nexit 1\n", { mode: 0o755 });
+    vi.stubEnv("GIT_CONFIG_COUNT", "1");
+    vi.stubEnv("GIT_CONFIG_KEY_0", "core.hooksPath");
+    vi.stubEnv("GIT_CONFIG_VALUE_0", hooks);
+  }
+
+  it("makes one empty commit on main in a folder holding only .DS_Store, which stays untracked", async () => {
+    const d = tmp();
+    writeFileSync(join(d, ".DS_Store"), "x");
+    await initEmptyRepo(d);
+    expect(git(d, "branch", "--show-current").trim()).toBe("main");
+    expect(git(d, "log", "--oneline").trim().split("\n")).toHaveLength(1);
+    expect(git(d, "show", "--stat", "--format=", "HEAD").trim()).toBe("");
+    expect(git(d, "status", "--porcelain", "--untracked-files=all").trim()).toBe("?? .DS_Store");
+  });
+  it("points HEAD at main in a git init -b master repo with no commits, leaving no master", async () => {
+    const d = tmp();
+    git(d, "init", "-q", "-b", "master");
+    await initEmptyRepo(d);
+    expect(git(d, "symbolic-ref", "HEAD").trim()).toBe("refs/heads/main");
+    expect(git(d, "log", "--oneline").trim().split("\n")).toHaveLength(1);
+    expect(git(d, "show", "--stat", "--format=", "HEAD").trim()).toBe("");
+    expect(git(d, "branch", "--list").trim()).toBe("* main");
+  });
+  it("removes the fresh .git when the commit fails", async () => {
+    const d = tmp();
+    failingHook();
+    await expect(initEmptyRepo(d)).rejects.toBeInstanceOf(GitError);
+    expect(existsSync(join(d, ".git"))).toBe(false);
+  });
+  it("puts HEAD back and keeps .git in a no-commits repo when the commit fails", async () => {
+    const d = tmp();
+    git(d, "init", "-q", "-b", "master");
+    failingHook();
+    await expect(initEmptyRepo(d)).rejects.toThrow(/nope|hook/);
+    expect(existsSync(join(d, ".git"))).toBe(true);
+    expect(git(d, "symbolic-ref", "HEAD").trim()).toBe("refs/heads/master");
+  });
+  it("refuses a repo that has commits", async () => {
+    await expect(initEmptyRepo(makeRepo())).rejects.toBeInstanceOf(GitError);
   });
 });
 
@@ -95,10 +201,9 @@ describe("ensureWorktreesExcluded", () => {
     const linked = join(tmp(), "linked");
     git(root, "worktree", "add", linked, "-b", "other", "main");
     expect(readFileSync(join(linked, ".git"), "utf8")).toMatch(/^gitdir:/);
-    const lroot = await resolveRepoRoot(linked);
-    await ensureWorktreesExcluded(lroot);
-    const p = git(lroot, "rev-parse", "--git-path", "info/exclude").trim();
-    expect(readFileSync(resolve(lroot, p), "utf8")).toContain(".claude/worktrees/");
+    await ensureWorktreesExcluded(linked);
+    const p = git(linked, "rev-parse", "--git-path", "info/exclude").trim();
+    expect(readFileSync(resolve(linked, p), "utf8")).toContain(".claude/worktrees/");
   });
 });
 

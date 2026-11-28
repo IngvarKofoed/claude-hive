@@ -1,8 +1,10 @@
 // The endpoints this slice builds (spec: API), a subset of docs/ARCHITECTURE.md's API.
+import { homedir } from "node:os";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { APP_VERSION, type HealthResponse, type UpdateIdeaBody } from "@hive/shared";
 import type { EventHub } from "../events";
 import { HttpError, type Hive } from "../hive";
+import { completeFolders } from "../projects/folders";
 
 type Handler = (req: Request, res: Response) => unknown | Promise<unknown>;
 
@@ -35,10 +37,13 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   });
   r.delete("/cards/:id", route((req) => hive.deleteCard(param(req, "id"))));
 
+  // A missing folder answers { missing } so the page asks before creating it
+  // (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md).
   r.post("/projects", route(async (req) => {
-    await hive.addProject(body(req).path);
-    return hive.board();
+    const answer = await hive.addProject(body(req).path, body(req).create === true);
+    return answer ?? hive.board();
   }));
+  r.get("/folders", route((req) => completeFolders(String(req.query.path ?? ""), homedir())));
   r.post("/projects/:id/check", route(async (req) => {
     await hive.checkTrust(param(req, "id"));
     return hive.board();

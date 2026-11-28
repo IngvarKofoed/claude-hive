@@ -96,7 +96,7 @@ Everything else is decided by the hive and written into the card's history as "d
 
 ### Project
 
-A repository. A folder that isn't one yet becomes one when you add it: the hive runs `git init` and commits what's there. Each project is a swimlane on the board and has its own rulebook.
+A repository, added by its top folder; the Project path field completes folder names as you type. An empty or new folder, or a fresh `git init` with no commits, becomes a repo with an empty first commit on `main`, and the hive asks before it creates a folder. A folder with files that isn't a repo is refused, and so is a folder inside a repo or a worktree. Each project is a swimlane on the board and has its own rulebook.
 
 ### Card
 

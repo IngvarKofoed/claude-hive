@@ -1,0 +1,52 @@
+.box {
+  position: relative;
+  display: inline-block;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target-min);
+  min-width: var(--project-col-width);
+  padding: 0 var(--space-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  max-height: calc(var(--target-min) * 8);
+  overflow-y: auto;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2);
+  list-style: none;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-tile);
+}
+
+.option {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.option:hover,
+.option[aria-selected="true"] {
+  background: var(--color-surface-muted);
+}
+
+.more {
+  padding: var(--space-3) var(--space-5);
+  color: var(--color-text-muted);
+}

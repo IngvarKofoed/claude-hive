@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import {
   appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import type {
   AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
@@ -22,6 +23,7 @@ import {
 import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type MockupState, type SessionRow } from "./db";
 import type { EventHub } from "./events";
+import { classifyFolder, type FolderClass } from "./projects/folders";
 import { applyChecklistChange } from "./sessions/checklist";
 import { describeHiveTool, type HiveToolName } from "./sessions/hiveTools";
 import { PLANNED_ROLES, type RoleEntry } from "./sessions/roles";
@@ -34,13 +36,14 @@ import {
   parseDeveloperReport, parseKeeperReport, parsePlanReport, parseReviewReport, parseSetupReport, PLAN_SCHEMA,
   REVIEW_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
-import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, SquashResult } from "./git";
+import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, RepoAt, SquashResult } from "./git";
 import { fakeApps, openableUrl, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
 import { cardPorts, fakePorts, type PortService } from "./preview/ports";
 
 /** The git service's API (packages/backend/src/git). */
 export interface GitService {
-  resolveRepoRoot(path: string): Promise<string>;
+  repoAt(dir: string): Promise<RepoAt | null>;
+  initEmptyRepo(dir: string): Promise<void>;
   hasBranch(root: string, branch: string): Promise<boolean>;
   ensureWorktreesExcluded(root: string): Promise<void>;
   createCardWorktree(root: string, slug: string, base?: string): Promise<{ worktreePath: string; branch: string }>;
@@ -81,6 +84,42 @@ export class HttpError extends Error {
   }
 }
 
+const RELATIVE_PATH = "Give a full path, starting with / or ~.";
+
+/** `addable` is false for a bare repo or a common git dir named in place of a checkout: adding it would be refused. */
+const insideRepo = (path: string, repo: string, addable = true) =>
+  addable
+    ? `${path} is inside the git repo ${repo}. Add ${repo} itself, or pick a folder outside it.`
+    : `${path} is inside the git repo ${repo}. Pick a folder outside it.`;
+
+/** What the page is told for a folder that can't be a project (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). */
+function refusal(where: Extract<FolderClass, { kind: "file" | "worktree" | "inside-repo" | "git-data" | "has-files" }>): string {
+  switch (where.kind) {
+    case "file":
+      return `${where.path} is a file, not a folder.`;
+    case "worktree":
+      return where.addable
+        ? `${where.path} is a worktree of the git repo ${where.repo}. Add ${where.repo} itself.`
+        : `${where.path} is a worktree of the git repo ${where.repo}.`;
+    case "inside-repo":
+      return insideRepo(where.path, where.repo);
+    case "git-data":
+      return `${where.path} is inside git's own data, not a work tree.`;
+    case "has-files":
+      return `${where.path} isn't a git repo and has files in it. The hive runs git init only in an empty folder: commit it as a repo yourself, or pick an empty folder.`;
+  }
+}
+
+/** Runs a step that only touches the disk and git, and sends its failure to the page as a 400 with the OS's or git's reason. */
+async function failingAs400<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, (error as Error).message);
+  }
+}
+
 export interface HiveDeps {
   db: HiveDb;
   hub: EventHub;
@@ -102,6 +141,8 @@ export interface HiveDeps {
   /** Runs the card's app in Try it. server.ts passes the real one; without it, every app runs at once on paper. */
   apps?: AppRunner;
   log?: (message: string) => void;
+  /** The folder `~` means when adding a project. The user's home unless a test says otherwise. */
+  home?: string;
 }
 
 /** The role whose session a lane talks to. */
@@ -390,6 +431,10 @@ export class Hive {
     return this.deps.db;
   }
 
+  private get home(): string {
+    return this.deps.home ?? homedir();
+  }
+
   private log(message: string) {
     (this.deps.log ?? console.error)(message);
   }
@@ -540,18 +585,64 @@ export class Hive {
 
   // ---------- projects ----------
 
-  async addProject(path: string): Promise<void> {
-    if (typeof path !== "string" || !path.trim()) throw new HttpError(400, "Give the path to a git repo.");
-    let root: string;
-    try {
-      root = await this.deps.git.resolveRepoRoot(path.trim());
-    } catch (error) {
-      throw new HttpError(400, (error as Error).message);
+  /**
+   * Add the folder at `path` as a project, or say why not (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md,
+   * revising docs/changelog/2026-11-26-projects-always-git.md): a repo's top folder is added as it is; an empty folder, or
+   * a top with no commits and no files, gets an empty first commit on main. A missing folder answers `{ missing }`
+   * until `create` says to make it. Anything inside a repo, and a non-repo folder with files, is refused.
+   */
+  async addProject(path: unknown, create = false): Promise<{ missing: string } | null> {
+    if (typeof path !== "string") throw new HttpError(400, RELATIVE_PATH);
+    const where = await failingAs400(() => classifyFolder(path, this.home, this.deps.git));
+    switch (where.kind) {
+      case "relative":
+        throw new HttpError(400, RELATIVE_PATH);
+      case "file":
+      case "worktree":
+      case "inside-repo":
+      case "git-data":
+      case "has-files":
+        throw new HttpError(400, refusal(where));
+      case "repo-top":
+        this.refuseKnown(where.path);
+        if (where.empty) await failingAs400(() => this.deps.git.initEmptyRepo(where.path));
+        else if (!(await this.deps.git.hasBranch(where.path, "main"))) {
+          throw new HttpError(400, `${where.path} has no main branch. Cards start from main.`);
+        }
+        this.insertProject(where.path);
+        return null;
+      case "empty":
+        this.refuseKnown(where.path);
+        await failingAs400(() => this.deps.git.initEmptyRepo(where.path));
+        this.insertProject(where.path);
+        return null;
+      case "missing": {
+        const { parent, missing } = where;
+        if (parent.kind === "worktree") throw new HttpError(400, insideRepo(missing, parent.repo, parent.addable));
+        if (parent.kind === "inside-repo") throw new HttpError(400, insideRepo(missing, parent.repo));
+        if (parent.kind === "repo-top") throw new HttpError(400, insideRepo(missing, parent.path));
+        if (parent.kind === "git-data") throw new HttpError(400, refusal({ kind: "git-data", path: missing }));
+        if (parent.kind === "file") throw new HttpError(400, refusal(parent));
+        // A project whose folder was removed: the missing path is in the stored form (real parent plus the tail).
+        this.refuseKnown(missing);
+        if (!create) return { missing };
+        const real = await failingAs400(async () => {
+          mkdirSync(missing, { recursive: true });
+          await this.deps.git.initEmptyRepo(missing);
+          return realpathSync(missing);
+        });
+        this.refuseKnown(real);
+        this.insertProject(real);
+        return null;
+      }
     }
+  }
+
+  private refuseKnown(root: string): void {
     if (this.db.getProjectByPath(root)) throw new HttpError(409, `${root} is already a project.`);
-    if (!(await this.deps.git.hasBranch(root, "main"))) {
-      throw new HttpError(400, `${root} has no main branch. Cards start from main.`);
-    }
+  }
+
+  private insertProject(root: string): void {
     const project = { id: randomUUID(), name: basename(root), path: root, trustWarning: false };
     this.db.insertProject(project);
     this.deps.hub.emit({ type: "project.updated", project: projectSummary(project) });

@@ -585,7 +585,24 @@ export interface CardDetail extends CardSummary {
 
 export interface AddProjectBody {
   path: string;
+  /** Create a missing folder and make it a repo (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). */
+  create?: boolean;
 }
+
+/** One folder that completes a typed path: `value` is the field's new text, ending in `/` (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). */
+export interface FolderCompletion {
+  name: string;
+  value: string;
+}
+
+/** `GET /api/folders?path=`: the first 50 matching folders, and how many more there are (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). */
+export interface FolderCompletions {
+  folders: FolderCompletion[];
+  more: number;
+}
+
+/** `POST /api/projects`: the board, or `{ missing }` for a folder that doesn't exist yet, so the page asks (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md). */
+export type AddProjectResponse = BoardResponse | { missing: string };
 
 /** A new idea: both fields are trimmed and required (docs/specs/2026-11-27-card-lane-artifacts.md). */
 export interface NewCardBody {

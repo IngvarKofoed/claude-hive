@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFile, mkdir, readFile, realpath, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { appendFile, mkdir, readFile, realpath, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 const run = promisify(execFile);
 
@@ -36,20 +36,85 @@ function reason(stderr: string): string {
   return stderr.replace(/^(fatal|error): /gm, "").trim() || "git failed";
 }
 
-/** Resolve any path inside a repo to the repo's root, as an absolute, real path. */
-export async function resolveRepoRoot(path: string): Promise<string> {
-  const notRepo = new GitError(`${path} is not a git repository`);
-  let dir: string;
-  try {
-    dir = await realpath(path);
-    if (!(await stat(dir)).isDirectory()) dir = dirname(dir);
-  } catch {
-    throw notRepo;
+/**
+ * What git makes of a folder (docs/specs/2026-11-28-folder-autocomplete-and-git-init-when-ad.md): null outside any
+ * repo; `insideGitDir` inside a `.git` folder or a bare repo; otherwise the work tree's top, the repo's main checkout
+ * (a linked worktree's or a subfolder's repo, never a worktree's folder), whether it's a linked worktree, and whether
+ * HEAD has a commit. Every path is real.
+ *
+ * A linked worktree of a bare repo, of a `--separate-git-dir` repo or of a submodule has no `<checkout>/.git` to find
+ * its checkout from, and git itself names the common git dir as its main worktree. Then `mainCheckout` is that
+ * folder, and `mainIsWorkTree` is false: it's git's own data, not a folder to add.
+ */
+export type RepoAt =
+  | { insideGitDir: true }
+  | {
+    insideGitDir: false; top: string; mainCheckout: string; mainIsWorkTree: boolean; linked: boolean; hasCommits: boolean;
+  };
+
+/** Ask git what `dir`, an existing folder, is part of. */
+export async function repoAt(dir: string): Promise<RepoAt | null> {
+  // The first call also works inside git's own data, where --show-toplevel fails, so it settles that case.
+  const r = await git(dir, ["rev-parse", "--is-inside-git-dir", "--is-bare-repository", "--git-dir", "--git-common-dir"]);
+  if (!r.ok) return null;
+  const [insideGitDir, bare, gitDirLine, commonDirLine] = r.stdout.split("\n").map((l) => l.trim());
+  if (insideGitDir === "true" || bare === "true") return { insideGitDir: true };
+  if (!gitDirLine || !commonDirLine) return null;
+  // git prints these relative to `dir` (".git", "../.git") or absolute.
+  const gitDir = await realpath(resolve(dir, gitDirLine));
+  const commonDir = await realpath(resolve(dir, commonDirLine));
+  const t = await git(dir, ["rev-parse", "--show-toplevel"]);
+  const topLine = t.stdout.trim();
+  if (!t.ok || !topLine) return null;
+  const top = await realpath(topLine);
+  const hasCommits = (await git(dir, ["rev-parse", "-q", "--verify", "HEAD"])).ok;
+  const linked = gitDir !== commonDir;
+  let main = { mainCheckout: top, mainIsWorkTree: true };
+  if (basename(commonDir) === ".git") main = { mainCheckout: dirname(commonDir), mainIsWorkTree: true };
+  else if (linked) main = await mainWorktree(dir, commonDir);
+  return { insideGitDir: false, top, ...main, linked, hasCommits };
+}
+
+/** The first entry of `git worktree list`: the main worktree, or the bare repo or common git dir when there is none. */
+async function mainWorktree(dir: string, commonDir: string): Promise<{ mainCheckout: string; mainIsWorkTree: boolean }> {
+  const r = await git(dir, ["worktree", "list", "--porcelain"]);
+  const first = r.ok ? r.stdout.split("\n\n")[0]!.split("\n") : [];
+  const line = first.find((l) => l.startsWith("worktree "));
+  if (!line) return { mainCheckout: commonDir, mainIsWorkTree: false };
+  const path = await realpath(line.slice("worktree ".length)).catch(() => line.slice("worktree ".length));
+  return { mainCheckout: path, mainIsWorkTree: path !== commonDir && !first.includes("bare") };
+}
+
+/**
+ * Make `dir` a repo on main with one empty commit, in the user's own git identity: `git init -b main` in a folder
+ * that isn't a repo, or HEAD pointed at main in a repo top with no commits. A failed commit leaves the folder as it
+ * was: the fresh `.git` is removed, or HEAD goes back to its old ref.
+ */
+export async function initEmptyRepo(dir: string): Promise<void> {
+  const repo = await repoAt(dir);
+  if (repo && (repo.insideGitDir || repo.hasCommits || repo.top !== (await realpath(dir)))) {
+    throw new GitError(`${dir} is already part of a git repo with commits.`);
   }
-  const r = await git(dir, ["rev-parse", "--show-toplevel"]);
-  const top = r.stdout.trim();
-  if (!r.ok || !top) throw notRepo;
-  return realpath(top);
+  const commit = ["commit", "--allow-empty", "-q", "-m", "Initial commit"];
+  if (!repo) {
+    const init = await git(dir, ["init", "-q", "-b", "main"]);
+    if (!init.ok) throw new GitError(reason(init.stderr));
+    const c = await git(dir, commit);
+    if (!c.ok) {
+      await rm(join(dir, ".git"), { recursive: true, force: true });
+      throw new GitError(reason(c.stderr));
+    }
+    return;
+  }
+  const head = await git(dir, ["symbolic-ref", "HEAD"]);
+  const oldRef = head.ok ? head.stdout.trim() : null;
+  const point = await git(dir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+  if (!point.ok) throw new GitError(reason(point.stderr));
+  const c = await git(dir, commit);
+  if (!c.ok) {
+    if (oldRef) await git(dir, ["symbolic-ref", "HEAD", oldRef]);
+    throw new GitError(reason(c.stderr));
+  }
 }
 
 /** True if the repo has a local branch with this name. */
