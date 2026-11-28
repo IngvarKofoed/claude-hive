@@ -153,6 +153,55 @@ describe("Hive", () => {
     });
   });
 
+  describe("history", () => {
+    // Rows as the lanes write them, at given times: the history only reads them.
+    let at = 0;
+    const row = (cardId: string, type: string, data: object) =>
+      db.addEvent(cardId, type, data, `e${++at}`, `2026-11-27T10:00:${String(at).padStart(2, "0")}.000Z`);
+    const issue = { where: "Design", problem: "Silent on rounding", guess: "Rounded down" };
+
+    it("gives every later lane's rounds newest first, from the rows each round wrote", async () => {
+      const { card } = await projectWithCard();
+      row(card.id, "plan", { steps: [], chunks: [], tests: ["first"] });
+      row(card.id, "build", {
+        status: "done", summary: "Built it.", departures: [], issues: [issue], decisions: [{ what: "A", alternative: "B" }],
+      });
+      row(card.id, "check", { round: 1, summary: "Two bugs.", bugs: [{ where: "a.ts:1", problem: "x" }], issues: [issue] });
+      row(card.id, "build", { status: "done", summary: "Fixed them.", departures: [], issues: [], decisions: [] });
+      row(card.id, "check", { round: 2, summary: "Clean.", bugs: [], issues: [] });
+      row(card.id, "chat", { lane: "check", from: "hive", text: "Round 2: no bugs." });
+      row(card.id, "plan", { steps: [], chunks: [], tests: ["second"] });
+
+      const { history } = hive.card(card.id);
+      expect(history.plans.map((p) => p.tests)).toEqual([["second"], ["first"]]);
+      expect(history.builds).toEqual([
+        { summary: "Fixed them.", departures: [], issues: [], decisions: [] },
+        { summary: "Built it.", departures: [], issues: [issue], decisions: [{ what: "A", alternative: "B" }] },
+      ]);
+      expect(history.checks.map((c) => [c.round, c.summary, c.issues.length])).toEqual([[2, "Clean.", 0], [1, "Two bugs.", 1]]);
+      expect(history.tryit).toEqual([]);
+    });
+
+    it("puts one acceptance on top of your feedback, only while it's the last word", async () => {
+      const { card } = await projectWithCard();
+      row(card.id, "feedback", { text: "Make it bigger." });
+      row(card.id, "accept", {});
+      expect(hive.card(card.id).history.tryit).toEqual([
+        { kind: "accepted" },
+        { kind: "feedback", text: "Make it bigger." },
+      ]);
+
+      // Back to Try it undid that acceptance: more feedback, then a second acceptance.
+      row(card.id, "feedback", { text: "Now smaller." });
+      expect(hive.card(card.id).history.tryit).toEqual([
+        { kind: "feedback", text: "Now smaller." },
+        { kind: "feedback", text: "Make it bigger." },
+      ]);
+      row(card.id, "accept", {});
+      expect(hive.card(card.id).history.tryit.map((r) => r.kind)).toEqual(["accepted", "feedback", "feedback"]);
+    });
+  });
+
   describe("turns", () => {
     it("stores each text block as a chat message and hands the turn back to you", async () => {
       const { card, turn } = await inRefine();

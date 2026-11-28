@@ -40,6 +40,7 @@ const detail: CardDetail = {
   decisions: [],
   chat: [],
   pastChats: {},
+  history: { plans: [], builds: [], checks: [], tryit: [] },
   pending: null,
   turnRunning: false,
   landed: null,
@@ -115,6 +116,128 @@ function page(card: CardDetail, url: string) {
     </MemoryRouter>,
   );
 }
+
+const emptyHistory = { plans: [], builds: [], checks: [], tryit: [] };
+const done = (history: Partial<CardDetail["history"]>, over: Partial<CardDetail> = {}): CardDetail => ({
+  ...specCard,
+  lane: "done",
+  history: { ...emptyHistory, ...history },
+  ...over,
+});
+const foldOf = (heading: string) => screen.getByText(heading).closest("details");
+
+describe("looking back at the later lanes' rounds", () => {
+  const buildRound = (summary: string) => ({
+    summary,
+    departures: [],
+    issues: [{ where: "Rounds", problem: `${summary} problem`, guess: "built it so" }],
+    decisions: [{ what: `${summary} decision`, alternative: "the other way" }],
+  });
+
+  it("lists Build rounds newest on top by position, newest open, older folded, files only on the newest", () => {
+    const files = [{ path: "src/a.ts", added: 1, removed: 2 }];
+    page(
+      done(
+        { builds: [buildRound("Third"), buildRound("Second"), buildRound("First")] },
+        { build: { summary: "x", departures: [], files } as CardDetail["build"] },
+      ),
+      "/cards/c1?lane=build",
+    );
+    const headings = screen.getAllByText(/^Round \d$/).map((h) => h.textContent);
+    expect(headings).toEqual(["Round 3", "Round 2", "Round 1"]);
+    expect(screen.getByRole("heading", { name: "Round 3" })).toBeInTheDocument();
+    expect(foldOf("Round 2")).not.toHaveAttribute("open");
+    expect(foldOf("Round 1")).not.toHaveAttribute("open");
+    expect(screen.getByText("Third problem")).toBeInTheDocument();
+    expect(screen.getByText("Third decision")).toBeInTheDocument();
+    expect(screen.getAllByText("src/a.ts")).toHaveLength(1);
+    expect(screen.getAllByText("Files changed")).toHaveLength(1);
+  });
+
+  it("doesn't carry a fold you opened in one lane over to another", () => {
+    const check = (summary: string) => ({ round: 1, summary, bugs: [], issues: [] });
+    page(
+      done({ builds: [buildRound("Second"), buildRound("First")], checks: [check("Newer"), check("Older")] }),
+      "/cards/c1?lane=build",
+    );
+    (foldOf("Round 1") as HTMLDetailsElement).open = true;
+    fireEvent.click(within(screen.getByRole("list", { name: "Lanes" })).getByRole("link", { name: "✓ Check" }));
+    expect(screen.getByText("Older")).toBeInTheDocument();
+    expect(foldOf("Round 1")).not.toHaveAttribute("open");
+  });
+
+  it("shows one round open with nothing folded", () => {
+    page(done({ builds: [buildRound("Only")] }), "/cards/c1?lane=build");
+    expect(screen.getByRole("heading", { name: "Round 1" })).toBeInTheDocument();
+    expect(document.querySelector("details")).toBeNull();
+  });
+
+  it("numbers plans by position", () => {
+    const plan = (summary: string) => ({ summary, steps: [], chunks: [], tests: [] }) as unknown as CardDetail["plan"];
+    page(done({ plans: [plan("B")!, plan("A")!] }), "/cards/c1?lane=plan");
+    expect(screen.getAllByText(/^Plan \d$/).map((h) => h.textContent)).toEqual(["Plan 2", "Plan 1"]);
+  });
+
+  it("shows Check rounds with their reported spec issues", () => {
+    const record = (n: number, summary: string, issues: { where: string; problem: string; guess: string }[]) => ({
+      round: 1,
+      summary,
+      bugs: [],
+      issues,
+      n,
+    });
+    page(
+      done({
+        checks: [
+          record(2, "Newest summary", [{ where: "Spec §4", problem: "Unclear order", guess: "oldest first" }]),
+          record(1, "Older summary", []),
+        ],
+      }),
+      "/cards/c1?lane=check",
+    );
+    expect(screen.getAllByText(/^Round \d$/).map((h) => h.textContent)).toEqual(["Round 2", "Round 1"]);
+    expect(screen.getByText("Unclear order")).toBeInTheDocument();
+    expect(screen.getByText("Built as: oldest first")).toBeInTheDocument();
+    expect(foldOf("Round 1")).not.toHaveAttribute("open");
+  });
+
+  it("shows Accepted, then Feedback rounds as written, counting only feedback", () => {
+    page(
+      done({
+        tryit: [
+          { kind: "accepted" },
+          { kind: "feedback", text: "second line one\nsecond line two" },
+          { kind: "feedback", text: "first" },
+        ],
+      }),
+      "/cards/c1?lane=tryit",
+    );
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getAllByText(/^Feedback \d$/).map((h) => h.textContent)).toEqual(["Feedback 2", "Feedback 1"]);
+    expect(screen.getByText(/second line one/).textContent).toBe("second line one\nsecond line two");
+    expect(foldOf("Feedback 1")).not.toHaveAttribute("open");
+  });
+
+  it("shows no Accepted when the card wasn't accepted", () => {
+    page(done({ tryit: [{ kind: "feedback", text: "only" }] }), "/cards/c1?lane=tryit");
+    expect(screen.queryByText("Accepted")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Feedback 1" })).toBeInTheDocument();
+  });
+
+  it("falls back to today's view when a lane's list is empty", () => {
+    page(done({}), "/cards/c1?lane=build");
+    expect(screen.getByText("No build report is kept.")).toBeInTheDocument();
+    document.body.innerHTML = "";
+    page(done({}), "/cards/c1?lane=check");
+    expect(screen.getByText("No Check round is kept.")).toBeInTheDocument();
+    document.body.innerHTML = "";
+    page(done({}), "/cards/c1?lane=tryit");
+    expect(screen.getByText("No feedback or acceptance is kept.")).toBeInTheDocument();
+    document.body.innerHTML = "";
+    page(done({}), "/cards/c1?lane=plan");
+    expect(screen.getByText("No plan is kept.")).toBeInTheDocument();
+  });
+});
 
 describe("looking back at a finished lane", () => {
   it("shows Refine's chat read-only next to the brief, with the way back to the current lane", () => {

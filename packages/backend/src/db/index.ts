@@ -421,6 +421,18 @@ export class HiveDb {
     return chats;
   }
 
+  /** A card's events of the given types, oldest first, with their data parsed. */
+  eventsOf(cardId: string, types: string[]): { type: string; at: string; data: any }[] {
+    if (types.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT type, at, data FROM events WHERE card_id = ? AND type IN (${types.map(() => "?").join(", ")}) ` +
+          "ORDER BY at, rowid",
+      )
+      .all(cardId, ...types) as { type: string; at: string; data: string }[];
+    return rows.map((r) => ({ type: r.type, at: r.at, data: JSON.parse(r.data) }));
+  }
+
   /** The last item in a lane's chat. */
   lastChatItem(cardId: string, lane: Lane): ChatItem | undefined {
     return this.chatFor(cardId, lane).at(-1);

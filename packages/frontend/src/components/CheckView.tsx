@@ -1,12 +1,22 @@
-import type { CheckRound } from "@hive/shared";
+import type { CheckRound, ReportedIssue } from "@hive/shared";
 import { Chip } from "./ui/Chip";
 import { Markdown } from "./ui/Markdown";
 import styles from "./CheckView.module.css";
 
-export function CheckView({ check }: { check: CheckRound }) {
+interface Props {
+  check: CheckRound;
+  /** The number to show; the round's own when not given. */
+  round?: number;
+  /** The spec issues the reviewer reported in this round. */
+  issues?: ReportedIssue[];
+  /** False when a surrounding heading already names the round. */
+  heading?: boolean;
+}
+
+export function CheckView({ check, round = check.round, issues = [], heading = true }: Props) {
   return (
     <div className={styles.check}>
-      <h3 className={styles.heading}>Round {check.round}</h3>
+      {heading ? <h3 className={styles.heading}>Round {round}</h3> : null}
       <Markdown>{check.summary}</Markdown>
       {check.bugs.length === 0 ? (
         <p className={styles.detail}>No bugs.</p>
@@ -20,6 +30,20 @@ export function CheckView({ check }: { check: CheckRound }) {
           ))}
         </ul>
       )}
+      {issues.length > 0 ? (
+        <>
+          <h4 className={styles.subheading}>Spec issues reported</h4>
+          <ul className={styles.list}>
+            {issues.map((issue, index) => (
+              <li key={index} className={styles.item}>
+                <strong>{issue.where}</strong>
+                <p>{issue.problem}</p>
+                <p className={styles.detail}>Built as: {issue.guess}</p>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -320,7 +320,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | **Decision** | card, lane, what, alternative, sessionId, source |
 | **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
-| **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn) and `brief` (every version of the brief) so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while. |
+| **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn), `brief` (every version of the brief), `plan` (every plan), `build` (every `done` report), `check` (every finished round, with its spec issues), `feedback` (your Try it words), `accept`, `landed` and `setup` so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while, and a card's history of plans, builds, Check rounds and feedback from them too. |
 
 ## API
 

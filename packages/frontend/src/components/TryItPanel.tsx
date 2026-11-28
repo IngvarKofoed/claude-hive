@@ -160,6 +160,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const guide = outcomeSection(detail.spec?.text ?? null);
+  const earlier = detail.history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
 
   async function run(action: () => Promise<unknown>, after?: () => void) {
     setError(null);
@@ -220,6 +221,19 @@ export function TryItPanel({ detail, onMoved }: Props) {
             <p className={styles.error} role="alert">
               {error}
             </p>
+          ) : null}
+          {earlier.length > 0 ? (
+            <details>
+              <summary>Your earlier feedback</summary>
+              <div className={styles.earlier}>
+                {earlier.map((text, index) => (
+                  <div key={earlier.length - index}>
+                    <h4 className={styles.heading}>Feedback {earlier.length - index}</h4>
+                    <p className={styles.feedbackText}>{text}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           ) : null}
         </div>
       </div>

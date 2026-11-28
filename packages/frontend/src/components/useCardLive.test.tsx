@@ -45,6 +45,7 @@ const detail: CardDetail = {
   decisions: [],
   chat: [{ kind: "message", id: "m1", at: "t", from: "you", text: "first" }],
   pastChats: {},
+  history: { plans: [], builds: [], checks: [], tryit: [] },
   pending: null,
   turnRunning: true,
   landed: null,

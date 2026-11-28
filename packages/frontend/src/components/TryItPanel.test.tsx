@@ -45,6 +45,7 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
     decisions: [],
     chat: [],
     pastChats: {},
+    history: { plans: [], builds: [], checks: [], tryit: [] },
     pending: null,
     turnRunning: false,
     landed: null,
@@ -54,6 +55,31 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("TryItPanel earlier feedback", () => {
+  it("folds your earlier feedback shut, newest on top, as written", () => {
+    const history = {
+      plans: [],
+      builds: [],
+      checks: [],
+      tryit: [
+        { kind: "feedback" as const, text: "second\nline" },
+        { kind: "feedback" as const, text: "first" },
+      ],
+    };
+    render(<TryItPanel detail={detail({ history })} onMoved={() => {}} />);
+    const summary = screen.getByText("Your earlier feedback");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getAllByText(/^Feedback \d$/).map((h) => h.textContent)).toEqual(["Feedback 2", "Feedback 1"]);
+    expect(screen.getByText(/second/).textContent).toBe("second\nline");
+  });
+
+  it("has no fold without feedback entries", () => {
+    const history = { plans: [], builds: [], checks: [], tryit: [{ kind: "accepted" as const }] };
+    render(<TryItPanel detail={detail({ history })} onMoved={() => {}} />);
+    expect(screen.queryByText("Your earlier feedback")).toBeNull();
+  });
+});
 
 describe("TryItPanel setup", () => {
   it("offers Prepare it when there is no setup, and calls the API", async () => {

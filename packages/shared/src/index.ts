@@ -182,6 +182,50 @@ export interface CheckRound {
   bugs: Bug[];
 }
 
+// ---------- History ----------
+
+/** A spec issue as a role reported it, before the hive gave it an id. */
+export interface ReportedIssue {
+  where: string;
+  problem: string;
+  /** What was done instead. */
+  guess: string;
+}
+
+/** A decision made without you, as a role reported it. */
+export interface ReportedDecision {
+  what: string;
+  alternative: string;
+}
+
+/** One Build round: the developer's `done` report as it came in. The files changed aren't part of it. */
+export interface BuildRound {
+  summary: string;
+  departures: Departure[];
+  issues: ReportedIssue[];
+  decisions: ReportedDecision[];
+}
+
+/** One finished Check round, with the spec issues the reviewer reported in it. `round` is the chat's number. */
+export interface CheckRecord extends CheckRound {
+  issues: ReportedIssue[];
+}
+
+/** One of Try it's rounds: a piece of your feedback, or your acceptance. */
+export type TryItRound = { kind: "feedback"; text: string } | { kind: "accepted" };
+
+/**
+ * What the later lanes produced, newest round first, from the card's event rows
+ * (docs/specs/2026-11-27-later-lane-artifacts.md).
+ */
+export interface CardHistory {
+  plans: Plan[];
+  builds: BuildRound[];
+  checks: CheckRecord[];
+  /** Your feedback, newest first, below one `accepted` when the card's last Try it row is an acceptance. */
+  tryit: TryItRound[];
+}
+
 // ---------- Worktree setup ----------
 
 /** One process of the card's app, as setup worked it out: a server the hive runs for Try it on the card's ports. */
@@ -440,6 +484,8 @@ export interface CardDetail extends CardSummary {
   chat: ChatItem[];
   /** The chat of every lane before the current one that has any, for looking back. Live events never touch it. */
   pastChats: Partial<Record<Lane, ChatItem[]>>;
+  /** What the later lanes produced, round by round. Live events never touch it; a lane change reloads it. */
+  history: CardHistory;
   pending: PendingItem | null;
   turnRunning: boolean;
 }

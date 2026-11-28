@@ -83,6 +83,17 @@
   font-size: var(--text-md);
 }
 
+.earlier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.feedbackText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .appHead {
   display: flex;
   align-items: center;

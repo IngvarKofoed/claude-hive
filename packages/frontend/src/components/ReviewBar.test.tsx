@@ -33,6 +33,7 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     decisions: [],
     chat: [],
     pastChats: {},
+    history: { plans: [], builds: [], checks: [], tryit: [] },
     pending: null,
     turnRunning: false,
     landed: null,

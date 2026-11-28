@@ -34,6 +34,7 @@ const detail: CardDetail = {
   decisions: [],
   chat: [],
   pastChats: {},
+  history: { plans: [], builds: [], checks: [], tryit: [] },
   pending: null,
   turnRunning: true,
   landed: null,

@@ -108,6 +108,13 @@ export async function commitFile(worktree: string, path: string, message: string
   return true;
 }
 
+/** A file's text at a commit: `git show <commit>:<path>`, `path` relative to the repo's root. */
+export async function fileAt(root: string, commit: string, path: string): Promise<string> {
+  const show = await git(root, ["show", `${commit}:${path}`]);
+  if (!show.ok) throw new GitError(reason(show.stderr));
+  return show.stdout;
+}
+
 /** What bringing in main did (docs/specs/2026-11-26-build-lane-developer.md, Starting the developer). */
 export type MergeResult =
   | { kind: "clean"; commits: number }

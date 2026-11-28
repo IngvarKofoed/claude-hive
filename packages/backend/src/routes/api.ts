@@ -46,7 +46,7 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
 
   r.post("/cards", route((req) => hive.createCard(body(req).projectId, body(req).title, body(req).text)));
   r.patch("/cards/:id", route((req) => hive.updateIdea(param(req, "id"), body(req) as UpdateIdeaBody)));
-  r.get("/cards/:id", route((req) => hive.card(param(req, "id"))));
+  r.get("/cards/:id", route((req) => hive.cardForPage(param(req, "id"))));
   r.post("/cards/:id/move", route((req) => hive.moveCard(param(req, "id"), body(req).lane)));
   r.post("/cards/:id/messages", route((req) => hive.sendMessage(param(req, "id"), body(req).text)));
   r.post("/cards/:id/stop", route((req) => hive.stop(param(req, "id"))));

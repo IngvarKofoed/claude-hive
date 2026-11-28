@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import { LANES, laneImplemented, lanesBefore, type CardDetail, type Lane } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
+import { BuildRoundView } from "../components/BuildRoundView";
+import { Rounds, roundNumber } from "../components/Rounds";
 import { CheckView } from "../components/CheckView";
 import { DeleteCard } from "../components/DeleteCard";
 import { Chat, PastChat } from "../components/Chat";
@@ -73,6 +75,7 @@ const PAST_CHAT_TITLE: Partial<Record<Lane, string>> = {
 /** What a finished lane produced, for the right-hand column. */
 function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
   const none = (text: string) => <p className={styles.muted}>{text}</p>;
+  const history = detail.history;
   switch (lane) {
     case "ideas":
       return (
@@ -100,8 +103,32 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
         </Panel>
       );
     case "plan":
+      if (history.plans.length > 0) {
+        return (
+          <Panel title="Plan">
+            <Rounds
+              rounds={history.plans.map((plan, i) => ({
+                heading: `Plan ${roundNumber(history.plans.length, i)}`,
+                content: <PlanView plan={plan} />,
+              }))}
+            />
+          </Panel>
+        );
+      }
       return <Panel title="Plan">{detail.plan ? <PlanView plan={detail.plan} /> : none("No plan is kept.")}</Panel>;
     case "build":
+      if (history.builds.length > 0) {
+        return (
+          <Panel title="Build">
+            <Rounds
+              rounds={history.builds.map((round, i) => ({
+                heading: `Round ${roundNumber(history.builds.length, i)}`,
+                content: <BuildRoundView round={round} files={i === 0 ? detail.build?.files : undefined} />,
+              }))}
+            />
+          </Panel>
+        );
+      }
       return (
         <Panel title="Build">
           {detail.build || detail.issues.length > 0 || detail.decisions.length > 0
@@ -110,9 +137,41 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
         </Panel>
       );
     case "check":
+      if (history.checks.length > 0) {
+        return (
+          <Panel title="Check">
+            <Rounds
+              rounds={history.checks.map((record, i) => {
+                const n = roundNumber(history.checks.length, i);
+                return {
+                  heading: `Round ${n}`,
+                  content: <CheckView check={record} round={n} issues={record.issues} heading={false} />,
+                };
+              })}
+            />
+          </Panel>
+        );
+      }
       return <Panel title="Check">{detail.check ? <CheckView check={detail.check} /> : none("No Check round is kept.")}</Panel>;
-    case "tryit":
-      return <Panel title="Feedback">{none("Try it's own record, your feedback rounds, isn't shown here yet.")}</Panel>;
+    case "tryit": {
+      if (history.tryit.length > 0) {
+        const accepted = history.tryit[0]?.kind === "accepted";
+        const feedback = history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
+        const rounds = feedback.map((text, i) => ({
+          heading: `Feedback ${roundNumber(feedback.length, i)}`,
+          content: <p className={styles.feedbackText}>{text}</p>,
+        }));
+        return (
+          <Panel title="Feedback">
+            <div className={styles.stack}>
+              {accepted ? <p>Accepted</p> : null}
+              {rounds.length > 0 ? <Rounds rounds={rounds} /> : null}
+            </div>
+          </Panel>
+        );
+      }
+      return <Panel title="Feedback">{none("No feedback or acceptance is kept.")}</Panel>;
+    }
     case "ship":
       return <DonePanel landed={detail.landed} />;
     default:
@@ -372,7 +431,8 @@ export function Card() {
                   Looking back at {laneName(viewing)}. It&apos;s finished, so nothing here can be changed.{" "}
                   <Link to={{ search: "" }}>Back to {laneName(live.detail.lane)}</Link>
                 </p>
-                <PastLaneView detail={live.detail} lane={viewing} />
+                {/* Keyed by lane: Build and Check both fold "Round N", and a fold you opened in one mustn't open in the other. */}
+                <PastLaneView key={viewing} detail={live.detail} lane={viewing} />
               </>
             ) : (
               <LaneView live={live} onMoved={() => void reload()} />

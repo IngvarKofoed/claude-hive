@@ -7,9 +7,9 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type {
-  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
+  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
   FeedbackBody, FileChange, ForYouItem, ForYouResponse, Landed, LandBody, Lane, PendingItem, Plan, Question,
-  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, UpdateIdeaBody,
+  RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, TryItRound, UpdateIdeaBody,
 } from "@hive/shared";
 import { CARD_PORTS, LANES, lanesBefore } from "@hive/shared";
 import {
@@ -60,6 +60,7 @@ export interface GitService {
   worktreeStatus(worktree: string): Promise<string[]>;
   discardChanges(worktree: string): Promise<void>;
   switchWorktree(worktree: string, target: { commit: string } | { branch: string }): Promise<void>;
+  fileAt(root: string, commit: string, path: string): Promise<string>;
   removeCardWorktree(root: string, worktree: string, branch: string): Promise<void>;
   removeWorktree(root: string, worktree: string): Promise<void>;
   pruneWorktrees(root: string): Promise<void>;
@@ -339,6 +340,7 @@ export class Hive {
   private readonly ports: PortService;
   private readonly apps: AppRunner;
   private lastSpec = new Map<string, string>(); // card id → the spec.updated last sent, to send only changes
+  private landedSpecs = new Map<string, string>(); // card id → its spec at the landed commit, which never changes
   private watch = new SpecWatch();
 
   constructor(private deps: HiveDeps) {
@@ -380,7 +382,7 @@ export class Hive {
       branch: card.branch,
       worktreePath: card.worktreePath,
       brief: card.brief,
-      spec: card.specPath ? this.refreshSpec(card.id) : null,
+      spec: card.specPath ? (this.landedSpec(card) ?? this.refreshSpec(card.id)) : null,
       specPath: card.specPath,
       plan: card.plan,
       build: card.build,
@@ -396,6 +398,7 @@ export class Hive {
       decisions: this.db.decisionsFor(card.id),
       chat: this.db.chatFor(card.id, card.lane),
       pastChats: this.pastChats(card.id, card.lane),
+      history: this.history(card.id),
       pending: this.db.openPendingFor(card.id)?.item ?? null,
       turnRunning: this.anyTurnRunning(card.id),
     };
@@ -436,6 +439,56 @@ export class Hive {
     roles.sort((a, b) =>
       laneIndex(a.lane) - laneIndex(b.lane) || ownFirst(a) - ownFirst(b) || a.name.localeCompare(b.name));
     return { roles };
+  }
+
+  /**
+   * The card for its page. A landed card's worktree is gone, so its spec is first read from the commit it landed as
+   * (docs/specs/2026-11-27-later-lane-artifacts.md, A landed card's spec).
+   */
+  async cardForPage(id: string): Promise<CardDetail> {
+    await this.readLandedSpec(id);
+    return this.card(id);
+  }
+
+  /** Reads a landed card's spec from its landed commit, once. A failed read isn't kept, so the next fetch tries again. */
+  private async readLandedSpec(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (!card.landed || card.worktreePath || !card.specPath || this.landedSpecs.has(cardId)) return;
+    const root = this.db.getProject(card.projectId)?.path;
+    if (!root) return;
+    try {
+      this.landedSpecs.set(cardId, await this.deps.git.fileAt(root, card.landed.commit, card.specPath));
+    } catch (error) {
+      this.log(`Can't read the landed spec of card ${cardId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** A landed card's spec as read from its landed commit: reviewed and signed off before it landed. */
+  private landedSpec(card: CardRow): SpecInfo | null {
+    const text = card.landed && !card.worktreePath && card.specPath ? this.landedSpecs.get(card.id) : undefined;
+    return text === undefined ? null : { path: card.specPath!, text, review: "fresh" };
+  }
+
+  /**
+   * What the later lanes produced, newest round first, from the event rows written as each round finished
+   * (docs/specs/2026-11-27-later-lane-artifacts.md, Where it comes from).
+   */
+  private history(cardId: string): CardHistory {
+    const rows = this.db.eventsOf(cardId, ["plan", "build", "check", "feedback", "accept"]);
+    const newestFirst = (type: string) => rows.filter((r) => r.type === type).map((r) => r.data).reverse();
+    const feedback: TryItRound[] = newestFirst("feedback").map((d) => ({ kind: "feedback", text: String(d.text) }));
+    // One acceptance, on top, and only while it's the last word: one that Back to Try it undid isn't shown.
+    const lastTryIt = rows.filter((r) => r.type === "feedback" || r.type === "accept").at(-1);
+    return {
+      plans: newestFirst("plan"),
+      builds: newestFirst("build").map((d) => ({
+        summary: d.summary, departures: d.departures ?? [], issues: d.issues ?? [], decisions: d.decisions ?? [],
+      })),
+      checks: newestFirst("check").map((d) => ({
+        round: d.round, summary: d.summary, bugs: d.bugs ?? [], issues: d.issues ?? [],
+      })),
+      tryit: lastTryIt?.type === "accept" ? [{ kind: "accepted" }, ...feedback] : feedback,
+    };
   }
 
   /** The chat of every lane before the current one that has any (docs/specs/2026-11-27-card-lane-artifacts.md). */
@@ -811,6 +864,7 @@ export class Hive {
     for (const id of [cardId]) {
       this.reviews.delete(id);
       this.lastSpec.delete(id);
+      this.landedSpecs.delete(id);
       this.moving.delete(id);
       this.starting.delete(id);
       this.previousSetup.delete(id);

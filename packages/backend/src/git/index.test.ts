@@ -12,6 +12,7 @@ import {
   commitFile,
   createCardWorktree,
   ensureWorktreesExcluded,
+  fileAt,
   hasBranch,
   mergeInProgress,
   mergeMain,
@@ -52,6 +53,17 @@ describe("resolveRepoRoot", () => {
     const d = tmp();
     await expect(resolveRepoRoot(d)).rejects.toBeInstanceOf(GitError);
     await expect(resolveRepoRoot(join(d, "nope"))).rejects.toThrow(/is not a git repository/);
+  });
+});
+
+describe("fileAt", () => {
+  it("reads a file as it was at a commit, and throws GitError for one that isn't there", async () => {
+    const root = makeRepo();
+    const first = git(root, "rev-parse", "HEAD").trim();
+    writeFileSync(join(root, "a.txt"), "changed\n");
+    git(root, "commit", "-qam", "change");
+    expect(await fileAt(root, first, "a.txt")).toBe("a\n");
+    await expect(fileAt(root, first, "missing.txt")).rejects.toBeInstanceOf(GitError);
   });
 });
 

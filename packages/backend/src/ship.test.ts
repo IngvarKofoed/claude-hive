@@ -160,6 +160,34 @@ describe("Ship lane", () => {
     ]));
   });
 
+  it("reads a landed card's spec from the commit it landed as, and keeps every lane's rounds", async () => {
+    const { id } = await inShip();
+    await land(id);
+    await waitFor(() => hive.card(id).lane === "done");
+    expect(hive.card(id).worktreePath).toBeNull();
+
+    // A read that fails isn't kept: once the commit can be read, the next fetch has the spec.
+    const landed = hive.card(id).landed!;
+    db.updateCard(id, { landed: { ...landed, commit: "0".repeat(40) } });
+    expect((await hive.cardForPage(id)).spec).toBeNull();
+    db.updateCard(id, { landed });
+    const card = await hive.cardForPage(id);
+    expect(card.spec).toMatchObject({ path: expect.stringMatching(/^docs\/specs\/.*\.md$/), review: "fresh" });
+    expect(card.spec!.text).toContain("- **Sizes:** each printer has its own.");
+
+    expect(card.history.plans).toEqual([expect.objectContaining({ tests: plan.tests, chunks: plan.chunks })]);
+    expect(card.history.builds).toEqual([
+      { summary: built.summary, departures: built.departures, issues: built.issues, decisions: built.decisions },
+    ]);
+    expect(card.history.checks).toEqual([{ round: 1, summary: clean.summary, bugs: [], issues: [] }]);
+    expect(card.history.tryit).toEqual([{ kind: "accepted" }]);
+
+    // A restarted hive reads it from git again.
+    hive.close();
+    hive = newHive();
+    expect((await hive.cardForPage(id)).spec?.text).toContain("each printer has its own");
+  });
+
   it("leaves your dirty checkout alone, and says its main is behind", async () => {
     const { id } = await inShip();
     writeFileSync(join(repo.root, "app.txt"), "your edit\n");

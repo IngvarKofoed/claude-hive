@@ -27,3 +27,7 @@
 .detail {
   color: var(--color-text-secondary);
 }
+
+.subheading {
+  font-weight: var(--weight-semibold);
+}

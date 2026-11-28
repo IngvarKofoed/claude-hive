@@ -1,6 +1,6 @@
 // The fixed-format reports of the spec reviewer, the planner, the developer and Check's reviewer. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
-import type { Bug, Departure, Plan } from "@hive/shared";
+import type { Bug, Departure, Plan, ReportedDecision, ReportedIssue } from "@hive/shared";
 
 const blockable = {
   status: { type: "string", enum: ["done", "blocked"] },
@@ -209,16 +209,8 @@ export type SetupResult =
 
 export type PlanReport = { status: "done"; plan: Plan } | { status: "blocked"; reason: string };
 
-export interface ReportedIssue {
-  where: string;
-  problem: string;
-  guess: string;
-}
-
-export interface ReportedDecision {
-  what: string;
-  alternative: string;
-}
+// What a role reported, before the hive gave it an id. Shared, since the card's history shows them as reported.
+export type { ReportedDecision, ReportedIssue } from "@hive/shared";
 
 export type DeveloperReport =
   | {
