@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { CardDetail, Landed, ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
+import { actionOf, laneActionsFor } from "./laneActions";
 import { Button } from "./ui/Button";
 import { Chip } from "./ui/Chip";
 import { Panel } from "./ui/Panel";
+import { ShipPlanView } from "./ShipPlanView";
 import styles from "./ShipPanel.module.css";
 
 interface Props {
@@ -43,71 +45,34 @@ export function ShipPanel({ detail, onMoved }: Props) {
 
   // `landing` comes only with a full load; the live card.updated event carries `state`, which is working while it lands.
   const landing = detail.landing || detail.state === "working";
-  const dirty = plan ? plan.uncommitted.length > 0 : false;
-  const blocked = !plan || plan.busy || plan.unpushed > 0 || plan.checkoutBlocks || dirty;
+  const actions = laneActionsFor(detail, { shipPlan: plan });
+  const land = actionOf(actions, "land");
+  const discard = actionOf(actions, "discard-and-land");
+  const backToTryIt = actionOf(actions, "back-to-tryit");
 
   return (
     <Panel title="Ship">
       <div className={styles.section}>
         {plan ? (
-          <>
-            <h3>Land on main will:</h3>
-            <ol className={styles.steps}>
-              <li>
-                Squash the card onto <Chip mono>{plan.base}</Chip> as one commit, written in the repo&apos;s style.
-              </li>
-              <li>
-                {plan.tests ? (
-                  <>
-                    Run the tests (<Chip mono>{plan.tests}</Chip>).
-                  </>
-                ) : (
-                  <span className={styles.warning}>No tests will run: {plan.noTestsReason}</span>
-                )}
-              </li>
-              <li>{plan.base === "main" ? "Move your local main to it." : "Push it to origin/main."}</li>
-              <li>Bring your checkout&apos;s main up to date, if that&apos;s safe.</li>
-              <li>Remove the card&apos;s worktree and branch.</li>
-            </ol>
-            {plan.unpushed > 0 ? (
-              <p className={styles.warning}>
-                Your local main has {plan.unpushed} commits that aren&apos;t on origin. Push them first.
-              </p>
-            ) : null}
-            {plan.checkoutBlocks ? (
-              <p className={styles.warning}>
-                Your checkout has main checked out with uncommitted changes. Commit or stash them first.
-              </p>
-            ) : null}
-            {plan.busy ? <p className={styles.warning}>Another card of this project is landing.</p> : null}
-            {dirty ? (
-              <div className={styles.warning}>
-                Uncommitted work in the card&apos;s worktree won&apos;t land:
-                <ul className={styles.lines}>
-                  {plan.uncommitted.map((line, i) => (
-                    <li key={`${i}:${line}`}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </>
+          <ShipPlanView plan={plan} />
         ) : (
           <p className={styles.muted}>Reading what landing will do…</p>
         )}
         <div className={styles.actions}>
-          <Button variant="primary" disabled={landing || blocked} onClick={() => call(() => api.land(detail.id))}>
-            Land on main
+          <Button variant="primary" disabled={!land?.enabled} title={land?.reason ?? undefined} onClick={() => call(() => api.land(detail.id))}>
+            {land?.label}
           </Button>
-          {dirty ? (
-            <Button
-              disabled={landing || !plan || plan.busy || plan.unpushed > 0 || plan.checkoutBlocks}
-              onClick={() => call(() => api.land(detail.id, true))}
-            >
-              Discard them and land
+          {discard ? (
+            <Button disabled={!discard.enabled} title={discard.reason ?? undefined} onClick={() => call(() => api.land(detail.id, true))}>
+              {discard.label}
             </Button>
           ) : null}
-          <Button disabled={landing} onClick={() => call(() => api.backToTryIt(detail.id), onMoved)}>
-            Back to Try it
+          <Button
+            disabled={!backToTryIt?.enabled}
+            title={backToTryIt?.reason ?? undefined}
+            onClick={() => call(() => api.backToTryIt(detail.id), onMoved)}
+          >
+            {backToTryIt?.label}
           </Button>
           {landing ? <span className={styles.muted}>Landing…</span> : null}
         </div>

@@ -7,9 +7,11 @@ export interface ForYouValue {
   items: ForYouItem[];
   loaded: boolean;
   error: string | null;
+  /** Fetch the list again, after you pressed something that moves a card. */
+  reload: () => void;
 }
 
-const EMPTY: ForYouValue = { items: [], loaded: false, error: null };
+const EMPTY: ForYouValue = { items: [], loaded: false, error: null, reload: () => {} };
 const ForYouContext = createContext<ForYouValue>(EMPTY);
 
 /** Everything waiting for you, kept fresh from the event stream. Outside a provider it is empty and quiet. */
@@ -55,6 +57,6 @@ export function ForYouProvider({ children }: { children: ReactNode }) {
       void load();
   });
 
-  const value = useMemo(() => ({ items, loaded, error }), [items, loaded, error]);
+  const value = useMemo(() => ({ items, loaded, error, reload: () => void load() }), [items, loaded, error, load]);
   return <ForYouContext.Provider value={value}>{children}</ForYouContext.Provider>;
 }

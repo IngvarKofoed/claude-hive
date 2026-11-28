@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type {
-  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction,
+  AnswerBody, BoardResponse, Brief, Bug, CardDetail, CardHistory, CardSummary, ChatAuthor, ChatItem, CheckRound, ErrorAction, LaneActionInput, LaneErrorAction,
   FeedbackBody, FileChange, ForYouItem, ForYouResponse, IssueAnswer, IssueJudgment, IssueStatus, Landed, LandBody, Lane, PendingItem,
   Plan, Question, RoleInfo, RolesResponse, SetupReport, ShipPlan, SpecInfo, SpecIssue, TryItRound, UpdateIdeaBody,
 } from "@hive/shared";
@@ -16,7 +16,7 @@ import {
   CHECK_ROUNDS, afterBlocking, canMove, fateOf, laneAfter, laneAfterBuild, laneAfterCheck, laneAfterJudging,
   laneAfterLanding, laneAfterPlan, type IssueFate,
 } from "./board/moves";
-import { waitsForYou, whatItWants } from "./board/forYou";
+import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb, projectSummary, type CardRow, type KeeperJudging, type SessionRow } from "./db";
 import type { EventHub } from "./events";
 import { applyChecklistChange } from "./sessions/checklist";
@@ -612,10 +612,23 @@ export class Hive {
       .filter((card) => waitsForYou(card) && !this.deleting.has(card.id))
       .map((card): ForYouItem => {
         const pending = this.db.openPendingFor(card.id)?.item ?? null;
-        const review = card.lane === "spec" && card.specPath ? (this.refreshSpec(card.id)?.review ?? null) : null;
+        const lastChat = this.db.lastChatItem(card.id, card.lane) ?? null;
+        const spec = card.lane === "spec" ? this.refreshSpec(card.id) : null;
         const { kind, text } = whatItWants({
-          lane: card.lane, pending, lastChat: this.db.lastChatItem(card.id, card.lane), review,
+          lane: card.lane, pending, lastChat: lastChat ?? undefined, review: spec?.review ?? null,
         });
+        // The Ship plan is never read here: it needs git on every reload, and the confirm row reads it instead.
+        const input: LaneActionInput = {
+          lane: card.lane,
+          turnRunning: this.anyTurnRunning(card.id),
+          pending: pending !== null,
+          lastChat,
+          spec: spec ? { review: spec.review, hasText: spec.text !== null } : null,
+          issues: this.db.issuesFor(card.id).map((issue) => issue.status),
+          landing: this.landingProjects.get(card.projectId) === card.id,
+          shipPlan: null,
+          hasFeedback: false,
+        };
         return {
           card: cardSummary(card),
           projectName: projects.get(card.projectId) ?? "",
@@ -623,6 +636,7 @@ export class Hive {
           kind,
           text,
           pending: kind === "question" || kind === "permission" ? pending : null,
+          actions: forYouActions(kind, input),
         };
       });
     // listCards is oldest card first, and the sort is stable, so equal times keep that order.
@@ -1231,7 +1245,7 @@ export class Hive {
   }
 
   private onPlannerEnded(cardId: string, outcome: TurnOutcome, stopped: boolean): void {
-    const fail = (message: string, actions: ErrorAction[]) => this.addError(cardId, "plan", message, actions);
+    const fail = (message: string, actions: LaneErrorAction<"plan">[]) => this.addError(cardId, "plan", message, actions);
     if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return fail("The planner was stopped.", ["retry"]);
     if (outcome.kind === "error") return fail(`The planner failed: ${outcome.message}`, ["retry"]);
     const report = parsePlanReport(outcome.report);
@@ -1677,7 +1691,7 @@ export class Hive {
     // A landing left from a cut-off run may have left the worktree detached on its commit: put it back on any way out.
     let switched = card.landing !== null;
     // Every way out that isn't a landing puts the worktree back on the card's branch and forgets the commit.
-    const stop = async (message: string, actions: ErrorAction[] = ["retry"]) => {
+    const stop = async (message: string, actions: LaneErrorAction<"ship">[] = ["retry"]) => {
       if (switched) await this.deps.git.switchWorktree(worktree, { branch }).catch(() => undefined);
       this.db.updateCard(cardId, { landing: null });
       this.addError(cardId, "ship", message, actions);
@@ -2075,7 +2089,7 @@ export class Hive {
   }
 
   private async onDeveloperEnded(cardId: string, session: SessionRow, outcome: TurnOutcome, stopped: boolean): Promise<void> {
-    const fail = (message: string, actions: ErrorAction[]) => this.addError(cardId, "build", message, actions);
+    const fail = (message: string, actions: LaneErrorAction<"build">[]) => this.addError(cardId, "build", message, actions);
     if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return fail("The developer was stopped.", ["retry"]);
     if (outcome.kind === "error") return fail(`The developer failed: ${outcome.message}`, ["retry"]);
     const report = parseDeveloperReport(outcome.report);
@@ -2200,7 +2214,7 @@ export class Hive {
   }
 
   private onReviewerEnded(cardId: string, outcome: TurnOutcome, stopped: boolean): void {
-    const fail = (message: string, actions: ErrorAction[]) => this.addError(cardId, "check", message, actions);
+    const fail = (message: string, actions: LaneErrorAction<"check">[]) => this.addError(cardId, "check", message, actions);
     if (stopped || (outcome.kind === "ok" && outcome.interrupted)) return fail("The reviewer was stopped.", ["retry"]);
     if (outcome.kind === "error") return fail(`The reviewer failed: ${outcome.message}`, ["retry"]);
     // A reviewer that can't review, or can't report, may do so every time: Move on keeps the card from being stuck.
@@ -3075,7 +3089,11 @@ export class Hive {
     this.addChat(cardId, lane, "hive", text);
   }
 
-  private addError(cardId: string, lane: Lane, message: string, actions: ErrorAction[]): void {
+  /**
+   * An error line in a lane's chat, with the lane actions it offers. Each action must be in its lane's LANE_ACTIONS,
+   * or the page would drop it: a literal lane is checked here, a variable one by errorActions.test.ts.
+   */
+  private addError<L extends Lane>(cardId: string, lane: L, message: string, actions: NoInfer<LaneErrorAction<L>>[]): void {
     const item: ChatItem = { kind: "error", id: randomUUID(), at: new Date().toISOString(), message, actions };
     this.db.addEvent(cardId, "error", { message, actions, lane }, item.id, item.at);
     if (this.requireCard(cardId).lane === lane) this.deps.hub.emit({ type: "chat.message", cardId, item });

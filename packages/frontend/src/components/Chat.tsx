@@ -1,18 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { CardDetail, ChatAuthor, ChatItem, ErrorAction, Lane } from "@hive/shared";
+import type { CardDetail, ChatAuthor, ChatItem, Lane, LaneActionState } from "@hive/shared";
 import { api } from "../api/client";
+import { LANE_ACTION_CALLS, actionOf, laneActionsFor, type LaneActionCall } from "./laneActions";
 import { PendingCard } from "./PendingCard";
 import { Button } from "./ui/Button";
 import { ChatBubble } from "./ui/ChatBubble";
 import styles from "./Chat.module.css";
-
-const ERROR_ACTION_LABEL: Record<ErrorAction, string> = {
-  retry: "Retry",
-  review: "Review again",
-  "back-to-spec": "Back to Spec",
-  "back-to-build": "Back to Build",
-  "move-on": "Move on",
-};
 
 const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
   refine: "product-owner",
@@ -51,9 +44,27 @@ export function isAtBottom(box: { scrollHeight: number; scrollTop: number; clien
   return box.scrollHeight - box.scrollTop - box.clientHeight <= BOTTOM_SLACK;
 }
 
-/** A chat's messages and error lines. Without `onAction`, error lines have no buttons. */
-function ChatItems({ items, onAction }: { items: ChatItem[]; onAction?: (action: ErrorAction) => void }) {
-  return items.map((item) =>
+/**
+ * The lane actions the last chat line offers: those it carries, when it's an error, among the ones on offer. An older
+ * error line offers none: the server only acts on the lane's last line.
+ */
+function errorLineActions(chat: ChatItem[], actions: LaneActionState[]): LaneActionState[] {
+  const last = chat.at(-1);
+  if (last?.kind !== "error") return [];
+  return actions.filter((action) => last.actions.some((id) => id === action.id));
+}
+
+/** A chat's messages and error lines. Only the last line gets `lastActions` as its buttons. */
+function ChatItems({
+  items,
+  lastActions = [],
+  onAction,
+}: {
+  items: ChatItem[];
+  lastActions?: LaneActionState[];
+  onAction?: (action: LaneActionState) => void;
+}) {
+  return items.map((item, index) =>
     item.kind === "message" ? (
       <ChatBubble key={item.id} from={item.from}>
         {item.text}
@@ -61,11 +72,17 @@ function ChatItems({ items, onAction }: { items: ChatItem[]; onAction?: (action:
     ) : (
       <ChatBubble key={item.id} from="error">
         <p>{item.message}</p>
-        {onAction && item.actions.length > 0 ? (
+        {onAction && index === items.length - 1 && lastActions.length > 0 ? (
           <div className={styles.actions}>
-            {item.actions.map((action) => (
-              <Button key={action} compact onClick={() => onAction(action)}>
-                {ERROR_ACTION_LABEL[action]}
+            {lastActions.map((action) => (
+              <Button
+                key={action.id}
+                compact
+                disabled={!action.enabled}
+                title={action.reason ?? undefined}
+                onClick={() => onAction(action)}
+              >
+                {action.label}
               </Button>
             ))}
           </div>
@@ -89,6 +106,8 @@ export function PastChat({ items }: { items: ChatItem[] }) {
 }
 
 export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props) {
+  const actions = laneActionsFor(detail);
+  const stop = actionOf(actions, "stop");
   const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
@@ -168,14 +187,6 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
     if (!closed) void send();
   }
 
-  const errorActions: Record<ErrorAction, () => Promise<unknown>> = {
-    retry: () => api.retry(detail.id),
-    review: () => api.review(detail.id),
-    "back-to-spec": () => api.backToSpec(detail.id),
-    "back-to-build": () => api.backToBuild(detail.id),
-    "move-on": () => api.moveOn(detail.id),
-  };
-
   async function run(action: () => Promise<unknown>) {
     setError(null);
     try {
@@ -189,7 +200,12 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
     <div className={styles.chat} data-framed={framed || undefined}>
       <div className={styles.logBox}>
         <div className={styles.log} role="log" aria-live="polite" ref={logRef} onScroll={onLogScroll}>
-          <ChatItems items={detail.chat} onAction={(action) => void run(errorActions[action])} />
+          <ChatItems
+            items={detail.chat}
+            lastActions={errorLineActions(detail.chat, actions)}
+            // An error line only carries error actions, and each has its call.
+            onAction={(action) => void run(() => LANE_ACTION_CALLS[action.id as LaneActionCall](detail.id))}
+          />
           {streaming ? (
             <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
               {streaming}
@@ -211,9 +227,9 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
           </p>
         ) : null}
         {readOnly ? (
-          detail.turnRunning ? (
+          stop ? (
             <div className={styles.actions}>
-              <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button>
+              <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id))}>{stop.label}</Button>
             </div>
           ) : null
         ) : (
@@ -241,7 +257,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
               <Button type="submit" variant="primary" disabled={closed || !text.trim()}>
                 Send
               </Button>
-              {detail.turnRunning ? <Button onClick={() => run(() => api.stop(detail.id))}>Stop</Button> : null}
+              {stop ? <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id))}>{stop.label}</Button> : null}
               {sendRowEnd ? <div className={styles.sendRowEnd}>{sendRowEnd}</div> : null}
             </div>
           </form>

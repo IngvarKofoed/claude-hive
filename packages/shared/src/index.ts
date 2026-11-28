@@ -2,6 +2,8 @@
 // A change here lands in backend and frontend in the same change (packages/shared/CLAUDE.md).
 
 export { APP_VERSION } from "./version";
+export * from "./laneActions";
+import type { ErrorAction, LaneActionState } from "./laneActions";
 
 // ---------- Lanes ----------
 
@@ -419,6 +421,12 @@ export interface ForYouItem {
   text: string;
   /** The open question or permission, answered on the list. Null for every other kind. */
   pending: PendingItem | null;
+  /**
+   * The lane actions the entry offers as buttons (docs/specs/2026-11-28-for-you-actions.md, What For you offers):
+   * none for a question or permission, or for a card in Try it. Land on main is always enabled here, since it only
+   * opens the confirm row, which reads the Ship plan.
+   */
+  actions: LaneActionState[];
 }
 
 /** GET /api/for-you: every card waiting for you, the one waiting longest first. */
@@ -478,12 +486,6 @@ export interface RolesResponse {
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
 export type ChatAuthor =
   | "you" | "product-owner" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive";
-
-/**
- * What an error line offers: retry the failed turn, run the review again, send a blocked plan or build back to Spec,
- * or, for a card that Check stopped, send it back to Build for one more round or move it on to Try it.
- */
-export type ErrorAction = "retry" | "review" | "back-to-spec" | "back-to-build" | "move-on";
 
 export type ChatItem =
   | { kind: "message"; id: string; at: string; from: ChatAuthor; text: string }

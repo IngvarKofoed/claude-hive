@@ -5,7 +5,17 @@ import type { CardDetail, Landed, ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
 import { DonePanel, ShipPanel } from "./ShipPanel";
 
-const detail = { id: "c1", landing: false, chat: [] } as unknown as CardDetail;
+const detail = {
+  id: "c1",
+  lane: "ship",
+  landing: false,
+  chat: [],
+  issues: [],
+  pending: null,
+  turnRunning: false,
+  spec: null,
+  state: "needs-you",
+} as unknown as CardDetail;
 const clean: ShipPlan = {
   base: "origin/main",
   uncommitted: [],
@@ -43,6 +53,7 @@ describe("ShipPanel", () => {
     await show(plan);
     expect(land()).toBeDisabled();
     expect(screen.getByText(text)).toBeInTheDocument();
+    expect(land()).toHaveAttribute("title", expect.stringMatching(text));
   });
 
   it("disables Land on main while landing", async () => {

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { describe, expect, it } from "vitest";
-import type { CardDetail } from "@hive/shared";
+import type { CardDetail, ErrorAction } from "@hive/shared";
 import { applyCardEvent, type CardLive } from "./cardState";
 import { api } from "../api/client";
 import { Chat } from "./Chat";
@@ -194,33 +194,70 @@ describe("Chat", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
-  it("shows one button per error action and calls the matching endpoint", async () => {
-    const retry = vi.spyOn(api, "retry").mockResolvedValue(undefined);
-    const review = vi.spyOn(api, "review").mockResolvedValue({ ok: true });
-    const back = vi.spyOn(api, "backToSpec").mockResolvedValue({} as never);
-    const backBuild = vi.spyOn(api, "backToBuild").mockResolvedValue({} as never);
-    const moveOn = vi.spyOn(api, "moveOn").mockResolvedValue({} as never);
-    const withError: CardDetail = {
-      ...detail,
-      turnRunning: false,
-      chat: [
-        { kind: "error", id: "e1", at: "t", message: "Blocked", actions: ["retry", "review", "back-to-spec", "back-to-build", "move-on"] },
-        { kind: "error", id: "e2", at: "t", message: "Plain", actions: [] },
-      ],
+  const errorLine = (id: string, actions: ErrorAction[]) =>
+    ({ kind: "error", id, at: "t", message: `Failed ${id}`, actions }) as const;
+  const buttons = () => screen.getAllByRole("button").map((b) => b.textContent);
+
+  it("Check: an error line shows its actions in the lane's order and calls each endpoint", async () => {
+    const calls = {
+      retry: vi.spyOn(api, "retry").mockResolvedValue(undefined),
+      backToBuild: vi.spyOn(api, "backToBuild").mockResolvedValue({} as never),
+      moveOn: vi.spyOn(api, "moveOn").mockResolvedValue({} as never),
+      backToSpec: vi.spyOn(api, "backToSpec").mockResolvedValue({} as never),
     };
-    render(<Chat detail={withError} streaming="" activity={null} />);
-    expect(screen.getAllByRole("button", { name: /Retry|Review again|Back to Spec|Back to Build|Move on/ })).toHaveLength(5);
-    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await userEvent.click(screen.getByRole("button", { name: "Review again" }));
-    await userEvent.click(screen.getByRole("button", { name: "Back to Spec" }));
-    await userEvent.click(screen.getByRole("button", { name: "Back to Build" }));
-    await userEvent.click(screen.getByRole("button", { name: "Move on" }));
-    expect(backBuild).toHaveBeenCalledWith("c1");
-    expect(moveOn).toHaveBeenCalledWith("c1");
-    expect(retry).toHaveBeenCalledWith("c1");
+    const d: CardDetail = {
+      ...detail,
+      lane: "check",
+      turnRunning: false,
+      chat: [errorLine("e1", ["move-on", "back-to-spec", "retry", "back-to-build"])],
+    };
+    render(<Chat detail={d} streaming="" activity={null} />);
+    expect(buttons()).toEqual(["Retry", "Back to Build", "Move on", "Back to Spec"]);
+    for (const name of ["Retry", "Back to Build", "Move on", "Back to Spec"]) {
+      await userEvent.click(screen.getByRole("button", { name }));
+    }
+    for (const spy of Object.values(calls)) expect(spy).toHaveBeenCalledWith("c1");
+  });
+
+  it("Spec: an error line with review shows Review, labelled by the definition", async () => {
+    const review = vi.spyOn(api, "review").mockResolvedValue({ ok: true });
+    const spec = { path: "docs/specs/x.md", text: "# X", review: "stale" as const };
+    const d: CardDetail = { ...detail, lane: "spec", turnRunning: false, spec, chat: [errorLine("e1", ["retry", "review"])] };
+    render(<Chat detail={d} streaming="" activity={null} />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /again/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(review).toHaveBeenCalledWith("c1");
-    expect(back).toHaveBeenCalledWith("c1");
-    vi.restoreAllMocks();
+  });
+
+  it("Refine: a retry-only line shows Retry only", () => {
+    const d: CardDetail = { ...detail, lane: "refine", turnRunning: false, chat: [errorLine("e1", ["retry"])] };
+    render(<Chat detail={d} streaming="" activity={null} />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Back to|Move on|Review/ })).toBeNull();
+  });
+
+  it("an older error line has no buttons", () => {
+    const d: CardDetail = {
+      ...detail,
+      lane: "check",
+      turnRunning: false,
+      chat: [errorLine("e1", ["retry", "move-on"]), errorLine("e2", ["retry"])],
+    };
+    render(<Chat detail={d} streaming="" activity={null} />);
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Move on" })).toBeNull();
+  });
+
+  it("greys error-line buttons with a reason while a turn runs, and shows Stop only then", () => {
+    const d: CardDetail = { ...detail, lane: "check", turnRunning: true, chat: [errorLine("e1", ["retry"])] };
+    const { rerender } = render(<Chat detail={d} streaming="" activity={null} />);
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute("title", "Wait for the running turn to finish");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    rerender(<Chat detail={{ ...d, turnRunning: false }} streaming="" activity={null} />);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 
   it("has no reply box in Check, and labels the reviewer", () => {

@@ -24,6 +24,7 @@ const item = (id: string): ForYouItem => ({
   kind: "try-it",
   text: "Try it out",
   pending: null,
+  actions: [],
 });
 
 beforeEach(() => listeners.clear());
@@ -78,6 +79,26 @@ describe("ForYouProvider", () => {
   it("is empty and quiet outside a provider", () => {
     render(<Probe />);
     expect(screen.getByText("count 0")).toBeTruthy();
+  });
+
+  it("reload() refetches, and does nothing outside a provider", async () => {
+    const spy = vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+    function Reloader() {
+      const { reload } = useForYou();
+      return <button onClick={reload}>again</button>;
+    }
+    const { unmount } = render(
+      <ForYouProvider>
+        <Reloader />
+      </ForYouProvider>,
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    act(() => screen.getByRole("button", { name: "again" }).click());
+    expect(spy).toHaveBeenCalledTimes(2);
+    unmount();
+    render(<Reloader />);
+    act(() => screen.getByRole("button", { name: "again" }).click());
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 

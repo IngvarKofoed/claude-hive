@@ -58,6 +58,28 @@ Your feedback goes back to the lane it belongs to. The hive picks the lane and s
 
 Feedback that changes the what or the look also changes the spec, so the card passes through Spec again, with a new review. A bug leaves the spec as it is.
 
+## Lane Actions
+
+A **lane action** is something you can do to a card in a lane: a button that moves it on, sends it back, or gets it going again. Each lane has its own:
+
+| Lane | Lane actions |
+| --- | --- |
+| **Ideas** | Start |
+| **Refine** | Good, Retry, Stop, Park |
+| **Mockup** | Good, Pick a version, Park |
+| **Spec** | Review, Sign off, Retry, Stop, Park |
+| **Plan** | Retry, Back to Spec, Stop, Park |
+| **Build** | Retry, Back to Spec, Stop, Park |
+| **Check** | Retry, Back to Build, Move on, Back to Spec, Stop, Park |
+| **Try it** | Send to Build, Accept, Retry, Park |
+| **Ship** | Land on main, Discard them and land, Back to Try it, Retry, Back to Build, Stop |
+| **Done** | none |
+
+- **Retry, Back to Spec, Back to Build and Move on** come with an error line, when a turn failed or a card stopped, and only on the lane's newest line. **Stop** shows while a turn runs. Discard them and land shows when the card's worktree has uncommitted work.
+- **A greyed action says why,** in the same words wherever it shows.
+- **The card page and For you offer the same actions.** For you leaves out Try it's, since you test on the card page, and asks before Land on main.
+- **Delete and Drop are card controls,** not lane actions: they end the card from any lane. Chatting, answering a question and the app's own controls in Try it aren't lane actions either.
+
 ## Hands Off: What Still Reaches You
 
 Between your sign-off and Try it, the hive works without you. Only these reach you:
@@ -236,7 +258,7 @@ One page, with several views:
   - ▶ working
   - ◆ versions to compare
   - ■ stopped
-- **For you:** everything waiting for you, across the whole board, oldest first.
+- **For you:** everything waiting for you, across the whole board, oldest first. Each entry offers its lane's actions (see Lane Actions), except a card in Try it, which you test on the card page.
 - **Card:** opens on the lane the card is in. The chat sits next to what that lane is producing (the brief, the mockup, the spec, or the developer's checklist), each half the width, with what sent the card back to the lane on top. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.

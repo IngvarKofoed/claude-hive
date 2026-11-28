@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CardState, ChatItem, Lane, PendingItem } from "@hive/shared";
-import { waitsForYou, whatItWants } from "./board/forYou";
+import type { CardState, ChatItem, ErrorAction, Lane, LaneActionInput, PendingItem } from "@hive/shared";
+import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
@@ -15,7 +15,7 @@ import { Hive } from "./hive";
 import { fakeApps } from "./preview/apps";
 import { fakePorts } from "./preview/ports";
 import type { Role } from "./sessions/types";
-import { FakeProbe, FakeRunner, makeRepo, makeSpecFormat, settle, waitFor, type TempRepo } from "./testing";
+import { FakeProbe, FakeRunner, keeperReport, makeRepo, makeSpecFormat, settle, waitFor, type TempRepo } from "./testing";
 
 const question: PendingItem = {
   id: "q1", kind: "question",
@@ -68,6 +68,54 @@ describe("what a waiting card wants", () => {
     expect(wants("tryit")).toEqual({ kind: "try-it", text: "Ready to test." });
     expect(wants("ship", { lastChat: note })).toEqual({ kind: "land", text: "Ready to land on main." });
     expect(wants("check").kind).toBe("waiting");
+  });
+});
+
+describe("what an entry offers", () => {
+  const input = (lane: Lane, extra: Partial<LaneActionInput> = {}): LaneActionInput => ({
+    lane, turnRunning: false, pending: false, lastChat: null, spec: null, issues: [], landing: false, shipPlan: null,
+    hasFeedback: false, ...extra,
+  });
+  const failed = (actions: ErrorAction[]): ChatItem => ({ kind: "error", id: "e", at: "t", message: "It failed.", actions });
+  const ids = (kind: Parameters<typeof forYouActions>[0], lane: Lane, extra: Partial<LaneActionInput> = {}) =>
+    forYouActions(kind, input(lane, extra)).map((a) => a.id);
+
+  it("offers nothing for a question or a permission, whatever the lane", () => {
+    expect(ids("question", "refine", { pending: true })).toEqual([]);
+    expect(ids("permission", "spec", { pending: true, spec: { review: "fresh", hasText: true } })).toEqual([]);
+    expect(ids("question", "build", { pending: true, lastChat: failed(["retry", "back-to-spec"]) })).toEqual([]);
+  });
+
+  it("offers nothing for a card in Try it, a failed keeper turn included", () => {
+    expect(ids("try-it", "tryit")).toEqual([]);
+    expect(ids("stuck", "tryit", { lastChat: failed(["retry"]) })).toEqual([]);
+  });
+
+  it("gives Ship Land on main, always enabled, and Back to Try it; Back to Build only from the error line", () => {
+    expect(forYouActions("land", input("ship"))).toEqual([
+      { id: "land", label: "Land on main", primary: true, enabled: true, reason: null },
+      { id: "back-to-tryit", label: "Back to Try it", primary: false, enabled: true, reason: null },
+    ]);
+    expect(ids("stuck", "ship", { lastChat: failed(["retry", "back-to-build"]) })).toEqual(["land", "back-to-tryit", "back-to-build"]);
+    expect(ids("stuck", "ship", { lastChat: failed(["retry"]) })).toEqual(["land", "back-to-tryit"]);
+  });
+
+  it("never gives Ship Retry, Discard them and land or Stop", () => {
+    const dirty = { base: "origin/main" as const, uncommitted: ["?? a"], unpushed: 0, tests: null, noTestsReason: "none",
+      checkoutBlocks: false, busy: false };
+    expect(ids("stuck", "ship", { lastChat: failed(["retry"]), shipPlan: dirty, turnRunning: true })).toEqual([
+      "land", "back-to-tryit",
+    ]);
+  });
+
+  it("gives other lanes only Good, Review, Sign off and the error line's actions, never Stop", () => {
+    expect(ids("your-turn", "refine")).toEqual(["good"]);
+    expect(ids("your-turn", "refine", { turnRunning: true })).toEqual(["good"]);
+    expect(ids("your-turn", "spec", { spec: { review: "none", hasText: true } })).toEqual(["review", "signoff"]);
+    expect(ids("stuck", "spec", { lastChat: failed(["retry"]) })).toEqual(["review", "signoff", "retry"]);
+    expect(ids("stuck", "plan", { lastChat: failed(["retry", "back-to-spec"]) })).toEqual(["retry", "back-to-spec"]);
+    expect(ids("stuck", "check", { lastChat: failed(["back-to-build", "move-on"]) })).toEqual(["back-to-build", "move-on"]);
+    expect(ids("waiting", "check")).toEqual([]);
   });
 });
 
@@ -244,6 +292,82 @@ describe("Hive.forYou", () => {
     expect(listed()[0]).toMatchObject({ kind: "review-again" });
   });
 
+  const actionsOf = (id: string) => hive.forYou().items.find((i) => i.card.id === id)?.actions;
+
+  /** A Refine card with a brief, its product owner's turn over. */
+  async function waitingInRefine() {
+    const s = await inRefine();
+    await s.po.request.hiveTools!.writeBrief!(brief);
+    s.po.handlers.onSessionCreated();
+    await s.po.end();
+    return s;
+  }
+
+  /** A Spec card whose spec writer has written the spec, with no review yet. */
+  async function writtenSpec() {
+    const s = await waitingInRefine();
+    await hive.good(s.id);
+    const writer = runner.last;
+    writeFileSync(join(s.worktree, hive.card(s.id).spec!.path), "# Printer font size\n\nThe spec.\n");
+    writer.handlers.onSessionCreated();
+    await writer.end();
+    return s;
+  }
+
+  it("offers Good on a Refine card waiting for your reply, and drops the card once Good moves it", async () => {
+    const { id } = await waitingInRefine();
+    expect(actionsOf(id)).toEqual([{ id: "good", label: "Good", primary: true, enabled: true, reason: null }]);
+    await hive.good(id);
+    expect(actionsOf(id)).toBeUndefined();
+    expect(hive.card(id).lane).toBe("spec");
+  });
+
+  it("offers Review on a written spec with no review, greys Sign off, and drops the card while the review runs", async () => {
+    const { id } = await writtenSpec();
+    expect(actionsOf(id)).toEqual([
+      { id: "review", label: "Review", primary: false, enabled: true, reason: null },
+      { id: "signoff", label: "Sign off", primary: true, enabled: false, reason: "Run the review first" },
+    ]);
+    hive.review(id);
+    expect(actionsOf(id)).toBeUndefined();
+  });
+
+  it("offers Retry and Back to Spec on a blocked build, and Back to Spec takes the developer's reason to the spec writer", async () => {
+    const { id } = await writtenSpec();
+    hive.review(id);
+    await runner.last.end({ kind: "ok", report: { status: "done", blockedReason: null, summary: "", findings: [] } });
+    await hive.signoff(id);
+    await runner.last.end({
+      kind: "ok",
+      report: {
+        status: "done", blockedReason: null, tests: [],
+        steps: [{ title: "Add the setting", detail: "A size per printer.", chunk: "core", check: "unit test" }],
+        chunks: [{ name: "core", owns: ["src/fonts.ts"], model: "opus" }],
+      },
+    });
+    await waitFor(() => runner.last.request.role.name === "developer");
+    const developer = runner.last;
+    developer.handlers.onSessionCreated();
+    await developer.end({
+      kind: "ok",
+      report: { status: "blocked", blockedReason: "No printers table.", summary: "", departures: [], issues: [], decisions: [] },
+    });
+    await waitFor(() => runner.last.request.role.name === "spec-writer");
+    const keeper = runner.last;
+    await keeper.end({ kind: "ok", report: keeperReport(keeper.request.message) });
+    await waitFor(() => hive.card(id).state === "needs-you");
+
+    expect(hive.card(id).lane).toBe("build");
+    expect(actionsOf(id)).toEqual([
+      { id: "retry", label: "Retry", primary: false, enabled: true, reason: null },
+      { id: "back-to-spec", label: "Back to Spec", primary: false, enabled: true, reason: null },
+    ]);
+    await hive.backToSpec(id);
+    expect(hive.card(id).lane).toBe("spec");
+    expect(runner.last.request.role.name).toBe("spec-writer");
+    expect(runner.last.request.message).toContain("No printers table.");
+  });
+
   describe("cards placed in a lane", () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -263,6 +387,23 @@ describe("Hive.forYou", () => {
         ["newer", "2026-11-27T09:30:00.000Z", "flux"],
         ["older", "2026-11-27T10:00:00.000Z", "flux"],
       ]);
+    });
+
+    it("offers Land on main and Back to Try it on a Ship card without reading git for the plan", () => {
+      db.insertCard(cardRow("c", "p", "ship", "needs-you"));
+      const shipPlan = vi.spyOn(hive, "shipPlan");
+      const [item] = hive.forYou().items;
+      expect(item!.actions).toEqual([
+        { id: "land", label: "Land on main", primary: true, enabled: true, reason: null },
+        { id: "back-to-tryit", label: "Back to Try it", primary: false, enabled: true, reason: null },
+      ]);
+      expect(shipPlan).not.toHaveBeenCalled();
+    });
+
+    it("offers no actions on a Try it card, nor on a question's entry", () => {
+      db.insertCard(cardRow("t", "p", "tryit", "needs-you"));
+      db.addEvent("t", "error", { message: "The spec keeper failed.", actions: ["retry"], lane: "tryit" }, randomUUID());
+      expect(hive.forYou().items[0]).toMatchObject({ kind: "stuck", actions: [] });
     });
 
     it("doesn't count a failed landing's error once the card has been back to Try it and accepted again", async () => {

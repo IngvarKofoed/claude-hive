@@ -72,6 +72,11 @@ describe("ReviewBar", () => {
     expect(screen.queryByText(/first$/)).not.toBeInTheDocument();
   });
 
+  it("gives a greyed Review its reason as its title", () => {
+    render(<ReviewBar detail={detail("fresh")} onMoved={() => {}} />);
+    expect(screen.getByRole("button", { name: "Review" })).toHaveAttribute("title", "Already reviewed");
+  });
+
   it("greys both buttons while a turn runs, and Review while the spec isn't written", () => {
     const { rerender } = render(<ReviewBar detail={detail("fresh", { turnRunning: true })} onMoved={() => {}} />);
     expect(screen.getByRole("button", { name: "Sign off" })).toBeDisabled();

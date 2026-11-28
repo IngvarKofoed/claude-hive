@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CardDetail } from "@hive/shared";
+import { LANE_ACTION_LABEL, type CardDetail } from "@hive/shared";
 import { api } from "../api/client";
 import { Button } from "./ui/Button";
 import { Panel } from "./ui/Panel";
@@ -77,7 +77,7 @@ export function IdeaPanel({ detail, onChanged }: Props) {
             Save
           </Button>
           <Button variant="primary" disabled={busy || !filled} onClick={() => void start()}>
-            Start
+            {LANE_ACTION_LABEL.start}
           </Button>
         </div>
       </div>

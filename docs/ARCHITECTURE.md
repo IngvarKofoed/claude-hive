@@ -208,6 +208,10 @@ query({
 | any before Ship | You park it | Ideas. The worktree is removed and the branch kept. |
 | any | You delete it | Gone, after everything it runs is stopped: its worktree and branch are removed and its rows deleted. Refused while it lands on main or moves. |
 
+## Lane Actions
+
+What you can do to a card in a lane (CONCEPT.md, Lane Actions) is defined once, in `packages/shared/src/laneActions.ts`. `LANE_ACTIONS` lists each lane's actions in display order, and the pure `laneActions(input)` returns the ones on offer, each with its label, whether it's enabled, and why not. It has two readers: the card page runs it on the live `CardDetail`, and `Hive.forYou()` runs it for each listed card, which gives every For you entry its `actions`. An error line's `actions` say which error actions it offers, and only the lane's last chat line offers them. `addError` is typed so that a literal lane accepts only the actions it lists. The definition decides only what the page offers: the server's guards (`Hive.good`, `signoff`, `retry` and the rest) are unchanged and still decide, from state the page never sees, such as a move under way or git at the moment of landing.
+
 ## Questions and Permissions
 
 `canUseTool` catches **questions** (`AskUserQuestion`). Permission requests are decided by Claude Code's auto mode, which every session runs in.
@@ -365,7 +369,7 @@ POST   /api/cards/:id/land                Land on main { discard? }
 POST   /api/cards/:id/back-to-tryit       Out of Ship, until Ship is built
 POST   /api/cards/:id/setup               Set up the worktree (again)
 POST   /api/cards/:id/app/start           Start the card's app in Try it · /app/stop · /app/restart
-GET    /api/for-you                       Everything waiting for you
+GET    /api/for-you                       Everything waiting for you, each with its lane actions
 GET    /api/roles                         Every role: its file, and what its sessions get beyond it
 POST   /api/for-you/:itemId               Answer, approve or decide
 GET    /api/lanes/:lane/history           A lane across all cards

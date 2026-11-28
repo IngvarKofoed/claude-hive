@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { LANES, type ForYouItem, type ForYouKind } from "@hive/shared";
+import { LANES, type ForYouItem, type ForYouKind, type LaneActionState } from "@hive/shared";
 import { ago } from "./ago";
+import { Button } from "./ui/Button";
+import { useForYou } from "./forYou";
+import { LANE_ACTION_CALLS, type LaneActionCall } from "./laneActions";
+import { LandConfirm } from "./LandConfirm";
 import { PendingCard } from "./PendingCard";
 import styles from "./ForYouEntry.module.css";
 
@@ -33,6 +37,27 @@ export function ForYouEntry({ item, nowMs }: { item: ForYouItem; nowMs: number }
   const [failed, setFailed] = useState<{ about: string; message: string } | null>(null);
   const error = failed?.about === about ? failed.message : null;
   const setError = (message: string) => setFailed({ about, message });
+  const { reload } = useForYou();
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const actions = item.actions;
+
+  async function press(action: LaneActionState) {
+    if (action.id === "land") {
+      setConfirming(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await LANE_ACTION_CALLS[action.id as LaneActionCall](item.card.id);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not ${action.label.toLowerCase()}.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const answered = item.kind === "question" || item.kind === "permission";
   return (
     <article className={styles.entry} data-kind={item.kind}>
@@ -54,11 +79,47 @@ export function ForYouEntry({ item, nowMs }: { item: ForYouItem; nowMs: number }
           {error}
         </p>
       ) : null}
-      <div className={styles.actions}>
-        <Link to={`/cards/${item.card.id}`} className={styles.link} data-secondary={answered || undefined}>
-          {linkLabel(item.kind)}
-        </Link>
-      </div>
+      {confirming ? (
+        <LandConfirm
+          card={item.card}
+          onClose={() => setConfirming(false)}
+          onLanded={() => {
+            setConfirming(false);
+            reload();
+          }}
+        />
+      ) : (
+        <>
+          <div className={styles.actions}>
+            {actions.map((action) => (
+              <Button
+                key={action.id}
+                compact
+                variant={action.primary ? "primary" : "secondary"}
+                disabled={busy || !action.enabled}
+                title={action.reason ?? undefined}
+                onClick={() => void press(action)}
+              >
+                {action.label}
+              </Button>
+            ))}
+            <Link
+              to={`/cards/${item.card.id}`}
+              className={styles.link}
+              data-secondary={answered || actions.length > 0 || undefined}
+            >
+              {linkLabel(item.kind)}
+            </Link>
+          </div>
+          {actions
+            .filter((action) => !action.enabled && action.reason)
+            .map((action) => (
+              <p key={action.id} className={styles.reason}>
+                {action.label}: {action.reason}
+              </p>
+            ))}
+        </>
+      )}
     </article>
   );
 }

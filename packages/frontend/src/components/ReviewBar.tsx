@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CardDetail, ReviewState } from "@hive/shared";
 import { api } from "../api/client";
+import { actionOf, laneActionsFor } from "./laneActions";
 import { Button } from "./ui/Button";
 import styles from "./ReviewBar.module.css";
 
@@ -13,15 +14,6 @@ export const REVIEW_TEXT: Record<ReviewState, string> = {
   stale: "Changed since the review",
 };
 
-/** Why Sign off is greyed, or null when it is enabled. */
-export function signOffReason(review: ReviewState, turnRunning: boolean): string | null {
-  if (review === "fresh") return turnRunning ? "Wait for the spec writer to finish" : null;
-  if (review === "none") return "Run the review first";
-  if (review === "stale") return "Review the changed spec again first";
-  if (review === "unfinished") return "Finish the review first";
-  return "Wait for the review";
-}
-
 interface Props {
   detail: CardDetail;
   /** Called after Sign off succeeds, so the page can load the card in its new lane. */
@@ -33,9 +25,9 @@ export function ReviewBar({ detail, onMoved }: Props) {
   const spec = detail.spec;
   if (!spec) return null;
 
-  const canReview =
-    (spec.review === "none" || spec.review === "stale") && spec.text !== null && !detail.turnRunning;
-  const reason = signOffReason(spec.review, detail.turnRunning);
+  const actions = laneActionsFor(detail);
+  const review = actionOf(actions, "review");
+  const signoff = actionOf(actions, "signoff");
 
   async function run(action: () => Promise<unknown>, after?: () => void) {
     setError(null);
@@ -53,18 +45,24 @@ export function ReviewBar({ detail, onMoved }: Props) {
         <p className={styles.state} data-review={spec.review} role="status">
           {REVIEW_TEXT[spec.review]}
         </p>
-        <Button compact disabled={!canReview} onClick={() => run(() => api.review(detail.id))}>
-          Review
+        <Button
+          compact
+          disabled={!review?.enabled}
+          title={review?.reason ?? undefined}
+          onClick={() => run(() => api.review(detail.id))}
+        >
+          {review?.label}
         </Button>
         <Button
           compact
           variant="primary"
-          disabled={reason !== null}
+          disabled={!signoff?.enabled}
+          title={signoff?.reason ?? undefined}
           onClick={() => run(() => api.signoff(detail.id), onMoved)}
         >
-          Sign off
+          {signoff?.label}
         </Button>
-        {reason ? <span className={styles.reason}>{reason}</span> : null}
+        {signoff?.reason ? <span className={styles.reason}>{signoff.reason}</span> : null}
       </div>
       {error ? (
         <p className={styles.error} role="alert">
