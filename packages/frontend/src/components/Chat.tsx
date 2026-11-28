@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { CardDetail, ChatAuthor, ChatItem, Lane, LaneActionId, LaneActionState } from "@hive/shared";
 import { api } from "../api/client";
 import { LANE_ACTION_CALLS, actionOf, laneActionsFor, useLaneActionDone, type LaneActionCall } from "./laneActions";
-import { PendingCard } from "./PendingCard";
+import { ChatItems, ChatLog, isAtBottom, type ChatLogHandle } from "./ChatLog";
 import { Button } from "./ui/Button";
-import { ChatBubble } from "./ui/ChatBubble";
 import styles from "./Chat.module.css";
 
 const LANE_AUTHOR: Partial<Record<Lane, ChatAuthor>> = {
@@ -34,17 +33,6 @@ interface Props {
   sendRowEnd?: ReactNode;
 }
 
-/** The log's line while a turn runs and nothing else shows (docs/specs/2026-11-28-instant-feedback-on-message.md). */
-const WORKING = "thinking…";
-
-/** How far short of the bottom still counts as the bottom, in pixels. */
-const BOTTOM_SLACK = 8;
-
-/** Whether a scrolling box is at its bottom, give or take a few pixels. */
-export function isAtBottom(box: { scrollHeight: number; scrollTop: number; clientHeight: number }): boolean {
-  return box.scrollHeight - box.scrollTop - box.clientHeight <= BOTTOM_SLACK;
-}
-
 /**
  * The lane actions the last chat line offers: those it carries, when it's an error, among the ones on offer. An older
  * error line offers none: the server only acts on the lane's last line.
@@ -55,44 +43,6 @@ function errorLineActions(chat: ChatItem[], actions: LaneActionState[]): LaneAct
   return actions.filter((action) => last.actions.some((id) => id === action.id));
 }
 
-/** A chat's messages and error lines. Only the last line gets `lastActions` as its buttons. */
-function ChatItems({
-  items,
-  lastActions = [],
-  onAction,
-}: {
-  items: ChatItem[];
-  lastActions?: LaneActionState[];
-  onAction?: (action: LaneActionState) => void;
-}) {
-  return items.map((item, index) =>
-    item.kind === "message" ? (
-      <ChatBubble key={item.id} from={item.from}>
-        {item.text}
-      </ChatBubble>
-    ) : (
-      <ChatBubble key={item.id} from="error">
-        <p>{item.message}</p>
-        {onAction && index === items.length - 1 && lastActions.length > 0 ? (
-          <div className={styles.actions}>
-            {lastActions.map((action) => (
-              <Button
-                key={action.id}
-                compact
-                disabled={!action.enabled}
-                title={action.reason ?? undefined}
-                onClick={() => onAction(action)}
-              >
-                {action.label}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-      </ChatBubble>
-    ),
-  );
-}
-
 /**
  * A finished lane's chat, looked back at: only what was said, with nothing to type into or press
  * (docs/specs/2026-11-27-card-lane-artifacts.md).
@@ -100,11 +50,13 @@ function ChatItems({
 export function PastChat({ items }: { items: ChatItem[] }) {
   if (items.length === 0) return <p className={styles.empty}>No chat in this lane.</p>;
   return (
-    <div className={styles.log}>
+    <div className={styles.past}>
       <ChatItems items={items} />
     </div>
   );
 }
+
+export { isAtBottom };
 
 export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props) {
   const actions = laneActionsFor(detail);
@@ -113,62 +65,9 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
   const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
-  // A tool's line wins; otherwise a running turn with no text streaming and no question waiting is thinking.
-  const line = activity ?? (detail.turnRunning && !streaming && !detail.pending ? WORKING : null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [unseen, setUnseen] = useState(false);
-  const logRef = useRef<HTMLDivElement>(null);
-  // Whether the log was at its bottom before the latest content arrived; kept by the scroll listener.
-  const followRef = useRef(true);
-  const seenRef = useRef<{ chat: number; streaming: string; pending: string | undefined } | null>(null);
-
-  function toBottom() {
-    const log = logRef.current;
-    if (log) log.scrollTop = log.scrollHeight;
-  }
-
-  // After a render that changed what the log shows: follow it from the bottom, or flag what arrived while scrolled up.
-  useLayoutEffect(() => {
-    const pending = detail.pending?.id;
-    const before = seenRef.current;
-    seenRef.current = { chat: detail.chat.length, streaming, pending };
-    if (before === null || followRef.current) {
-      followRef.current = true;
-      toBottom();
-      return;
-    }
-    const added =
-      detail.chat.length > before.chat ||
-      (streaming !== "" && streaming !== before.streaming) ||
-      (pending !== undefined && pending !== before.pending);
-    if (added) setUnseen(true);
-  }, [detail.chat.length, streaming, detail.pending?.id, line]);
-
-  // The log's own box changes size when the window does, or when the footer grows (a hint, Stop, an error line, a
-  // taller reply box). No scroll event says so, so keep the log at its bottom here if it was there.
-  useEffect(() => {
-    const log = logRef.current;
-    if (!log || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (followRef.current) toBottom();
-    });
-    observer.observe(log);
-    return () => observer.disconnect();
-  }, []);
-
-  function onLogScroll() {
-    const log = logRef.current;
-    if (!log) return;
-    followRef.current = isAtBottom(log);
-    if (followRef.current) setUnseen(false);
-  }
-
-  function jumpToBottom() {
-    followRef.current = true;
-    setUnseen(false);
-    toBottom();
-  }
+  const logRef = useRef<ChatLogHandle>(null);
 
   async function send() {
     const body = text.trim();
@@ -177,7 +76,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
     try {
       await api.sendMessage(detail.id, { text: body });
       setText("");
-      jumpToBottom();
+      logRef.current?.jumpToBottom();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send the message.");
     }
@@ -202,28 +101,20 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
 
   return (
     <div className={styles.chat} data-framed={framed || undefined}>
-      <div className={styles.logBox}>
-        <div className={styles.log} role="log" aria-live="polite" ref={logRef} onScroll={onLogScroll}>
-          <ChatItems
-            items={detail.chat}
-            lastActions={errorLineActions(detail.chat, actions)}
-            // An error line only carries error actions, and each has its call.
-            onAction={(action) => void run(() => LANE_ACTION_CALLS[action.id as LaneActionCall](detail.id), action.id)}
-          />
-          {streaming ? (
-            <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
-              {streaming}
-            </ChatBubble>
-          ) : null}
-          {line ? <p className={styles.activity}>{line}</p> : null}
-          {detail.pending ? <PendingCard item={detail.pending} onError={setError} /> : null}
-        </div>
-        {unseen ? (
-          <Button compact className={styles.newMessages} onClick={jumpToBottom}>
-            ↓ New messages
-          </Button>
-        ) : null}
-      </div>
+      <ChatLog
+        ref={logRef}
+        framed={framed}
+        items={detail.chat}
+        streaming={streaming}
+        streamingFrom={LANE_AUTHOR[detail.lane] ?? "product-owner"}
+        activity={activity}
+        turnRunning={detail.turnRunning}
+        pending={detail.pending}
+        onError={setError}
+        lastActions={errorLineActions(detail.chat, actions)}
+        // An error line only carries error actions, and each has its call.
+        onAction={(action) => void run(() => LANE_ACTION_CALLS[action.id as LaneActionCall](detail.id), action.id)}
+      />
       <div className={styles.footer}>
         {error ? (
           <p className={styles.error} role="alert">

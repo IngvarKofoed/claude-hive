@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app";
+import { ProjectChats } from "./chats";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
@@ -21,23 +22,25 @@ describe("the API's local-only guard", () => {
   let server: Server;
   let port: number;
   let db: HiveDb;
+  let runner: FakeRunner;
 
   beforeEach(async () => {
     db = new HiveDb(":memory:");
     const hub = new EventHub();
+    runner = new FakeRunner();
+    const role = (name: string) => ({ name, model: "opus", kind: "conversation", instructions: "" });
+    const chats = new ProjectChats({ db, hub, runner, role });
     const hive = new Hive({
-      db, hub, git, runner: new FakeRunner(), probe: new FakeProbe(),
-      role: (name) => ({ name, model: "opus", kind: "conversation", instructions: "" }),
-      specFormatDir: "/nonexistent",
+      db, hub, git, runner, probe: new FakeProbe(), role, specFormatDir: "/nonexistent", chats,
     });
     server = await new Promise<Server>((resolve) => {
-      const s = createApp(hive, hub, { ports: [0] }).listen(0, "127.0.0.1", () => resolve(s));
+      const s = createApp(hive, hub, { ports: [0], chats }).listen(0, "127.0.0.1", () => resolve(s));
     });
     port = (server.address() as AddressInfo).port;
     // The guard needs the real port, which is only known once listening.
     server.close();
     server = await new Promise<Server>((resolve) => {
-      const s = createApp(hive, hub, { ports: [port, 5173] }).listen(port, "127.0.0.1", () => resolve(s));
+      const s = createApp(hive, hub, { ports: [port, 5173], chats }).listen(port, "127.0.0.1", () => resolve(s));
     });
   });
   afterEach(() => {
@@ -125,6 +128,23 @@ describe("the API's local-only guard", () => {
     const r = await send("POST", "/api/cards/nope/stop", { host: `localhost:${port}` });
     expect(r.status).toBe(404);
   });
+
+  it("refuses a chat message while the idea is drafting, and an unknown chat (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md)", async () => {
+    db.insertProject({ id: "p1", name: "repo", path: tmpdir(), trustWarning: false });
+    const json = { host: `127.0.0.1:${port}`, "content-type": "application/json" };
+    const made = await send("POST", "/api/projects/p1/chats", json, '{"text":"How do cards move?"}');
+    expect(made.status).toBe(200);
+    const chatId = made.body.id as string;
+    runner.last.handlers.onTextBlock("Through moves.ts.");
+    await runner.last.end();
+
+    expect((await send("POST", `/api/chats/${chatId}/draft`, { host: `127.0.0.1:${port}` })).status).toBe(200);
+    const refused = await send("POST", `/api/chats/${chatId}/messages`, json, '{"text":"And then?"}');
+    expect(refused).toMatchObject({ status: 409, body: { error: "Claude is drafting the idea" } });
+
+    const unknown = await send("GET", "/api/chats/nope", { host: `127.0.0.1:${port}` });
+    expect(unknown).toMatchObject({ status: 404, body: { error: "No such chat." } });
+  });
 });
 
 describe("a card's mockup, served (docs/specs/2026-11-28-mockup-lane-and-designer-role.md, Serving the pages)", () => {
@@ -159,18 +179,17 @@ describe("a card's mockup, served (docs/specs/2026-11-28-mockup-lane-and-designe
       mockup: { folder: "docs/mockups/font-1", current: { kind: "pages", page: "docs/mockups/font-1/index.html" }, kept: null },
     });
     const hub = new EventHub();
-    const hive = new Hive({
-      db, hub, git, runner: new FakeRunner(), probe: new FakeProbe(),
-      role: (name) => ({ name, model: "opus", kind: "conversation", instructions: "" }),
-      specFormatDir: "/nonexistent",
-    });
+    const runner = new FakeRunner();
+    const role = (name: string) => ({ name, model: "opus", kind: "conversation", instructions: "" });
+    const chats = new ProjectChats({ db, hub, runner, role });
+    const hive = new Hive({ db, hub, git, runner, probe: new FakeProbe(), role, specFormatDir: "/nonexistent", chats });
     server = await new Promise<Server>((resolve) => {
-      const s = createApp(hive, hub, { ports: [0] }).listen(0, "127.0.0.1", () => resolve(s));
+      const s = createApp(hive, hub, { ports: [0], chats }).listen(0, "127.0.0.1", () => resolve(s));
     });
     port = (server.address() as AddressInfo).port;
     server.close();
     server = await new Promise<Server>((resolve) => {
-      const s = createApp(hive, hub, { ports: [port] }).listen(port, "127.0.0.1", () => resolve(s));
+      const s = createApp(hive, hub, { ports: [port], chats }).listen(port, "127.0.0.1", () => resolve(s));
     });
   });
   afterEach(() => {

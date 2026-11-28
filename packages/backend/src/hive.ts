@@ -22,6 +22,7 @@ import {
   laneAfterLanding, laneAfterPlan, laneAfterSendBack, type IssueFate,
 } from "./board/moves";
 import { forYouActions, waitsForYou, whatItWants } from "./board/forYou";
+import { chatSummary } from "./chats/summary";
 import {
   HiveDb, projectSummary, type AmendmentRow, type CardRow, type KeeperJudging, type MockupState, type SessionRow,
 } from "./db";
@@ -35,9 +36,9 @@ import type {
 } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
-  AMENDMENT_SCHEMA, CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, KEEPER_SCHEMA, parseAmendmentReport,
-  parseCheckReport, parseCommitReport, parseDeveloperReport, parseKeeperReport, parsePlanReport, parseReviewReport,
-  parseSendBackReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SEND_BACK_SCHEMA, SETUP_SCHEMA,
+  AMENDMENT_SCHEMA, CHECK_SCHEMA, COMMIT_SCHEMA, DEVELOPER_SCHEMA, findingsMessage, IDEA_DRAFT_SCHEMA, KEEPER_SCHEMA,
+  parseAmendmentReport, parseCheckReport, parseCommitReport, parseDeveloperReport, parseKeeperReport, parsePlanReport,
+  parseReviewReport, parseSendBackReport, parseSetupReport, PLAN_SCHEMA, REVIEW_SCHEMA, SEND_BACK_SCHEMA, SETUP_SCHEMA,
 } from "./spec/reports";
 import type { CopyOutcome, LocalFileList, MainBase, MergeResult, PushResult, RepoAt, SquashResult } from "./git";
 import { fakeApps, openableUrl, runToEnd, type AppEntry, type AppRunner } from "./preview/apps";
@@ -145,6 +146,8 @@ export interface HiveDeps {
   setupLimitMs?: number;
   /** Runs the card's app in Try it. server.ts passes the real one; without it, every app runs at once on paper. */
   apps?: AppRunner;
+  /** The project chats (chats/index.ts), told when a card is made from one so the chat gets its note. */
+  chats?: { ideaMade(chatId: string, title: string, cardId: string): void };
   log?: (message: string) => void;
   /** The folder `~` means when adding a project. The user's home unless a test says otherwise. */
   home?: string;
@@ -184,7 +187,7 @@ const CHANGE_THE_SPEC = "Change the spec";
 const KEEP_THE_SPEC = "Keep the spec";
 
 /** What a role's sessions get beyond its file. */
-interface RoleTurn {
+export interface RoleTurn {
   /** Files from the spec format's folder, appended after the role's instructions. */
   specFormat?: string[];
   /** The fixed-format report each turn must end with (`outputFormat`). */
@@ -203,7 +206,7 @@ interface RoleTurn {
  * prompts page all read it, so the page can't drift from what sessions get
  * (docs/specs/2026-11-27-role-prompts-page.md, Key decisions).
  */
-const ROLE_TURNS: Record<string, RoleTurn> = {
+export const ROLE_TURNS: Record<string, RoleTurn> = {
   "product-owner": { tools: ["write_brief"] },
   designer: { tools: ["set_mockup"] },
   setup: { report: SETUP_SCHEMA, tools: ["copy_local_files"] },
@@ -216,6 +219,9 @@ const ROLE_TURNS: Record<string, RoleTurn> = {
   developer: { report: DEVELOPER_SCHEMA, taskTools: true },
   reviewer: { report: CHECK_SCHEMA },
   committer: { report: COMMIT_SCHEMA },
+  // Rides in a project chat's session, at the top of each draft message (chats/index.ts). The chat itself, project-chat,
+  // gets nothing beyond its file.
+  "idea-draft": { report: IDEA_DRAFT_SCHEMA },
 };
 
 const AUTHOR: Record<string, ChatAuthor> = {
@@ -227,7 +233,24 @@ const AUTHOR: Record<string, ChatAuthor> = {
   reviewer: "reviewer",
 };
 
-function refineFirstMessage(projectName: string, title: string, idea: string): string {
+/**
+ * The product owner's first message. A card made from a project chat carries its copy of that chat in Ideas, and the
+ * product owner reads it first (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, Into Refine).
+ */
+function refineFirstMessage(projectName: string, title: string, idea: string, chat: ChatItem[] = []): string {
+  const lines = chat
+    .filter((c): c is Extract<ChatItem, { kind: "message" }> => c.kind === "message" && c.from !== "hive")
+    .map((c) => `${c.from === "you" ? "you" : "claude"}: ${c.text}`);
+  const fromChat = lines.length
+    ? [
+        "Before it was a card, this idea came out of a chat with the project. Read it first, and don't ask again what it " +
+          "already settles. The chat may cover other ideas too: this card is only the title and idea above, and the " +
+          "rest is background.",
+        "",
+        lines.join("\n\n"),
+        "",
+      ]
+    : [];
   return [
     `A new idea for the project ${projectName}:`,
     "",
@@ -235,6 +258,7 @@ function refineFirstMessage(projectName: string, title: string, idea: string): s
     "",
     `The idea: ${idea}`,
     "",
+    ...fromChat,
     "Read the repo, then open with a draft brief through write_brief, and ask what you need to know with AskUserQuestion.",
   ].join("\n");
 }
@@ -477,6 +501,7 @@ export class Hive {
     return {
       projects: this.db.listProjects().map(projectSummary),
       cards: this.db.listCards().map(cardSummary),
+      chats: this.db.listChats().map(chatSummary),
     };
   }
 
@@ -515,7 +540,14 @@ export class Hive {
       history: this.history(card.id),
       pending: this.db.openPendingFor(card.id)?.item ?? null,
       turnRunning: this.anyTurnRunning(card.id),
+      fromChat: this.fromChat(card),
     };
+  }
+
+  /** The project chat the card was made from, while it exists. */
+  private fromChat(card: CardRow): CardDetail["fromChat"] {
+    const chat = card.chatId ? this.db.getChat(card.chatId) : undefined;
+    return chat ? { id: chat.id, title: chat.title } : null;
   }
 
   /**
@@ -702,18 +734,40 @@ export class Hive {
 
   // ---------- cards and moves ----------
 
-  createCard(projectId: string, title: string, text: string): CardSummary {
+  /**
+   * A new idea. Made from a project chat (`chatId`), the card gets a copy of the chat's messages so far, from you and
+   * from Claude, as its Ideas chat, and the chat's draft form closes
+   * (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, Into the card).
+   */
+  createCard(projectId: string, title: string, text: string, chatId?: string | null): CardSummary {
     if (!this.db.getProject(projectId)) throw new HttpError(404, "No such project.");
     if (typeof title !== "string" || !title.trim()) throw new HttpError(400, "Give the idea a title first.");
     if (typeof text !== "string" || !text.trim()) throw new HttpError(400, "Type an idea first.");
+    const fromChat = chatId === undefined || chatId === null ? null : typeof chatId === "string" ? chatId : "";
+    if (fromChat !== null) {
+      const chat = this.db.getChat(fromChat);
+      if (!chat) throw new HttpError(404, "No such chat.");
+      if (chat.projectId !== projectId) throw new HttpError(409, "That chat is about another project.");
+    }
     const id = randomUUID();
-    this.db.insertCard({
-      id, projectId, title: title.trim(), ideaTitle: title.trim(), ideaText: text.trim(), lane: "ideas",
-      state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
-      specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
-      setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null, shipAfterCheck: false,
+    this.db.transaction(() => {
+      this.db.insertCard({
+        id, projectId, title: title.trim(), ideaTitle: title.trim(), ideaText: text.trim(), lane: "ideas",
+        state: "needs-you", branch: null, worktreePath: null, brief: null, moveError: null,
+        specPath: null, reviewedSpecHash: null, reviewApplying: false, plan: null, build: null, check: null,
+        setup: null, port: null, feedback: null, appStopped: false, landing: null, landed: null, shipAfterCheck: false,
+        chatId: fromChat,
+      });
+      if (fromChat === null) return;
+      // Messages only, never the hive's notes or error lines; each copy keeps its time and gets an id of its own.
+      for (const item of this.db.chatItems(fromChat)) {
+        if (item.kind !== "message" || (item.from !== "you" && item.from !== "project-chat")) continue;
+        this.db.addEvent(id, "chat", { from: item.from, text: item.text, lane: "ideas" }, randomUUID(), item.at);
+      }
+      this.db.updateChat(fromChat, { draft: null });
     });
     this.emitCard(id);
+    if (fromChat !== null) this.deps.chats?.ideaMade(fromChat, title.trim(), id);
     return cardSummary(this.requireCard(id));
   }
 
@@ -824,7 +878,8 @@ export class Hive {
 
     const sessionId = randomUUID();
     this.db.insertSession({ id: sessionId, cardId: id, lane, role: LANE_ROLE.refine!, kind: role.kind });
-    this.startTurn(id, sessionId, refineFirstMessage(project.name, card.ideaTitle, card.ideaText));
+    this.startTurn(id, sessionId,
+      refineFirstMessage(project.name, card.ideaTitle, card.ideaText, this.db.chatFor(id, "ideas")));
     // The worktree is set up in the background while you chat (docs/specs/2026-11-27-worktree-setup-and-try-it.md).
     void this.startSetup(id).catch((error: unknown) => this.log(`Setting up card ${id} failed: ${String(error)}`));
     return cardSummary(this.requireCard(id));
@@ -4092,7 +4147,7 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 /** git's reason as a sentence, so the hive's next sentence doesn't run on from it. */
 const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
-function toQuestions(raw: unknown): Question[] {
+export function toQuestions(raw: unknown): Question[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((q: any) => ({
     question: String(q?.question ?? ""),
@@ -4110,7 +4165,7 @@ function isAnswers(body: AnswerBody): body is { answers: Record<string, string> 
     && Object.values(answers).every((v) => typeof v === "string");
 }
 
-function summarizeAnswers(answers: Record<string, string>): string {
+export function summarizeAnswers(answers: Record<string, string>): string {
   return Object.values(answers).join("\n");
 }
 

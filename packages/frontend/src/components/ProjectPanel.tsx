@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LANES, type BoardResponse, type CardSummary, type ProjectSummary } from "@hive/shared";
+import { LANES, type BoardResponse, type CardSummary, type ProjectChatSummary, type ProjectSummary } from "@hive/shared";
 import { AddIdea } from "./AddIdea";
 import { CardTile } from "./CardTile";
 import { inProgress } from "./cardBadge";
@@ -16,6 +16,10 @@ interface Props {
   /** A card was deleted from its tile. */
   onDeleted?: (card: CardSummary) => void;
   onBoard: (board: BoardResponse) => void;
+  /** The project's chats, for its heading's Chat button. */
+  chats?: ProjectChatSummary[];
+  /** Open a path: the Chat button's page. */
+  onChat?: (path: string) => void;
 }
 
 const laneIndex = (card: CardSummary) => LANES.findIndex((lane) => lane.id === card.lane);
@@ -24,7 +28,7 @@ const laneIndex = (card: CardSummary) => LANES.findIndex((lane) => lane.id === c
  * One project on the Board By project (docs/specs/2026-11-27-board-by-project.md): the cards in progress in lane order,
  * never by state, so a card moves only when it changes lane; then the ideas; then the landed cards, folded.
  */
-export function ProjectPanel({ project, cards, onOpen, onStart, onDeleted, onBoard }: Props) {
+export function ProjectPanel({ project, cards, onOpen, onStart, onDeleted, onBoard, chats, onChat }: Props) {
   const [landedOpen, setLandedOpen] = useState(false);
   // Array.prototype.sort is stable, so cards in one lane keep the board's order: oldest first.
   const going = cards.filter(inProgress).sort((a, b) => laneIndex(a) - laneIndex(b));
@@ -33,7 +37,7 @@ export function ProjectPanel({ project, cards, onOpen, onStart, onDeleted, onBoa
 
   return (
     <Panel className={styles.panel} aria-label={project.name}>
-      <ProjectHeading project={project} onBoard={onBoard} />
+      <ProjectHeading project={project} onBoard={onBoard} chats={chats} onChat={onChat} />
 
       {going.length > 0 ? (
         <div className={styles.cards}>

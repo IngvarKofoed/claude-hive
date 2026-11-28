@@ -1,5 +1,5 @@
 import { useId, useState, type DragEvent } from "react";
-import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectSummary } from "@hive/shared";
+import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectChatSummary, type ProjectSummary } from "@hive/shared";
 import { AddIdea } from "./AddIdea";
 import { CardTile } from "./CardTile";
 import { ProjectHeading } from "./ProjectHeading";
@@ -19,6 +19,10 @@ interface Props {
   /** A card was deleted from its tile. */
   onDeleted?: (card: CardSummary) => void;
   onBoard: (board: BoardResponse) => void;
+  /** The project's chats, for its heading's Chat button. */
+  chats?: ProjectChatSummary[];
+  /** Open a path: the Chat button's page. */
+  onChat?: (path: string) => void;
   /** Board's Compact By lane: smaller tiles, and Done as a count that opens the landed cards under the row. */
   compact?: boolean;
 }
@@ -35,6 +39,8 @@ export function ProjectRow({
   onStart,
   onBoard,
   onDeleted,
+  chats,
+  onChat,
   compact = false,
 }: Props) {
   const [landedOpen, setLandedOpen] = useState(false);
@@ -46,7 +52,7 @@ export function ProjectRow({
   return (
     <div className={styles.row} data-compact={compact || undefined} data-landed-open={showStrip || undefined}>
       <div className={styles.project}>
-        <ProjectHeading project={project} onBoard={onBoard} compact={compact} />
+        <ProjectHeading project={project} onBoard={onBoard} compact={compact} chats={chats} onChat={onChat} />
       </div>
       {LANES.map((lane) => {
         const laneCards = cards.filter((card) => card.lane === lane.id);

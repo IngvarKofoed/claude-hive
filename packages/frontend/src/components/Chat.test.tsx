@@ -42,6 +42,7 @@ const base: CardDetail = {
   landing: false,
   sendBack: null,
   amendment: null,
+  fromChat: null,
 };
 const message = (id: string) => ({ kind: "message", id, at: "t", from: "product-owner", text: `msg ${id}` }) as const;
 const withChat = (...ids: string[]): CardDetail => ({ ...base, chat: ids.map(message) });
@@ -171,6 +172,15 @@ describe("Chat following", () => {
       box.clientHeight = 320;
       act(() => resized());
       expect(box.scrollTop).toBe(100);
+
+      // Back at the bottom, the box shrinks and the browser sends a scroll event before the resize callback: the log
+      // was at its bottom before the shrink, so it still follows (a project chat's draft form opening under it).
+      box.scrollTop = 680;
+      fireEvent.scroll(log);
+      box.clientHeight = 260;
+      fireEvent.scroll(log);
+      act(() => resized());
+      expect(box.scrollTop).toBe(1000);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1,4 +1,4 @@
-// The fixed-format reports of the spec reviewer, the planner, the developer and Check's reviewer. Each is checked against its JSON schema by the SDK
+// The fixed-format reports of the spec reviewer, the planner, the developer, Check's reviewer and the idea draft. Each is checked against its JSON schema by the SDK
 // (outputFormat) and again here, and every report can say it's blocked (docs/ARCHITECTURE.md, Role reports).
 import type { Bug, Departure, IssueJudgment, Plan, ReportedDecision, ReportedIssue, SendBackPoint } from "@hive/shared";
 
@@ -263,6 +263,40 @@ export const COMMIT_SCHEMA = {
     body: { type: "string", description: "The rest of the message in the repo's style; empty if the style has none" },
   },
 } as const;
+
+/**
+ * The draft Make it an idea asks a project chat for (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md,
+ * Make it an idea). Its field names are the spec's: `reason`, not `blockedReason`.
+ */
+export const IDEA_DRAFT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "reason", "title", "text"],
+  properties: {
+    status: { type: "string", enum: ["done", "blocked"] },
+    reason: {
+      type: ["string", "null"],
+      description: "Why there's no idea to draft yet, in a sentence the person reads; null when status is done",
+    },
+    title: { type: "string", description: "A short name for the card, a few words; empty when blocked" },
+    text: {
+      type: "string",
+      description: "A few sentences: the problem and what to do, in the person's words where you can; empty when blocked",
+    },
+  },
+} as const;
+
+/** A drafted idea, or why there's none: blocked, empty, or no report at all. */
+export function parseIdeaDraftReport(raw: unknown): { title: string; text: string } | { reason: string } {
+  if (!isObject(raw) || (raw.status !== "done" && raw.status !== "blocked")) return { reason: "No draft came back." };
+  if (raw.status === "blocked") {
+    const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
+    return { reason: reason || "Claude couldn't draft an idea, and gave no reason." };
+  }
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  return title && text ? { title, text } : { reason: "The draft came back empty." };
+}
 
 /** The committer's subject and body, or null when there's no usable report. */
 export function parseCommitReport(raw: unknown): { subject: string; body: string } | null {

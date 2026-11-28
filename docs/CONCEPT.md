@@ -21,7 +21,7 @@ Lanes are the columns, and projects are the rows (swimlanes). The page can also 
 
 | Lane | Who | What happens | Moves on when |
 | --- | --- | --- | --- |
-| **Ideas** | you | You type an idea: a title, and a text of two sentences or so. You can edit both until it starts. | You drag it to Refine, or press Start. |
+| **Ideas** | you | You type an idea: a title, and a text of two sentences or so. Or you make it from a project chat (see Project chat). You can edit both until it starts. | You drag it to Refine, or press Start. |
 | **Refine** | you ⇄ product owner | A chat until the idea is clear. The product owner has already read the repo and the rulebook, and opens with a draft brief: the problem, who it's for, what done looks like, and what's out of scope. | You say **Good**: on to Mockup, or skip to Spec when there's nothing to show. |
 | **Mockup** | you ⇄ designer | A clickable mockup: plain HTML pages the designer makes in the card's own folder, never inside the app, or a mockup you make yourself in Claude Design and paste as a link. You comment by pointing at the screen. A real choice can be built as versions to compare side by side. | You say **Good**, and choose whether to keep the mockup. |
 | **Spec** | spec writer, then you | A full spec in the spec format, written in one go from the chats and the mockup. It includes the technical design, worked out by reading the code. A blind review reads it. Its decisions come to you, and its fixes are applied. | You **sign off**. An amendment signs off on its own unless you take over. |
@@ -97,10 +97,15 @@ Everything else is decided by the hive and written into the card's history as "d
 
 A repository, added by its top folder; the Project path field completes folder names as you type. An empty or new folder, or a fresh `git init` with no commits, becomes a repo with an empty first commit on `main`, and the hive asks before it creates a folder. A folder with files that isn't a repo is refused, and so is a folder inside a repo or a worktree. Each project is a swimlane on the board and has its own rulebook.
 
+### Project chat
+
+A conversation with Claude about a project, before any idea exists. It has no card and no lane. Claude reads the project's code, docs and git history as your checkout holds them, and changes nothing. When the talk has turned into something, **Make it an idea** asks the chat for a draft title and text. You edit them and add the card to the project's Ideas cell, and the chat goes on and can make more ideas. A question the chat asks you puts a ● on the project's Chat button and never reaches For you. Chats are kept per project and can be deleted.
+
 ### Card
 
 One feature, from idea to Done. It carries everything:
 
+- the chat it came from, as a copy, when it began as a project chat;
 - the brief;
 - the mockup versions;
 - the spec;
@@ -121,6 +126,7 @@ Each lane's instructions and model. Every session has the same full access, in C
 ### Sessions
 
 - **A new session for each card in each lane,** started with the role's instructions and the card.
+- **One session for each project chat,** resumed on every message.
 - **Conversations continue the same session.** A card sent back to Spec resumes the spec writer that wrote its spec. A card sent back to Build resumes the developer that built it.
 - **Nothing runs between turns.** A kept session costs nothing.
 
@@ -208,7 +214,8 @@ It works down a ladder:
 
 ## Worktrees
 
-- **Ideas have no worktree.** Entering Refine creates one at `<repo>/.claude/worktrees/<card>`, on a branch `hive/<card>` taken from the latest main.
+- **Ideas have no worktree,** and neither has a project chat. A chat runs in the project's own folder, the one session that does, and only its instructions keep it from changing anything.
+- **Entering Refine creates a worktree,** at `<repo>/.claude/worktrees/<card>`, on a branch `hive/<card>` taken from the latest main.
 - **Setup starts at once,** in the background while you chat. A setup session picks the local files the app needs from your checkout, such as `.env` files and local databases, and the hive copies them. It installs dependencies, and works out how to start the app and its tests on the card's own ports.
 - **Refine reads the code from this clean copy,** never from your own checkout.
 - **Mockup versions get worktrees of their own.** The designer builds them one after another. When you pick one, the others are deleted.
@@ -273,6 +280,7 @@ One page, with several views:
 - **For you:** everything waiting for you, across the whole board, oldest first. Each entry offers its lane's actions (see Lane Actions), except a card in Try it, which you test on the card page. A card you open from an entry takes you back to For you after any of its lane actions but Stop, so the next thing waiting is one glance away.
 - **Card:** opens on the lane the card is in. The chat sits next to what that lane is producing (the brief, the mockup, the spec, or the developer's checklist), each half the width, with what sent the card back to the lane on top. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
+- **Project chat:** a Chat button on each project's heading opens the project's chats in a list, with the open chat beside it, a new chat, and Delete. **Make it an idea** fills a title and text for you to edit and add. A card made this way shows its chat in Ideas, with a link back, and the product owner reads it first in Refine.
 - **Rulebooks:** read and edit them.
 - **Role prompts,** behind the ☰ menu: what each lane's sessions are told. For each role, its instructions and what its sessions get on top of them: the report they end with, and the hive's own tools.
 

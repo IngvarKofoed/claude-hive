@@ -6,6 +6,7 @@ import {
 } from "./board/moves";
 import { loadRole, parseRole } from "./sessions/roles";
 import { describeTool, InputQueue } from "./sessions/sdkRunner";
+import { parseIdeaDraftReport } from "./spec/reports";
 
 describe("the spec keeper's routing (docs/specs/2026-11-28-spec-keeper.md)", () => {
   const j = (verdict: "spec-wrong" | "code-wrong" | "no-change", level: "minor" | "changes-signoff" | "severe" = "minor", repeats: string | null = null) =>
@@ -190,5 +191,31 @@ describe("the SDK runner's helpers", () => {
     expect(describeTool("Read", { file_path: "/w/src/a.ts" }, "/w")).toBe("reading src/a.ts…");
     expect(describeTool("AskUserQuestion", {}, "/w")).toBeNull();
     expect(describeTool("mcp__hive__write_brief", {}, "/w")).toBe("updating the brief…");
+  });
+});
+
+describe("the idea draft's report (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md)", () => {
+  it("gives the title and text of a done report, trimmed", () => {
+    expect(parseIdeaDraftReport({ status: "done", reason: null, title: " Bigger font ", text: " Make it adjustable. " }))
+      .toEqual({ title: "Bigger font", text: "Make it adjustable." });
+  });
+
+  it("gives the reason of a blocked report, or says it gave none", () => {
+    expect(parseIdeaDraftReport({ status: "blocked", reason: "No idea yet.", title: "", text: "" }))
+      .toEqual({ reason: "No idea yet." });
+    expect(parseIdeaDraftReport({ status: "blocked", reason: null, title: "", text: "" }))
+      .toEqual({ reason: "Claude couldn't draft an idea, and gave no reason." });
+  });
+
+  it("treats a done report with an empty title or text as empty", () => {
+    expect(parseIdeaDraftReport({ status: "done", reason: null, title: "Font", text: "  " }))
+      .toEqual({ reason: "The draft came back empty." });
+    expect(parseIdeaDraftReport({ status: "done", reason: null, title: "", text: "Text." }))
+      .toEqual({ reason: "The draft came back empty." });
+  });
+
+  it("says no draft came back when there's no report, or it has no known status", () => {
+    expect(parseIdeaDraftReport(undefined)).toEqual({ reason: "No draft came back." });
+    expect(parseIdeaDraftReport({ status: "maybe" })).toEqual({ reason: "No draft came back." });
   });
 });

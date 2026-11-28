@@ -43,6 +43,7 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     landing: false,
     sendBack: null,
     amendment: null,
+    fromChat: null,
     ...over,
   };
 }

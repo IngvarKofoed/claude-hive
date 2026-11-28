@@ -44,6 +44,7 @@ const detail: CardDetail = {
   landing: false,
   sendBack: null,
   amendment: null,
+  fromChat: null,
 };
 const start: CardLive = { detail, streaming: "", activity: null };
 

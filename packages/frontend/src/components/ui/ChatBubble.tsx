@@ -12,6 +12,7 @@ export const AUTHOR_LABEL: Record<ChatAuthor, string> = {
   developer: "Developer",
   reviewer: "Reviewer",
   hive: "Hive",
+  "project-chat": "Claude",
 };
 
 interface Props {

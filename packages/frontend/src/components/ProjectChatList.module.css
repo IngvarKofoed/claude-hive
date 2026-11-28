@@ -1,0 +1,125 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* The title's line: "Chats" on the left, New chat on the right. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  /* Room for New chat's overhang, so the first chat isn't pressed against it. */
+  margin-bottom: var(--space-2);
+}
+
+/* As Panel's own title, whose line this replaces. */
+.heading {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+/* It overhangs the title's line a little, so "Chats" lines up with the chat panel's title beside it. */
+.new {
+  margin-left: auto;
+  margin-block: calc(-1 * var(--space-2));
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.item[data-current] {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-muted);
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.link {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-3);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+
+.ago {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.dot {
+  flex: none;
+  color: var(--color-needs-you-text);
+}
+
+.delete {
+  flex: none;
+  color: var(--color-text-subtle);
+}
+
+/* A slimmer Delete than a compact button's, so the title keeps most of the line (beats .button[data-compact]). */
+.item .line .delete {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-stopped-bg);
+  border: var(--border-width) solid var(--color-stopped-border);
+  border-radius: var(--radius-md);
+  color: var(--color-stopped-text);
+  font-size: var(--text-md);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.error {
+  font-weight: var(--weight-semibold);
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}

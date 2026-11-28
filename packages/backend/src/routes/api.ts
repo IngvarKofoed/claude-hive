@@ -1,29 +1,16 @@
 // The endpoints this slice builds (spec: API), a subset of docs/ARCHITECTURE.md's API.
 import { homedir } from "node:os";
-import { Router, type NextFunction, type Request, type Response } from "express";
+import { Router } from "express";
 import { APP_VERSION, type HealthResponse, type UpdateIdeaBody } from "@hive/shared";
+import type { ProjectChats } from "../chats";
 import type { EventHub } from "../events";
-import { HttpError, type Hive } from "../hive";
+import type { Hive } from "../hive";
 import { completeFolders } from "../projects/folders";
+import { chatRoutes } from "./chats";
+import { body, param, route } from "./route";
 
-type Handler = (req: Request, res: Response) => unknown | Promise<unknown>;
-
-/** Runs a handler and turns HttpErrors into `{ error }` with their status. */
-const route = (handler: Handler) => async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await handler(req, res);
-    if (!res.headersSent) res.json(result ?? { ok: true });
-  } catch (error) {
-    if (error instanceof HttpError) res.status(error.status).json({ error: error.message });
-    else next(error);
-  }
-};
-
-const param = (req: Request, name: string) => String(req.params[name]);
-
-export function apiRouter(hive: Hive, hub: EventHub): Router {
+export function apiRouter(hive: Hive, hub: EventHub, chats: ProjectChats): Router {
   const r = Router();
-  const body = (req: Request) => (req.body ?? {}) as Record<string, any>;
 
   r.get("/health", route((): HealthResponse => ({ status: "ok", version: APP_VERSION })));
   r.get("/events", hub.handler);
@@ -49,7 +36,8 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
     return hive.board();
   }));
 
-  r.post("/cards", route((req) => hive.createCard(body(req).projectId, body(req).title, body(req).text)));
+  r.post("/cards", route((req) =>
+    hive.createCard(body(req).projectId, body(req).title, body(req).text, body(req).chatId)));
   r.patch("/cards/:id", route((req) => hive.updateIdea(param(req, "id"), body(req) as UpdateIdeaBody)));
   r.get("/cards/:id", route((req) => hive.cardForPage(param(req, "id"))));
   r.post("/cards/:id/move", route((req) => hive.moveCard(param(req, "id"), body(req).lane)));
@@ -119,6 +107,8 @@ export function apiRouter(hive: Hive, hub: EventHub): Router {
   }));
   r.get("/for-you", route(() => hive.forYou()));
   r.post("/for-you/:itemId", route((req) => hive.answer(param(req, "itemId"), body(req) as any)));
+
+  chatRoutes(r, chats);
 
   r.use((_req, res) => res.status(404).json({ error: "No such endpoint." }));
   return r;

@@ -10,7 +10,7 @@ import { EventHub } from "./events";
 import * as git from "./git";
 import { Hive } from "./hive";
 import { listRoles, parseRole, PLANNED_ROLES, type RoleEntry } from "./sessions/roles";
-import { CHECK_SCHEMA, COMMIT_SCHEMA, PLAN_SCHEMA } from "./spec/reports";
+import { CHECK_SCHEMA, COMMIT_SCHEMA, IDEA_DRAFT_SCHEMA, PLAN_SCHEMA } from "./spec/reports";
 import { FakeProbe, FakeRunner } from "./testing";
 
 const temps: string[] = [];
@@ -128,6 +128,21 @@ describe("Hive.roles()", () => {
     expect(designer.tools.map((t) => t.name)).toEqual(["set_mockup"]);
     const input = designer.tools[0]!.input as { properties: Record<string, unknown> };
     expect(Object.keys(input.properties)).toEqual(["page", "link"]);
+  });
+
+  it("lists the project chat with nothing beyond its file, and the idea draft with its report (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md)", () => {
+    const real = listRoles().filter((e) => e.name === "project-chat" || e.name === "idea-draft");
+    expect(real.map((e) => e.name)).toEqual(["idea-draft", "project-chat"]);
+    for (const entry of real) expect(entry).toMatchObject({ role: { lane: "ideas", model: "opus", kind: "conversation" } });
+
+    const roles = hiveWith(real).roles().roles;
+    const chat = roles.find((r) => r.name === "project-chat")!;
+    expect(chat).toMatchObject({ report: null, tools: [], extras: [], taskTools: false });
+    expect(chat.instructions).toContain("AskUserQuestion");
+    expect(chat.instructions).toContain("Never change anything");
+    const draft = roles.find((r) => r.name === "idea-draft")!;
+    expect(draft.report).toBe(IDEA_DRAFT_SCHEMA);
+    expect(draft.tools).toEqual([]);
   });
 
   it("says which roles get Claude Code's task-list tools: only the developer", () => {

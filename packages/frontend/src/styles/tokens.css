@@ -88,5 +88,9 @@
   --chat-log-min-height: 240px;
   --chat-log-max-height: 70vh;
   --page-max-width: 1280px;
+  --chat-list-width: 300px;
+  --chat-draft-max-height: 50%;
+  --chat-draft-max-height-stacked: 50vh;
+  --chat-draft-field-min-height: 80px;
   --for-you-width: 760px;
 }

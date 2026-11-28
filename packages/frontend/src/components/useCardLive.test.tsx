@@ -55,6 +55,7 @@ const detail: CardDetail = {
   landing: false,
   sendBack: null,
   amendment: null,
+  fromChat: null,
 };
 
 const emit = (event: HiveEvent) => listeners.forEach((l) => l(event));

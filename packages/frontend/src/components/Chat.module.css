@@ -9,40 +9,6 @@
   flex: 1;
 }
 
-.logBox {
-  position: relative;
-}
-
-/*
- * The log is laid over its box, so however long the chat grows it never adds to the height the panel asks for: the
- * box's floor does. In the flow, a long log would push every automatic min-height above it to its full length.
- */
-.chat[data-framed] .logBox {
-  flex: 1;
-  min-height: var(--chat-log-min-height);
-}
-
-.log {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.chat[data-framed] .log {
-  position: absolute;
-  inset: 0;
-  overflow-y: auto;
-}
-
-.newMessages {
-  position: absolute;
-  bottom: var(--space-3);
-  left: 0;
-  right: 0;
-  width: max-content;
-  margin-inline: auto;
-}
-
 .footer {
   display: flex;
   flex-direction: column;
@@ -57,30 +23,21 @@
   margin-left: auto;
 }
 
-/* Below 60rem the page scrolls, so the log keeps its own scroll at a capped height with the footer right under it. */
+/* Below 60rem the page scrolls, so a framed chat no longer fills the panel. */
 @media (max-width: 60rem) {
   .chat[data-framed] {
     flex: none;
   }
+}
 
-  .chat[data-framed] .logBox {
-    flex: none;
-  }
-
-  .chat[data-framed] .log {
-    position: static;
-    max-height: var(--chat-log-max-height);
-  }
+.past {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .empty {
   color: var(--color-text-muted);
-  font-style: italic;
-}
-
-.activity {
-  color: var(--color-text-muted);
-  font-size: var(--text-md);
   font-style: italic;
 }
 

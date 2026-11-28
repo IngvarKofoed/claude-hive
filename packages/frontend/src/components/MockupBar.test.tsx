@@ -7,7 +7,7 @@ import type { CardDetail } from "@hive/shared";
 const detail = (over: Partial<CardDetail> = {}): CardDetail =>
   ({
     id: "c1", lane: "mockup", state: "needs-you", turnRunning: false, pending: null, mockup: null, chat: [], issues: [],
-    spec: null, landing: false, ...over,
+    spec: null, landing: false, fromChat: null, ...over,
   }) as CardDetail;
 import { api } from "../api/client";
 import { MockupBar } from "./MockupBar";

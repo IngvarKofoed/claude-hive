@@ -28,6 +28,7 @@ const card = (id: string, lane: CardSummary["lane"], state: CardSummary["state"]
 const board: BoardResponse = {
   projects: [{ id: "p1", name: "flux", path: "~/work/flux", trustWarning: false }],
   cards: [card("i1", "ideas"), card("r1", "refine"), card("b1", "build", "working")],
+  chats: [],
 };
 
 function emit(event: HiveEvent) {
@@ -105,6 +106,36 @@ describe("Board", () => {
     await userEvent.click(within(panel).getByRole("button", { name: "Start" }));
     expect(move).toHaveBeenCalledWith("i1", { lane: "refine" });
     expect(await screen.findByRole("alert")).toHaveTextContent("This card is already moving.");
+  });
+
+  it("puts ● on the Chat button of the project whose chat asks, in both layouts, and leaves the For you count alone", async () => {
+    await renderBoard();
+    const waiting = "1 project · 2 cards in progress · 1 waiting for you";
+    expect(screen.queryByRole("button", { name: "Chat, a question waits" })).toBeNull();
+    const chat = { id: "ch1", projectId: "p1", title: "How", state: "asking", updatedAt: "t" } as const;
+    emit({ type: "projectChat.updated", chat });
+    expect(screen.getByRole("button", { name: "Chat, a question waits" })).toHaveTextContent("●");
+    expect(screen.getByText(waiting)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /For you, \d+ waiting/ })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "By project" }));
+    expect(screen.getByRole("button", { name: "Chat, a question waits" })).toBeInTheDocument();
+    expect(screen.getByText(waiting)).toBeInTheDocument();
+
+    emit({ type: "projectChat.updated", chat: { ...chat, state: "idle" } });
+    expect(screen.queryByRole("button", { name: "Chat, a question waits" })).toBeNull();
+    emit({ type: "projectChat.updated", chat });
+    emit({ type: "projectChat.deleted", chatId: "ch1" });
+    expect(screen.queryByRole("button", { name: "Chat, a question waits" })).toBeNull();
+  });
+
+  it("starts with the chats the board came with", async () => {
+    vi.spyOn(api, "board").mockResolvedValue({
+      ...board,
+      chats: [{ id: "ch2", projectId: "p1", title: "Q", state: "asking", updatedAt: "t" }],
+    });
+    await renderBoard();
+    expect(screen.getByRole("button", { name: "Chat, a question waits" })).toBeInTheDocument();
   });
 
   describe("Compact", () => {
@@ -215,6 +246,7 @@ describe("Board", () => {
     const NEW_BOARD: BoardResponse = {
       projects: [...board.projects, { id: "p2", name: "newdir", path: "/tmp/newdir", trustWarning: false }],
       cards: board.cards,
+      chats: board.chats,
     };
 
     async function typeMissing(post = vi.spyOn(api, "addProject")) {

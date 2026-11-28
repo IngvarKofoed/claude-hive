@@ -56,6 +56,7 @@ const detail: CardDetail = {
   landing: false,
   sendBack: null,
   amendment: null,
+  fromChat: null,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -371,13 +372,50 @@ describe("looking back at a finished lane", () => {
     expect(screen.getByRole("link", { name: "Back to Spec" })).toBeInTheDocument();
   });
 
-  it("shows the idea's own title and text for Ideas, on the right, after an empty chat", () => {
+  it("shows a typed idea's own title and text for Ideas, alone on the right, with no chat panel", () => {
     page(specCard, "/cards/c1?lane=ideas");
-    const noChat = screen.getByText("No chat in this lane.");
-    const idea = screen.getByText("Bigger font");
-    expect(noChat.compareDocumentPosition(idea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Bigger font")).toBeInTheDocument();
     expect(screen.getByText("Some users can't read the labels.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Idea" })).toBeInTheDocument();
+    // A typed idea never had a chat (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, The card page).
+    expect(screen.queryByText("No chat in this lane.")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Project chat" })).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  describe("an idea made from a project chat", () => {
+    const copy: CardDetail["chat"] = [
+      { kind: "message", id: "k1", at: "t", from: "you", text: "Could the font be bigger?" },
+      { kind: "message", id: "k2", at: "t", from: "project-chat", text: "It is set in the print dialog." },
+    ];
+    const idea = (over: Partial<CardDetail>): CardDetail => ({ ...specCard, lane: "ideas", pastChats: {}, ...over });
+
+    it("shows the copy in a Project chat panel on the left, with a link to the chat", () => {
+      page(idea({ chat: copy, fromChat: { id: "ch7", title: "Font" } }), "/cards/c1");
+      expect(screen.getByRole("heading", { name: "Project chat" })).toBeInTheDocument();
+      expect(screen.getByText("It is set in the print dialog.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open the chat" })).toHaveAttribute("href", "/projects/p1/chat/ch7");
+      expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
+    });
+
+    it("shows the copy without the link when the chat is gone", () => {
+      page(idea({ chat: copy, fromChat: null }), "/cards/c1");
+      expect(screen.getByText("Could the font be bigger?")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open the chat" })).toBeNull();
+    });
+
+    it("shows no left panel for a typed idea", () => {
+      page(idea({ chat: [] }), "/cards/c1");
+      expect(screen.queryByRole("heading", { name: "Project chat" })).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
+    });
+
+    it("titles the look-back at Ideas 'Project chat', with the copy on the left of the idea", () => {
+      page({ ...specCard, pastChats: { ideas: copy } }, "/cards/c1?lane=ideas");
+      expect(screen.getByRole("heading", { name: "Project chat" })).toBeInTheDocument();
+      const said = screen.getByText("It is set in the print dialog.");
+      expect(said.compareDocumentPosition(screen.getByText("Bigger font")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 
   it("says where the spec is when it can't be read, as on a landed card", () => {

@@ -10,7 +10,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                             Browser (React)                                             │
-│               Board · For you · Card · Lane history · Rulebooks · Projects · Role prompts               │
+│       Board · For you · Card · Lane history · Rulebooks · Projects · Project chats · Role prompts       │
 └─────────────┬───────────────────────────────────────────────────────────────────────┬───────────────────┘
               │                                                                       ▲ SSE: live events
               ▼ REST: moves, chat, comments, answers, sign-off                        │
@@ -46,6 +46,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 | --- | --- |
 | **Board engine** | Lanes, card moves, round limits and the loop guard. It reads each role's fixed-format report and decides the next lane. |
 | **Session runner** | Starts, resumes and stops sessions. Applies each role's instructions and model, and runs every session with full access in auto mode. Catches questions through `canUseTool`. |
+| **Project chats** | A project's chat sessions, with no card and no lane: their own tables, turn loop and drafts. Runs in the project's own folder. |
 | **Question router** | Questions in the chat lanes go straight to the page. Questions in hands-off lanes go to the manager ladder. |
 | **Spec keeper** | Judges each batch of spec issues as a new turn in the spec writer's session, which carries on after sign-off. |
 | **Review gate** | Runs the blind spec review and tracks the spec's hash, so sign-off is only possible on reviewed text. |
@@ -53,7 +54,7 @@ Claude Hive is a local web app. A Node backend runs on your Mac and drives every
 | **Preview service** | Gives each card's app its own port, starts and stops it, and takes screenshots for the mockup reference and the tester. |
 | **History** | Every event on every card, each lane's changes, and the archive at Done. |
 
-**REST** carries everything you do, and **SSE** (Server-Sent Events) pushes everything that happens. The page keeps one SSE connection open.
+**REST** carries everything you do, and **SSE** (Server-Sent Events) pushes everything that happens. The page keeps one SSE connection open. Chat summaries on the board stay current through the `projectChat.updated` and `projectChat.deleted` events.
 
 ## Project Structure
 
@@ -70,6 +71,7 @@ claude-hive/
 │   │       ├── board/         # Lanes, moves, round limits, loop guard
 │   │       ├── sessions/      # Session runner, role loading, canUseTool
 │   │       ├── questions/     # Question router and manager ladder
+│   │       ├── chats/         # Project chats: their turn loop, questions and drafts
 │   │       ├── spec/          # Spec keeper, review gate, spec-format loading
 │   │       ├── git/           # Worktrees, setup, checkpoints, ship
 │   │       ├── preview/       # Ports, running apps, screenshots
@@ -116,6 +118,8 @@ A role is a Markdown file in `roles/`: settings at the top, instructions below. 
 | `reviewer` | Check | Opus | Nothing | Work, new for each round |
 | `tester` | Check | Sonnet | Nothing; runs the app and takes screenshots | Work, new for each round |
 | `manager` | any hands-off lane | Sonnet | Nothing; uses the hive's lookup tools | One-off, one for each question |
+| `project-chat` | A project's chat, not a lane | Opus | Nothing; reads the person's checkout | Conversation, one per chat, run in the project's folder |
+| `idea-draft` | A project's chat, not a lane | Opus | Nothing | Instructions that ride in the chat's session, at the top of each draft message, with the report `IDEA_DRAFT_SCHEMA { status, reason, title, text }`, listed in `ROLE_TURNS` |
 | `spec-reviewer` | Spec | Fable | Nothing; reads only the spec file and `review.md` | One-off, blind |
 | `committer` | Ship | Sonnet | Nothing; writes the commit message a card lands with | One-off |
 
@@ -152,7 +156,7 @@ query({
 
 | Kind | Used for | How |
 | --- | --- | --- |
-| **Conversation** | Refine, Mockup, Spec: chats with you; the spec keeper after sign-off | One session per card per lane, resumed on every message, and again when feedback sends the card back. The designer builds mockup versions one after another in its session, resumed in each version's worktree. The spec writer's session carries on after sign-off, and each batch of spec issues is a new turn in it. |
+| **Conversation** | Refine, Mockup, Spec: chats with you; the spec keeper after sign-off; project chats | One session per card per lane, resumed on every message, and again when feedback sends the card back. The designer builds mockup versions one after another in its session, resumed in each version's worktree. The spec writer's session carries on after sign-off, and each batch of spec issues is a new turn in it. A project chat has one session for its whole life, with no card, run in the project's own folder; `ProjectChats` drives the session runner itself. |
 | **Work** | Plan, Build, Check | One session per card per lane. A card sent back resumes the same developer. Reviewer and tester start fresh each round. |
 | **One-off** | Manager, spec reviewer | A new session, discarded after one answer |
 
@@ -234,6 +238,7 @@ What you can do to a card in a lane (CONCEPT.md, Lane Actions) is defined once, 
 
 - **In a chat lane,** a question goes straight to the page as part of the conversation.
 - **In a hands-off lane,** a question goes to the manager ladder. Until the manager exists, the planner's, the developer's and the reviewer's questions come straight to you on the card page, like a chat lane's. The setup's questions are refused: it runs in the background with nobody to ask. So are the spec keeper's, during its turns, and the feedback reader's. An amendment's spec writer may ask you: the card is in Spec, so its questions are Spec chat.
+- **In a project chat,** a question goes to the chat's page, kept on the chat's row, and puts a ● on the project's Chat button. It never reaches For you or the header's count. A permission request auto mode passes on is denied, since a chat never needs to change anything.
 - **A permission request auto mode passes on** to `canUseTool` instead of deciding goes to the page in a chat lane, and becomes an Approve item in a hands-off lane. None was passed on in our tests, so in practice the only Approve item is the push at Ship.
 
 ```
@@ -282,6 +287,7 @@ The backend can stop at any time: the Mac sleeps, it crashes, or you restart it.
 
 - **One turn at a time per session.** A turn the hive starts for a session that is already busy waits in a queue for that session. An example is two spec questions for the spec keeper, one from the reviewer and one from the tester. A message you type still joins the running turn.
 - **A cut-off turn is resumed once in a hands-off lane.** At startup, a card marked working with no live turn has its session resumed and told that its last turn was cut off. If that turn also ends without a report, the card stops. A chat lane's cut-off turn is not resumed: the chat says the reply was cut off and waits for your next message, since a retry would only talk over you.
+- **A chat's cut-off turn isn't resumed.** The chat gets an error line and waits for your next message. A draft left drafting becomes failed.
 - **Answers outlive the turn that asked.** A question or Approve item waiting for you is a `PendingItem` row. If the turn that asked is gone when you answer, the answer goes to that session as a new turn, together with the question and options it asked.
 - **The card apps the hive runs end with it.** At startup it sweeps a Try it card's ports and starts its app again, unless you stopped it: your Stop is stored on the card.
 - **A landing survives a restart.** The hive stores the squash commit before the push. At startup, one whose commit is on main is finished; any other is undone, the worktree goes back to its branch, and Retry starts the landing over.
@@ -359,7 +365,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | Table | Key fields |
 | --- | --- |
 | **Project** | name, path, trustWarning. The setup session decides each card's local files, install, start commands and test command, so there's no project-level run or test command. |
-| **Card** | project, title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, mockup (the card's mockup once it has entered Mockup: its folder `docs/mockups/<card>`, what the designer last named with `set_mockup`, a page or a link, and whether you kept it; null for a card that skipped Mockup. The folder's files are read from disk on each fetch), moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers / send-back, and its issue ids), sendBack (your Send back words while the keeper reads them, or after its pick failed; cleared when the card leaves Try it), amendment (the open amendment, from Send back until the card next enters Try it), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
+| **Card** | project, chatId (the project chat it came from; null for a typed idea, and nulled when the chat is deleted), title (starts as the idea's title; the brief's title replaces it in Refine), ideaTitle, ideaText, lane, state (working / needs-you / stopped), branch, worktreePath, brief, mockup (the card's mockup once it has entered Mockup: its folder `docs/mockups/<card>`, what the designer last named with `set_mockup`, a page or a link, and whether you kept it; null for a card that skipped Mockup. The folder's files are read from disk on each fetch), moveError, port (the first of the card's 10), setup (the worktree's setup: what was copied, how to start the app and its tests), feedback (your Try it words, until the developer's next `done` report), appStopped (you stopped its app in Try it), landing (a landing under way: base, commit, pushed), landed (the commit it landed as, and whether your checkout's main followed), shipAfterCheck (Ship sent it back to Build, so after Check it returns to Ship), specPath (always under `docs/specs/` in the worktree), reviewedSpecHash, reviewApplying (a review's findings sent but not yet applied in full), plan (the planner's report), build (the developer's last `done` report, with the files changed against main; cleared each time the card enters Build), check (Check's last finished round: its number, the reviewer's summary and the bugs; cleared when a new plan is done), judging (which keeper turn is under way: batch / as-built / blocking / answers / send-back, and its issue ids), sendBack (your Send back words while the keeper reads them, or after its pick failed; cleared when the card leaves Try it), amendment (the open amendment, from Send back until the card next enters Try it), keeperFixes (the issues going to the developer, and the lane they came from; cleared on the developer's next `done` report), keeperRounds (keeper fix rounds since sign-off; cleared at sign-off), blockJudged (this Build visit has had its keeper turn; cleared when the card enters Build), checklist (the developer session's own task list, read from its `TaskCreate` / `TaskUpdate` calls and shown live in Build; emptied only when a new developer session starts), waitingSince (when the card started waiting for you: set when it starts needing you, or changes lane while it does; For you sorts on it) |
 | **LaneVisit** | card, lane, enteredAt, leftAt, outcome, round |
 | **Session** | card, lane, role, kind, sessionId, startedAt, turnRunning, existsYet (a first turn created it, so later turns `resume`), lastMessage (what Retry sends again) |
 | **Version** | card, label, worktreePath, screenshot, picked |
@@ -367,6 +373,8 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 | **Issue** | card, foundIn, where (the spec's section), problem, guess (what was built instead), status (open, spec-fixed, no-change, sent, fixed, judged, severe, waiting, held, kept, settled), the keeper's judgment (verdict, level, reason, recommendation, repeats), answer (yours), flips (the repeats in a chain) |
 | **Decision** | card, lane, what, alternative, sessionId, source |
 | **PendingItem** | card, session (where the answer goes), kind (question / permission / approve / severe / loop), payload, recommendation, answer. `permission` is a request auto mode passed on in a chat lane. |
+| **Chat** | project, title, sessionId, existsYet, turnRunning, lastMessage, pending (the question waiting for you), draft (the idea-draft turn's state and result), createdAt, updatedAt |
+| **ChatEvent** | chat, at, type (`chat` or `error`), data. The chat page shows its messages from these rows. A "Made an idea" note's data also holds the card's id, which the chat page links to; a note whose card no longer exists shows as plain text. |
 | **Rule** | project (or shared), text, origin card, status (active / suggested) |
 | **Event** | card, at, type, data. Every row of a card's history: `chat` (a message, yours or a session's text block), `error` (a failed or cut-off turn), `brief` (every version of the brief), `plan` (every plan), `build` (every `done` report), `check` (every finished round, with its spec issues), `judged` (every keeper turn's judgments), `feedback` (your Try it words), `accept`, `landed` and `setup` so far. The page shows the chat from these rows, never from Claude Code's transcripts, which Claude Code deletes after a while, and a card's history of plans, builds, Check rounds and feedback from them too. |
 
@@ -374,7 +382,7 @@ Ship never touches uncommitted work in your checkout. It updates your checkout's
 
 ```
 GET    /api/board                         Projects × lanes with their cards
-POST   /api/cards                         New idea { projectId, title, text }
+POST   /api/cards                         New idea { projectId, title, text, chatId? }
 PATCH  /api/cards/:id                     Edit an idea { title, text }, only in Ideas
 POST   /api/cards/:id/move                Drag { lane }; also park and drop
 DELETE /api/cards/:id                     Delete the card: { left } lists anything git left behind
@@ -403,6 +411,15 @@ POST   /api/cards/:id/app/start           Start the card's app in Try it · /app
 GET    /api/for-you                       Everything waiting for you, each with its lane actions
 GET    /api/roles                         Every role: its file, and what its sessions get beyond it
 POST   /api/for-you/:itemId               Answer, approve or decide
+GET    /api/projects/:id/chats            The project's chats, newest first
+POST   /api/projects/:id/chats            New chat with its first message { text }
+GET    /api/chats/:id                     One chat, with its messages, question and draft
+POST   /api/chats/:id/messages            Chat { text }
+POST   /api/chats/:id/answer              Answer the chat's question { itemId, answers }
+POST   /api/chats/:id/stop                Stop the chat's turn
+POST   /api/chats/:id/draft               Make it an idea: start the draft turn
+DELETE /api/chats/:id/draft               Close the draft
+DELETE /api/chats/:id                     Delete the chat; ideas made from it keep their copy
 GET    /api/lanes/:lane/history           A lane across all cards
 GET    /api/rules  · POST · PATCH         Rulebooks and suggested rules
 GET    /api/projects · POST · PATCH       Projects and their settings; POST { path, create? } answers { missing } for a folder that doesn't exist

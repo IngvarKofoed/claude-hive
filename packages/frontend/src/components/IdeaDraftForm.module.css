@@ -1,0 +1,77 @@
+/* Under the chat's log: at most part of the column, so the log keeps room. The Idea field takes the spare height and scrolls inside. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: var(--chat-draft-max-height);
+  min-height: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* The Idea field: grows into the form's spare height, then scrolls. */
+.grow {
+  flex: 1;
+  min-height: 0;
+}
+
+.control {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+}
+
+.grow .control {
+  flex: 1;
+  min-height: var(--chat-draft-field-min-height);
+  overflow-y: auto;
+  resize: none;
+}
+
+.control:disabled {
+  background: var(--color-surface-muted);
+  cursor: not-allowed;
+}
+
+.drafting {
+  color: var(--color-working-text);
+  font-size: var(--text-md);
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.error {
+  margin: 0;
+  color: var(--color-stopped-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* Stacked layout: the column has no height of its own, so the cap is a share of the window. */
+@media (max-width: 60rem) {
+  .form {
+    max-height: var(--chat-draft-max-height-stacked);
+  }
+}

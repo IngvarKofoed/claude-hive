@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { titleFromIdea } from "./titleFromIdea";
 import type {
   Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, IssueAnswer, IssueJudgment, IssueStatus,
-  Landed, MockupRef, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SendBackPoint, SpecIssue,
+  IdeaDraft, Landed, MockupRef, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SendBackPoint, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -98,6 +98,27 @@ CREATE TABLE IF NOT EXISTS decisions (
   source TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  title TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  exists_yet INTEGER NOT NULL DEFAULT 0,
+  turn_running INTEGER NOT NULL DEFAULT 0,
+  last_message TEXT,
+  pending TEXT,
+  draft TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_events (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id),
+  at TEXT NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_events_chat ON chat_events(chat_id, at);
 `;
 
 /** Columns added after the first slice; added to an existing database on open. */
@@ -125,6 +146,8 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "mockup", type: "TEXT" },
   { table: "cards", column: "send_back", type: "TEXT" },
   { table: "cards", column: "amendment", type: "TEXT" },
+  // No foreign key: deleting the chat sets it to null, and the card keeps its copy of the chat.
+  { table: "cards", column: "chat_id", type: "TEXT" },
   { table: "issues", column: "status", type: "TEXT NOT NULL DEFAULT 'open'" },
   { table: "issues", column: "recommendation", type: "TEXT" },
   { table: "issues", column: "repeats", type: "TEXT" },
@@ -197,6 +220,31 @@ export interface MockupState {
   kept: boolean | null;
 }
 
+/**
+ * A project chat as stored (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, Data). A chat has one
+ * session for its whole life, so the session lives on its row.
+ */
+export interface ChatRow {
+  id: string;
+  projectId: string;
+  /** The first message's first sentence; fixed. */
+  title: string;
+  /** Chosen by the hive, so the first turn can be resumed. */
+  sessionId: string;
+  /** A first turn created the session, so later turns resume it. */
+  existsYet: boolean;
+  turnRunning: boolean;
+  /** What the last turn was started with. */
+  lastMessage: string | null;
+  /** The open question, or null. */
+  pending: PendingItem | null;
+  /** Make it an idea's draft while its form is open, or null. */
+  draft: IdeaDraft | null;
+  createdAt: string;
+  /** Moves with every message; the list sorts on it, newest first. */
+  updatedAt: string;
+}
+
 export interface ProjectRow {
   id: string;
   name: string;
@@ -261,6 +309,8 @@ export interface CardRow {
   sendBack: { text: string } | null;
   /** The id of the amendment the card carries, from Send back until it next enters Try it. */
   amendment: string | null;
+  /** The project chat the card was made from; null for a typed idea, and once the chat is deleted. */
+  chatId: string | null;
   /**
    * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
    * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
@@ -358,27 +408,31 @@ export class HiveDb {
     return r ? toCard(r) : undefined;
   }
 
-  /** A new card has no checklist (only a developer session gives it one) and no mockup (only Mockup does). */
+  /**
+   * A new card has no checklist (only a developer session gives it one) and no mockup (only Mockup does). `chatId` is
+   * the project chat it was made from, if any.
+   */
   insertCard(
     c: Omit<
       CardRow,
-      "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged" | "mockup" | "sendBack" | "amendment"
-    >,
+      | "waitingSince" | "checklist" | "judging" | "keeperFixes" | "keeperRounds" | "blockJudged" | "mockup" | "sendBack"
+      | "amendment" | "chatId"
+    > & { chatId?: string | null },
   ): void {
     const at = now();
     this.db
       .prepare(
         `INSERT INTO cards (id, project_id, title, idea_title, idea_text, lane, state, branch, worktree_path, brief, move_error,
            spec_path, reviewed_spec_hash, review_applying, plan, build, check_round, setup, port, feedback, app_stopped,
-           landing, landed, ship_after_check, waiting_since, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           landing, landed, ship_after_check, waiting_since, created_at, chat_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(c.id, c.projectId, c.title, c.ideaTitle, c.ideaText, c.lane, c.state, c.branch, c.worktreePath,
         c.brief ? JSON.stringify(c.brief) : null, c.moveError, c.specPath, c.reviewedSpecHash,
         c.reviewApplying ? 1 : 0, c.plan ? JSON.stringify(c.plan) : null, c.build ? JSON.stringify(c.build) : null,
         c.check ? JSON.stringify(c.check) : null, c.setup ? JSON.stringify(c.setup) : null, c.port, c.feedback,
         c.appStopped ? 1 : 0, c.landing ? JSON.stringify(c.landing) : null, c.landed ? JSON.stringify(c.landed) : null,
-        c.shipAfterCheck ? 1 : 0, at, at);
+        c.shipAfterCheck ? 1 : 0, at, at, c.chatId ?? null);
   }
 
   /**
@@ -662,6 +716,99 @@ export class HiveDb {
       this.db.prepare("SELECT * FROM decisions WHERE card_id = ? ORDER BY created_at, rowid").all(cardId) as any[]
     ).map((r) => ({ id: r.id, lane: r.lane, what: r.what, alternative: r.alternative, source: r.source }));
   }
+
+  // ---------- project chats ----------
+
+  insertChat(c: { id: string; projectId: string; title: string; sessionId: string }): void {
+    const at = now();
+    this.db
+      .prepare(
+        `INSERT INTO chats (id, project_id, title, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(c.id, c.projectId, c.title, c.sessionId, at, at);
+  }
+
+  getChat(id: string): ChatRow | undefined {
+    const r = this.db.prepare("SELECT * FROM chats WHERE id = ?").get(id);
+    return r ? toChat(r) : undefined;
+  }
+
+  /** Every chat, or one project's, the most recently active first. */
+  listChats(projectId?: string): ChatRow[] {
+    const rows = projectId === undefined
+      ? this.db.prepare("SELECT * FROM chats ORDER BY updated_at DESC, rowid DESC").all()
+      : this.db.prepare("SELECT * FROM chats WHERE project_id = ? ORDER BY updated_at DESC, rowid DESC").all(projectId);
+    return (rows as any[]).map(toChat);
+  }
+
+  updateChat(
+    id: string,
+    patch: Partial<Pick<ChatRow, "existsYet" | "turnRunning" | "lastMessage" | "pending" | "draft" | "updatedAt">>,
+  ): void {
+    const cols: Record<string, string> = {
+      existsYet: "exists_yet", turnRunning: "turn_running", lastMessage: "last_message", pending: "pending",
+      draft: "draft", updatedAt: "updated_at",
+    };
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, value] of Object.entries(patch)) {
+      const col = cols[key];
+      if (!col) continue;
+      sets.push(`${col} = ?`);
+      if (key === "pending" || key === "draft") values.push(value ? JSON.stringify(value) : null);
+      else if (key === "existsYet" || key === "turnRunning") values.push(value ? 1 : 0);
+      else values.push(value);
+    }
+    if (sets.length === 0) return;
+    this.db.prepare(`UPDATE chats SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
+  }
+
+  /** A chat row: a message or an error line. It moves the chat's `updated_at`, so the list's order follows the talk. */
+  addChatEvent(chatId: string, type: "chat" | "error", data: unknown, id: string, at: string = now()): void {
+    this.db
+      .prepare("INSERT INTO chat_events (id, chat_id, at, type, data) VALUES (?, ?, ?, ?, ?)")
+      .run(id, chatId, at, type, JSON.stringify(data));
+    this.db.prepare("UPDATE chats SET updated_at = ? WHERE id = ?").run(at, chatId);
+  }
+
+  /** A chat's messages, notes and error lines, oldest first, in the shape of a card's lane chat. */
+  chatItems(chatId: string): ChatItem[] {
+    const rows = this.db
+      .prepare("SELECT * FROM chat_events WHERE chat_id = ? ORDER BY at, rowid")
+      .all(chatId) as any[];
+    return rows.map((r): ChatItem => {
+      const d = JSON.parse(r.data);
+      return r.type === "chat"
+        ? { kind: "message", id: r.id, at: r.at, from: d.from, text: d.text, ...(typeof d.cardId === "string" ? { cardId: d.cardId } : {}) }
+        : { kind: "error", id: r.id, at: r.at, message: d.message, actions: [] };
+    });
+  }
+
+  /** The cards made from a chat, oldest first. */
+  cardsFromChat(chatId: string): CardRow[] {
+    return (this.db.prepare("SELECT * FROM cards WHERE chat_id = ? ORDER BY created_at, rowid").all(chatId) as any[])
+      .map(toCard);
+  }
+
+  /**
+   * Deletes a chat in one transaction: its rows, then the chat, then the link from the cards made from it. Those cards
+   * keep their copy of the chat.
+   */
+  deleteChat(id: string): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM chat_events WHERE chat_id = ?").run(id);
+      this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
+      this.db.prepare("UPDATE cards SET chat_id = NULL WHERE chat_id = ?").run(id);
+    });
+  }
+}
+
+function toChat(r: any): ChatRow {
+  return {
+    id: r.id, projectId: r.project_id, title: r.title, sessionId: r.session_id, existsYet: !!r.exists_yet,
+    turnRunning: !!r.turn_running, lastMessage: r.last_message ?? null, pending: r.pending ? JSON.parse(r.pending) : null,
+    draft: r.draft ? JSON.parse(r.draft) : null, createdAt: r.created_at, updatedAt: r.updated_at,
+  };
 }
 
 function toProject(r: any): ProjectRow {
@@ -693,7 +840,7 @@ function toCard(r: any): CardRow {
     judging: r.judging ? JSON.parse(r.judging) : null, keeperFixes: r.keeper_fixes ? JSON.parse(r.keeper_fixes) : null,
     keeperRounds: r.keeper_rounds ?? 0, blockJudged: !!r.block_judged, mockup: r.mockup ? JSON.parse(r.mockup) : null,
     sendBack: r.send_back ? JSON.parse(r.send_back) : null, amendment: r.amendment ?? null,
-    waitingSince: r.waiting_since ?? r.created_at,
+    chatId: r.chat_id ?? null, waitingSince: r.waiting_since ?? r.created_at,
   };
 }
 

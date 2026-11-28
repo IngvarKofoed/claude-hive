@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PendingItem } from "@hive/shared";
+import type { AnswerBody, PendingItem } from "@hive/shared";
 import { api } from "../api/client";
 import { buildAnswers, isComplete, togglePick, type QuestionInput } from "./answers";
 import { Button } from "./ui/Button";
@@ -9,7 +9,16 @@ import styles from "./PendingCard.module.css";
 type QuestionItem = Extract<PendingItem, { kind: "question" }>;
 type PermissionItem = Extract<PendingItem, { kind: "permission" }>;
 
-function QuestionCard({ item, onError }: { item: QuestionItem; onError: (message: string) => void }) {
+/** Where an answer goes. A card's questions go to For you's endpoint; a project chat sends its own. */
+export type AnswerFn = (itemId: string, body: AnswerBody) => Promise<unknown>;
+
+interface CardProps<T> {
+  item: T;
+  onError: (message: string) => void;
+  answer: AnswerFn;
+}
+
+function QuestionCard({ item, onError, answer: sendAnswer }: CardProps<QuestionItem>) {
   const [input, setInput] = useState<QuestionInput>({ picks: {}, free: {} });
   const [sending, setSending] = useState(false);
   const answers = buildAnswers(item.questions, input);
@@ -18,7 +27,7 @@ function QuestionCard({ item, onError }: { item: QuestionItem; onError: (message
   async function send() {
     setSending(true);
     try {
-      await api.answer(item.id, { answers });
+      await sendAnswer(item.id, { answers });
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not send the answer.");
       setSending(false);
@@ -88,13 +97,13 @@ function QuestionCard({ item, onError }: { item: QuestionItem; onError: (message
   );
 }
 
-function PermissionCard({ item, onError }: { item: PermissionItem; onError: (message: string) => void }) {
+function PermissionCard({ item, onError, answer }: CardProps<PermissionItem>) {
   const [sending, setSending] = useState(false);
 
   async function decide(allow: boolean) {
     setSending(true);
     try {
-      await api.answer(item.id, { allow });
+      await answer(item.id, { allow });
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not send the answer.");
       setSending(false);
@@ -119,11 +128,19 @@ function PermissionCard({ item, onError }: { item: PermissionItem; onError: (mes
   );
 }
 
-export function PendingCard({ item, onError }: { item: PendingItem; onError: (message: string) => void }) {
+export function PendingCard({
+  item,
+  onError,
+  answer = api.answer,
+}: {
+  item: PendingItem;
+  onError: (message: string) => void;
+  answer?: AnswerFn;
+}) {
   // Keyed by id so a new item starts with fresh picks.
   return item.kind === "question" ? (
-    <QuestionCard key={item.id} item={item} onError={onError} />
+    <QuestionCard key={item.id} item={item} onError={onError} answer={answer} />
   ) : (
-    <PermissionCard key={item.id} item={item} onError={onError} />
+    <PermissionCard key={item.id} item={item} onError={onError} answer={answer} />
   );
 }

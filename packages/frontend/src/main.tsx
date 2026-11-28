@@ -6,6 +6,7 @@ import { NewIdeaProvider } from "./components/newIdeaContext";
 import { Board } from "./pages/Board";
 import { Card } from "./pages/Card";
 import { ForYou } from "./pages/ForYou";
+import { ProjectChat } from "./pages/ProjectChat";
 import { RolePrompts } from "./pages/RolePrompts";
 import "./styles/tokens.css";
 import "./styles/global.css";
@@ -18,6 +19,8 @@ createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<Board />} />
             <Route path="/cards/:id" element={<Card />} />
+            <Route path="/projects/:projectId/chat" element={<ProjectChat />} />
+            <Route path="/projects/:projectId/chat/:chatId" element={<ProjectChat />} />
             <Route path="/for-you" element={<ForYou />} />
             <Route path="/roles" element={<RolePrompts />} />
             <Route path="/roles/:name" element={<RolePrompts />} />

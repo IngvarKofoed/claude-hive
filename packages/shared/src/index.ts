@@ -3,6 +3,7 @@
 
 export { APP_VERSION } from "./version";
 export * from "./laneActions";
+export * from "./projectChat";
 import type { ErrorAction, LaneActionState } from "./laneActions";
 
 // ---------- Lanes ----------
@@ -440,6 +441,51 @@ export interface CardSummary {
 export interface BoardResponse {
   projects: ProjectSummary[];
   cards: CardSummary[];
+  /** Every project chat, newest first: the board's Chat buttons show ● for a project with one that's asking. */
+  chats: ProjectChatSummary[];
+}
+
+// ---------- Project chats ----------
+
+/**
+ * A chat with a project, with no card behind it (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md).
+ * idle: nothing runs · working: a turn runs · asking: a question waits for you.
+ */
+export interface ProjectChatSummary {
+  id: string;
+  projectId: string;
+  /** The first message's first sentence; fixed. */
+  title: string;
+  state: "idle" | "working" | "asking";
+  /** When the chat was last active (ISO time): the list sorts on it, newest first. */
+  updatedAt: string;
+}
+
+/**
+ * The draft Make it an idea asks for. drafting: the quiet draft turn runs · ready: title and text came back ·
+ * failed: no draft came back, and `reason` says why; the form opens empty.
+ */
+export interface IdeaDraft {
+  status: "drafting" | "ready" | "failed";
+  title: string;
+  text: string;
+  reason: string;
+}
+
+/** GET /api/chats/:id: one chat as its page shows it. */
+export interface ProjectChatDetail extends ProjectChatSummary {
+  projectName: string;
+  chat: ChatItem[];
+  pending: PendingItem | null;
+  turnRunning: boolean;
+  /** The draft form's contents while one is open; null when no form is open. */
+  draft: IdeaDraft | null;
+}
+
+/** GET /api/projects/:id/chats: the project's chats, newest first, and its name for the page's top band. */
+export interface ProjectChatList {
+  projectName: string;
+  chats: ProjectChatSummary[];
 }
 
 // ---------- For you ----------
@@ -527,10 +573,19 @@ export interface RolesResponse {
 
 /** Who wrote a chat line. `hive` is the hive's own note, e.g. "The review found two fixes and one decision". */
 export type ChatAuthor =
-  | "you" | "product-owner" | "designer" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive";
+  | "you" | "product-owner" | "designer" | "spec-writer" | "spec-keeper" | "planner" | "developer" | "reviewer" | "hive"
+  /** A project chat's session (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md). */
+  | "project-chat";
 
 export type ChatItem =
-  | { kind: "message"; id: string; at: string; from: ChatAuthor; text: string }
+  | {
+      kind: "message"; id: string; at: string; from: ChatAuthor; text: string;
+      /**
+       * Set only on a project chat's "Made an idea" note, and only while that card still exists: the page shows such a
+       * note as a link to /cards/:cardId (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, Amendments).
+       */
+      cardId?: string;
+    }
   | { kind: "error"; id: string; at: string; message: string; actions: ErrorAction[] };
 
 export interface QuestionOption {
@@ -617,6 +672,8 @@ export interface CardDetail extends CardSummary {
   history: CardHistory;
   pending: PendingItem | null;
   turnRunning: boolean;
+  /** The project chat the card was made from, while that chat exists; null for a typed idea or a deleted chat. */
+  fromChat: { id: string; title: string } | null;
 }
 
 // ---------- API bodies ----------
@@ -647,6 +704,8 @@ export interface NewCardBody {
   projectId: string;
   title: string;
   text: string;
+  /** The project chat the idea was made from: the card gets a copy of its messages so far. */
+  chatId?: string;
 }
 
 /** An idea's edit, allowed only while the card is in Ideas and not moving. Both fields trimmed and required. */
@@ -697,6 +756,12 @@ export interface MessageBody {
  */
 export type AnswerBody = { answers: Record<string, string> } | { allow: boolean };
 
+/** Answer to a project chat's question (POST /api/chats/:id/answer). A chat asks only questions, never permissions. */
+export interface ChatAnswerBody {
+  itemId: string;
+  answers: Record<string, string>;
+}
+
 export interface ApiError {
   error: string;
 }
@@ -734,4 +799,15 @@ export type HiveEvent =
   /** The card was deleted: everything about it is gone (docs/specs/2026-11-27-delete-a-card.md). */
   | { type: "card.deleted"; cardId: string }
   | { type: "turn.started"; cardId: string }
-  | { type: "turn.ended"; cardId: string };
+  | { type: "turn.ended"; cardId: string }
+  // Project chats: their own events, keyed on chatId, so nothing that follows cards (For you) reacts to them.
+  /** A chat was made, or its state, title, draft or last activity changed. */
+  | { type: "projectChat.updated"; chat: ProjectChatSummary }
+  | { type: "projectChat.deleted"; chatId: string }
+  /** A piece of the text block being written. */
+  | { type: "projectChat.delta"; chatId: string; text: string }
+  /** A finished chat item: a text block, your message, a note or an error. Replaces any partial text. */
+  | { type: "projectChat.message"; chatId: string; item: ChatItem }
+  /** A passing line such as "reading src/market.ts…". Null clears it. Never stored. */
+  | { type: "projectChat.activity"; chatId: string; text: string | null }
+  | { type: "projectChat.pending"; chatId: string; pending: PendingItem | null };

@@ -11,7 +11,7 @@ afterEach(() => vi.restoreAllMocks());
 const project = (id: string, name: string) => ({ id, name, path: `/r/${id}` }) as unknown as ProjectSummary;
 
 function board(...projects: ProjectSummary[]) {
-  return vi.spyOn(api, "board").mockResolvedValue({ projects, cards: [] } as BoardResponse);
+  return vi.spyOn(api, "board").mockResolvedValue({ projects, cards: [], chats: [] } as BoardResponse);
 }
 
 /** A stand-in for the board's field: opens the form with a preset. */
@@ -169,7 +169,7 @@ describe("NewIdea", () => {
     await openForm();
     expect(await screen.findByText("Backend down")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    spy.mockResolvedValue({ projects: [], cards: [] } as BoardResponse);
+    spy.mockResolvedValue({ projects: [], cards: [], chats: [] } as BoardResponse);
     await openForm();
     expect(await screen.findByText(/Add one on the Board first/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();

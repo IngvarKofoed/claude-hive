@@ -73,6 +73,7 @@ export function lookBackLanes(current: Lane, skipped: Lane[] = []): Lane[] {
 
 /** Who a finished lane's chat was with, as the left panel's title. */
 const PAST_CHAT_TITLE: Partial<Record<Lane, string>> = {
+  ideas: "Project chat",
   refine: "Product owner",
   mockup: "Designer",
   spec: "Spec writer",
@@ -211,10 +212,23 @@ function PastArtifact({ detail, lane }: { detail: CardDetail; lane: Lane }) {
  * (docs/specs/2026-11-27-card-lane-artifacts.md).
  */
 export function PastLaneView({ detail, lane }: { detail: CardDetail; lane: Lane }) {
+  const chat = detail.pastChats[lane] ?? [];
+  // A typed idea never had a chat: its look-back is the idea alone, on the right, as the live Ideas view lays it out.
+  // Only an idea made from a project chat has a copy to show on the left
+  // (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md, The card page).
+  if (lane === "ideas" && chat.length === 0) {
+    return (
+      <div className={styles.columns}>
+        <div className={styles.right}>
+          <PastArtifact detail={detail} lane={lane} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={styles.columns}>
       <Panel title={PAST_CHAT_TITLE[lane] ?? laneName(lane)}>
-        <PastChat items={detail.pastChats[lane] ?? []} />
+        <PastChat items={chat} />
       </Panel>
       <PastArtifact detail={detail} lane={lane} />
     </div>
@@ -224,11 +238,21 @@ export function PastLaneView({ detail, lane }: { detail: CardDetail; lane: Lane 
 export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => void }) {
   const { detail } = live;
 
-  // The idea is the lane's artifact, so it sits on the right like every lane's. The left stays empty: Refine's chat
-  // starts there.
+  // The idea is the lane's artifact, so it sits on the right like every lane's. The left stays empty unless the idea
+  // came from a project chat: then it holds the copy of that chat. A typed idea has none, and Refine's chat starts there.
   if (detail.lane === "ideas") {
     return (
       <div className={styles.columns}>
+        {detail.chat.length > 0 ? (
+          <Panel title={PAST_CHAT_TITLE.ideas}>
+            <div className={styles.stack}>
+              <PastChat items={detail.chat} />
+              {detail.fromChat ? (
+                <Link to={`/projects/${detail.projectId}/chat/${detail.fromChat.id}`}>Open the chat</Link>
+              ) : null}
+            </div>
+          </Panel>
+        ) : null}
         <div className={styles.right}>
           <IdeaPanel detail={detail} onChanged={onMoved} />
         </div>

@@ -55,6 +55,7 @@ function detail(over: Partial<CardDetail> = {}): CardDetail {
     landing: false,
     sendBack: null,
     amendment: null,
+    fromChat: null,
     ...over,
   };
 }

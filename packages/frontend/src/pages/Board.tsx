@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type DragEvent } from "react";
 import { useNavigate } from "react-router";
-import { LANES, type BoardResponse, type CardSummary, type Lane, type ProjectSummary } from "@hive/shared";
+import {
+  LANES,
+  type BoardResponse,
+  type CardSummary,
+  type Lane,
+  type ProjectChatSummary,
+  type ProjectSummary,
+} from "@hive/shared";
 import { api } from "../api/client";
 import { useHiveEvents, useStreamOpen } from "../api/events";
 import { boardSummary } from "../components/cardBadge";
@@ -85,6 +92,7 @@ export function Board() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [cards, setCards] = useState<CardSummary[]>([]);
+  const [chats, setChats] = useState<ProjectChatSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<CardSummary | null>(null);
@@ -99,6 +107,7 @@ export function Board() {
   const applyBoard = useCallback((board: BoardResponse) => {
     setProjects(board.projects);
     setCards(board.cards);
+    setChats(board.chats);
   }, []);
 
   const load = useCallback(async () => {
@@ -120,6 +129,8 @@ export function Board() {
     if (event.type === "project.updated") setProjects((prev) => upsert(prev, event.project));
     else if (event.type === "card.updated") setCards((prev) => upsert(prev, event.card));
     else if (event.type === "card.deleted") setCards((prev) => prev.filter((card) => card.id !== event.cardId));
+    else if (event.type === "projectChat.updated") setChats((prev) => upsert(prev, event.chat));
+    else if (event.type === "projectChat.deleted") setChats((prev) => prev.filter((chat) => chat.id !== event.chatId));
   });
 
   // Refetch whatever changed while the stream was down.
@@ -313,6 +324,8 @@ export function Board() {
                   onStart={startIdea}
                   onBoard={applyBoard}
                   onDeleted={removeCard}
+                  chats={chats.filter((chat) => chat.projectId === project.id)}
+                  onChat={navigate}
                 />
               ))}
             </div>
@@ -328,6 +341,8 @@ export function Board() {
                 onStart={startIdea}
                 onBoard={applyBoard}
                 onDeleted={removeCard}
+                chats={chats.filter((chat) => chat.projectId === project.id)}
+                onChat={navigate}
               />
             ))}
           </div>

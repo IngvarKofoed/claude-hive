@@ -3,6 +3,7 @@ import type {
   AddProjectResponse,
   FolderCompletions,
   AnswerBody,
+  ChatAnswerBody,
   ApiError,
   BoardResponse,
   CardDetail,
@@ -18,6 +19,9 @@ import type {
   DeleteResult,
   GoodBody,
   MockupInfo,
+  ProjectChatDetail,
+  ProjectChatList,
+  ProjectChatSummary,
 } from "@hive/shared";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -96,4 +100,19 @@ export const api = {
   appRestart: (id: string) => request<{ ok: true }>("POST", `/cards/${encodeURIComponent(id)}/app/restart`),
   answer: (itemId: string, body: AnswerBody) =>
     request<unknown>("POST", `/for-you/${encodeURIComponent(itemId)}`, body),
+  // Project chats (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md).
+  projectChats: (projectId: string) =>
+    request<ProjectChatList>("GET", `/projects/${encodeURIComponent(projectId)}/chats`),
+  newProjectChat: (projectId: string, body: MessageBody) =>
+    request<ProjectChatSummary>("POST", `/projects/${encodeURIComponent(projectId)}/chats`, body),
+  projectChat: (id: string) => request<ProjectChatDetail>("GET", `/chats/${encodeURIComponent(id)}`),
+  sendChatMessage: (id: string, body: MessageBody) =>
+    request<unknown>("POST", `/chats/${encodeURIComponent(id)}/messages`, body),
+  answerChat: (id: string, body: ChatAnswerBody) =>
+    request<unknown>("POST", `/chats/${encodeURIComponent(id)}/answer`, body),
+  stopChat: (id: string) => request<unknown>("POST", `/chats/${encodeURIComponent(id)}/stop`),
+  // Make it an idea: start the draft turn, or close the draft form.
+  draftIdea: (id: string) => request<unknown>("POST", `/chats/${encodeURIComponent(id)}/draft`),
+  closeDraft: (id: string) => request<unknown>("DELETE", `/chats/${encodeURIComponent(id)}/draft`),
+  deleteChat: (id: string) => request<unknown>("DELETE", `/chats/${encodeURIComponent(id)}`),
 };

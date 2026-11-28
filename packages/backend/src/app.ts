@@ -2,6 +2,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { ProjectChats } from "./chats";
 import type { EventHub } from "./events";
 import type { Hive } from "./hive";
 import { apiRouter } from "./routes/api";
@@ -12,6 +13,8 @@ export interface AppOptions {
   ports: number[];
   /** The built page (packages/frontend/dist), served when it exists. */
   pageDir?: string;
+  /** The project chats, beside the hive (docs/specs/2026-11-28-chat-with-a-project-then-make-it-an-idea.md). */
+  chats: ProjectChats;
 }
 
 export function createApp(hive: Hive, hub: EventHub, options: AppOptions) {
@@ -19,7 +22,7 @@ export function createApp(hive: Hive, hub: EventHub, options: AppOptions) {
   app.disable("x-powered-by");
   app.use(localOnly(options.ports));
   app.use(express.json({ limit: "1mb" }));
-  app.use("/api", apiRouter(hive, hub));
+  app.use("/api", apiRouter(hive, hub, options.chats));
 
   if (options.pageDir && existsSync(join(options.pageDir, "index.html"))) {
     app.use(express.static(options.pageDir));

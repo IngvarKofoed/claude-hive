@@ -11,6 +11,7 @@ const detail = {
   landing: false,
   sendBack: null,
   amendment: null,
+  fromChat: null,
   chat: [],
   issues: [],
   pending: null,
