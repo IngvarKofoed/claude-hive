@@ -12,7 +12,11 @@ import { Hive } from "./hive";
 import { PLAN_SCHEMA, REVIEW_SCHEMA } from "./spec/reports";
 import { FakeProbe, FakeRunner, makeRepo, makeSpecFormat, settle, waitFor, type TempRepo } from "./testing";
 
-const role = (name: string) => ({ name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "conversation", instructions: `Be the ${name}.` });
+const brokenRoles = new Set<string>();
+const role = (name: string) => {
+  if (brokenRoles.has(name)) throw new Error(`roles/${name}.md is broken`);
+  return { name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "conversation", instructions: `Be the ${name}.` };
+};
 
 const brief = {
   title: "Printer font size", problem: "Labels are too small.", whoItsFor: "People with low vision",
@@ -39,6 +43,7 @@ describe("Spec and Plan lanes", () => {
     new Hive({ db, hub, git, runner, probe: new FakeProbe(), role, log: () => {}, specFormatDir: format.dir, today: () => "2026-11-26" });
 
   beforeEach(() => {
+    brokenRoles.clear();
     db = new HiveDb(":memory:");
     hub = new EventHub();
     runner = new FakeRunner();
@@ -211,6 +216,28 @@ describe("Spec and Plan lanes", () => {
       expect(card.spec!.review).toBe("none");
       expect(card.chat.at(-1)).toMatchObject({ kind: "message", from: "hive" });
       expect((card.chat.at(-1) as { text: string }).text).toMatch(/changed during the review/);
+    });
+
+    it("ends the review with Review again when its findings can't reach the spec writer", async () => {
+      const { id } = await specWritten();
+      hive.review(id);
+      brokenRoles.add("spec-writer"); // broken since the review began: role files are read on every turn
+      events.length = 0;
+      await reviewer().end(report([fix]));
+      await waitFor(() => events.some((e) => e.type === "turn.ended"));
+      expect(hive.card(id).chat.at(-1)).toMatchObject({
+        kind: "error",
+        message: "The review's findings can't be sent to the spec writer: roles/spec-writer.md is broken",
+        actions: ["review"],
+      });
+      expect(hive.card(id)).toMatchObject({ state: "needs-you", turnRunning: false });
+      expect(hive.card(id).spec!.review).not.toBe("applying");
+      expect(events.filter((e) => e.type === "chat.activity").at(-1)).toMatchObject({ text: null });
+      expect(events.some((e) => e.type === "turn.started")).toBe(false);
+
+      brokenRoles.clear();
+      hive.review(id);
+      expect(runner.last.request.role.name).toBe("spec-reviewer");
     });
 
     it("offers Review again when the reviewer is blocked or returns no report", async () => {

@@ -40,6 +40,9 @@ interface Props {
   sendRowEnd?: ReactNode;
 }
 
+/** The log's line while a turn runs and nothing else shows (docs/specs/2026-11-28-instant-feedback-on-message.md). */
+const WORKING = "thinking…";
+
 /** How far short of the bottom still counts as the bottom, in pixels. */
 const BOTTOM_SLACK = 8;
 
@@ -89,6 +92,8 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
   const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
+  // A tool's line wins; otherwise a running turn with no text streaming and no question waiting is thinking.
+  const line = activity ?? (detail.turnRunning && !streaming && !detail.pending ? WORKING : null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [unseen, setUnseen] = useState(false);
@@ -117,7 +122,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
       (streaming !== "" && streaming !== before.streaming) ||
       (pending !== undefined && pending !== before.pending);
     if (added) setUnseen(true);
-  }, [detail.chat.length, streaming, detail.pending?.id, activity]);
+  }, [detail.chat.length, streaming, detail.pending?.id, line]);
 
   // The log's own box changes size when the window does, or when the footer grows (a hint, Stop, an error line, a
   // taller reply box). No scroll event says so, so keep the log at its bottom here if it was there.
@@ -190,7 +195,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
               {streaming}
             </ChatBubble>
           ) : null}
-          {activity ? <p className={styles.activity}>{activity}</p> : null}
+          {line ? <p className={styles.activity}>{line}</p> : null}
           {detail.pending ? <PendingCard item={detail.pending} onError={setError} /> : null}
         </div>
         {unseen ? (

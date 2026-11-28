@@ -2,7 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HiveEvent } from "@hive/shared";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
 import * as git from "./git";
@@ -41,16 +42,21 @@ describe("Build lane", () => {
   let repo: TempRepo;
   let format: ReturnType<typeof makeSpecFormat>;
   let brokenRoles: Set<string>;
+  let hub: EventHub;
+  let events: HiveEvent[];
 
   const role = (name: string): Role => {
     if (brokenRoles.has(name)) throw new Error(`roles/${name}.md is broken`);
     return { name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "conversation", instructions: `Be the ${name}.` };
   };
   const newHive = () =>
-    new Hive({ db, hub: new EventHub(), git, runner, probe: new FakeProbe(), role, log: () => {}, specFormatDir: format.dir, today: () => "2026-11-26" });
+    new Hive({ db, hub, git, runner, probe: new FakeProbe(), role, log: () => {}, specFormatDir: format.dir, today: () => "2026-11-26" });
 
   beforeEach(() => {
     db = new HiveDb(":memory:");
+    hub = new EventHub();
+    events = [];
+    hub.subscribe((e) => events.push(e));
     runner = new FakeRunner();
     brokenRoles = new Set();
     format = makeSpecFormat();
@@ -169,6 +175,36 @@ describe("Build lane", () => {
       hive.retry(s.id);
       await waitFor(() => turnsOf("developer").length === 1);
       expect(lastOf("developer").request.message).toContain("Bringing in main");
+    });
+  });
+
+  describe("announcing Build's turn", () => {
+    it("Retry after a failed start emits turn.started at once, before the merge, and turn.ended once the developer ends", async () => {
+      const s = await inPlan();
+      brokenRoles.add("developer");
+      await s.planner.end({ kind: "ok", report: plan });
+      await waitFor(() => hive.card(s.id).chat.some((c) => c.kind === "error"));
+      brokenRoles.clear();
+      events.length = 0;
+      hive.retry(s.id);
+      expect(events.map((e) => e.type)).toContain("turn.started");
+      expect(turnsOf("developer")).toHaveLength(0);
+      await waitFor(() => turnsOf("developer").length === 1);
+      expect(events.filter((e) => e.type === "turn.ended")).toHaveLength(0);
+      await endTurn(lastOf("developer"), { kind: "error", message: "cut off" }, s.id);
+      expect(events.filter((e) => e.type === "turn.ended")).toHaveLength(1);
+    });
+
+    it("emits one turn.ended when the runner can't start the developer, and offers Retry", async () => {
+      const s = await inPlan();
+      vi.spyOn(runner, "start").mockImplementationOnce(() => { throw new Error("spawn failed"); });
+      events.length = 0;
+      await s.planner.end({ kind: "ok", report: plan });
+      await waitFor(() => hive.card(s.id).chat.some((c) => c.kind === "error"));
+      expect(events.filter((e) => e.type === "turn.ended")).toHaveLength(1);
+      expect(hive.card(s.id).chat.at(-1)).toMatchObject({
+        kind: "error", message: expect.stringContaining("Build couldn't start: spawn failed"), actions: ["retry"],
+      });
     });
   });
 

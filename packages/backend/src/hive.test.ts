@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HiveEvent } from "@hive/shared";
 import { HiveDb } from "./db";
 import { EventHub } from "./events";
@@ -7,7 +7,11 @@ import * as git from "./git";
 import { answerAsMessage, Hive, HttpError } from "./hive";
 import { FakeProbe, FakeRunner, makeRepo, settle, type TempRepo, waitFor } from "./testing";
 
-const role = (name: string) => ({ name, model: "opus", kind: "conversation", instructions: "Be a product owner." });
+const brokenRoles = new Set<string>();
+const role = (name: string) => {
+  if (brokenRoles.has(name)) throw new Error(`roles/${name}.md is broken`);
+  return { name, model: "opus", kind: "conversation", instructions: "Be a product owner." };
+};
 
 describe("Hive", () => {
   let db: HiveDb;
@@ -21,6 +25,7 @@ describe("Hive", () => {
   const newHive = () => new Hive({ db, hub, git, runner, probe, role, log: () => {}, specFormatDir: "/nonexistent" });
 
   beforeEach(() => {
+    brokenRoles.clear();
     db = new HiveDb(":memory:");
     hub = new EventHub();
     runner = new FakeRunner();
@@ -220,6 +225,34 @@ describe("Hive", () => {
       expect(after.turnRunning).toBe(false);
       expect(events.map((e) => e.type)).toContain("chat.delta");
       expect(events.filter((e) => e.type === "chat.activity").at(-1)).toMatchObject({ text: null });
+    });
+
+    it("leaves no mark when the role file is broken: the send throws and nothing is running", async () => {
+      const { card, turn } = await inRefine();
+      await turn.end();
+      const sessionId = db.getSessionFor(card.id, "refine", "product-owner")!.id;
+      brokenRoles.add("product-owner");
+      events.length = 0;
+      expect(() => hive.sendMessage(card.id, "Per printer, please")).toThrow(/broken/);
+      expect(events.some((e) => e.type === "turn.started")).toBe(false);
+      expect(db.getSession(sessionId)!.turnRunning).toBe(false);
+      // Still stored, so Retry after a turn that couldn't start sends this message again.
+      expect(db.getSession(sessionId)!.lastMessage).toBe("Per printer, please");
+      expect(hive.card(card.id)).toMatchObject({ turnRunning: false, state: "needs-you" });
+    });
+
+    it("takes the mark back when the runner can't start the turn, and ends the turn after it started", async () => {
+      const { card, turn } = await inRefine();
+      await turn.end();
+      const sessionId = db.getSessionFor(card.id, "refine", "product-owner")!.id;
+      vi.spyOn(runner, "start").mockImplementationOnce(() => { throw new Error("spawn failed"); });
+      events.length = 0;
+      expect(() => hive.sendMessage(card.id, "Per printer, please")).toThrow(/spawn failed/);
+      expect(db.getSession(sessionId)!.turnRunning).toBe(false);
+      expect(hive.card(card.id)).toMatchObject({ turnRunning: false, state: "needs-you" });
+      const types = events.map((e) => e.type);
+      expect(types.indexOf("turn.started")).toBeGreaterThanOrEqual(0);
+      expect(types.indexOf("turn.ended")).toBeGreaterThan(types.indexOf("turn.started"));
     });
 
     it("saves the brief from write_brief and renames the card", async () => {

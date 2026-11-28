@@ -174,6 +174,7 @@ export class SdkRunner implements SessionRunner {
       };
       let outcome: TurnOutcome = { kind: "error", message: "The turn ended without a result." };
       const checklist = new ChecklistReader();
+      const openTools = new Set<string>(); // the session's own tool calls still waiting for a result
       try {
         for await (const m of q as AsyncIterable<SDKMessage>) {
           if (m.type === "stream_event") {
@@ -189,6 +190,7 @@ export class SdkRunner implements SessionRunner {
               if (block.type === "tool_use") {
                 const input = block.input as Record<string, unknown>;
                 handlers.onActivity(describeTool(block.name, input, request.cwd));
+                openTools.add(block.id);
                 const change = checklist.toolUse(block.name, block.id, input);
                 if (change) handlers.onChecklist(change);
               }
@@ -207,6 +209,9 @@ export class SdkRunner implements SessionRunner {
               const change = checklist.toolResult(block.tool_use_id, structured, block.is_error === true, resultText);
               if (change) handlers.onChecklist(change);
             }
+            // A tool's line ends with its result, once no call of the session's own is still open.
+            for (const block of results) openTools.delete(block.tool_use_id);
+            if (results.length > 0 && openTools.size === 0) handlers.onActivity(null);
           } else if (m.type === "result") {
             if (interruptRequested) {
               outcome = { kind: "ok", interrupted: true };

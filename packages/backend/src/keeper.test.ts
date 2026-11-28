@@ -43,13 +43,18 @@ describe("the spec keeper", () => {
   let hub: EventHub;
   let events: HiveEvent[];
 
-  const role = (name: string): Role =>
-    ({ name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "work", instructions: `Be the ${name}.` });
+  let brokenRoles: Set<string>;
+
+  const role = (name: string): Role => {
+    if (brokenRoles.has(name)) throw new Error(`roles/${name}.md is broken`);
+    return { name, model: "opus", kind: name === "spec-reviewer" ? "one-off" : "work", instructions: `Be the ${name}.` };
+  };
   const newHive = () =>
     new Hive({ db, hub, git, runner, probe: new FakeProbe(), role, log: () => {}, specFormatDir: format.dir, today: () => "2026-11-28" });
 
   beforeEach(() => {
     db = new HiveDb(":memory:");
+    brokenRoles = new Set();
     runner = new FakeRunner();
     hub = new EventHub();
     events = [];
@@ -298,6 +303,21 @@ describe("the spec keeper", () => {
       expect(message).toContain('The person said: Neither: use a dropdown');
     });
 
+    it("Retry after a broken spec-writer role file sends your answers, not the keeper's last message", async () => {
+      const { id } = await asked();
+      brokenRoles.add("spec-writer");
+      answer(id, ["Keep it as built"]);
+      await waitFor(() => hive.card(id).chat.at(-1)?.kind === "error");
+      expect(hive.card(id).chat.at(-1)).toMatchObject({ kind: "error", actions: expect.arrayContaining(["retry"]) });
+      expect(hive.card(id)).toMatchObject({ state: "needs-you", turnRunning: false });
+
+      brokenRoles.clear();
+      const keepers = turnsOf("spec-writer").length;
+      await hive.retry(id);
+      expect(turnsOf("spec-writer")).toHaveLength(keepers + 1);
+      expect(lastOf("spec-writer").request.message).toContain("keep it as built: change the spec to describe what was built");
+    });
+
     it("Keep it as built on a no-change issue needs no spec change and no turn", async () => {
       const { id } = await asked("no-change");
       const turns = runner.turns.length;
@@ -411,6 +431,22 @@ describe("the spec keeper", () => {
       expect(lastOf("developer").request.message).toMatch(/^The spec keeper changed the spec: Use prefs\.json\./);
       expect(sh(worktree, "log", "-1", "--format=%s")).toBe("Spec keeper: Printer font size");
       expect(hive.card(id).issues.at(-1)).toMatchObject({ status: "spec-fixed" });
+    });
+
+    it("Retry after a broken developer role file sends the keeper's verdict, not the developer's old message", async () => {
+      const { id, keeper } = await blocked();
+      brokenRoles.add("developer");
+      await keeper.end({ kind: "ok", report: keeperReport(keeper.request.message, () => ({ verdict: "code-wrong", reason: "The table is in migration 12." })) });
+      await waitFor(() => hive.card(id).chat.at(-1)?.kind === "error");
+      expect(hive.card(id).chat.at(-1)).toMatchObject({
+        kind: "error", message: expect.stringContaining("The developer couldn't carry on"), actions: ["retry", "back-to-spec"],
+      });
+      expect(turnsOf("developer")).toHaveLength(1);
+
+      brokenRoles.clear();
+      await hive.retry(id);
+      await waitFor(() => turnsOf("developer").length === 2);
+      expect(lastOf("developer").request.message).toMatch(/^The spec stands: The table is in migration 12\./);
     });
 
     it("falls back to Retry and Back to Spec on no-change, and on a second block in the same visit", async () => {

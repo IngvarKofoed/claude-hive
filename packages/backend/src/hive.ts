@@ -1187,7 +1187,14 @@ export class Hive {
     }
     this.db.updateCard(cardId, { reviewApplying: true });
     const writer = this.db.getSessionFor(cardId, "spec", LANE_ROLE.spec!)!;
-    this.startTurn(cardId, writer.id, findingsMessage(report.findings), options);
+    // A start that fails (a role file broken since the review began) must not leave this turn-end handler early: the
+    // reviewer's turn has already left `turns`, so its turn.ended still has to follow, with Review again to offer.
+    try {
+      this.startTurn(cardId, writer.id, findingsMessage(report.findings), options);
+    } catch (error) {
+      this.db.updateCard(cardId, { reviewApplying: false });
+      return again(`The review's findings can't be sent to the spec writer: ${(error as Error).message}`);
+    }
   }
 
   /** The spec writer's turn ended. If it was the review turn, only a finished one makes the spec reviewed. */
@@ -1903,6 +1910,7 @@ export class Hive {
     const roleName = LANE_ROLE.build!;
     this.starting.add(cardId);
     this.setState(cardId, "working");
+    this.deps.hub.emit({ type: "turn.started", cardId }); // so a start with no lane change shows the line during the merge
     try {
       const entering = this.requireCard(cardId);
       const feedback = entering.feedback;
@@ -2782,42 +2790,57 @@ export class Hive {
     const chatLane = keeper ? card.lane : session.lane;
     const author: ChatAuthor = keeper ? "spec-keeper" : AUTHOR[session.role] ?? "hive";
     const hiveTools = this.hiveToolsFor(session.role, cardId);
-    this.db.updateSession(sessionId, { turnRunning: true, lastMessage: message });
+    // Stored first: Retry after a turn that couldn't start sends this message again.
+    this.db.updateSession(sessionId, { lastMessage: message });
+    // Resolved before the turn is marked running, so a broken role file leaves no running turn behind.
+    const role = this.deps.role(session.role);
+    this.db.updateSession(sessionId, { turnRunning: true });
     this.withdrawn.delete(sessionId);
     if (!background) {
       this.setState(cardId, "working");
       this.deps.hub.emit({ type: "turn.started", cardId });
     }
 
-    const turn: RunningTurn = this.deps.runner.start(
-      {
-        sessionId,
-        resume: session.existsYet,
-        cwd: card.worktreePath!,
-        role: this.deps.role(session.role),
-        message,
-        ...(hiveTools ? { hiveTools } : {}),
-        ...turnOptions,
-      },
-      {
-        onTextDelta: (text) => {
-          if (!quiet) this.deps.hub.emit({ type: "chat.delta", cardId, text });
+    let turn: RunningTurn;
+    try {
+      turn = this.deps.runner.start(
+        {
+          sessionId,
+          resume: session.existsYet,
+          cwd: card.worktreePath!,
+          role,
+          message,
+          ...(hiveTools ? { hiveTools } : {}),
+          ...turnOptions,
         },
-        onTextBlock: (text) => {
-          // An interrupted turn of a card being deleted may still flush a block: there's no card to write it to.
-          if (!quiet && !this.deleting.has(cardId)) this.addChat(cardId, chatLane, author, text);
+        {
+          onTextDelta: (text) => {
+            if (!quiet) this.deps.hub.emit({ type: "chat.delta", cardId, text });
+          },
+          onTextBlock: (text) => {
+            // An interrupted turn of a card being deleted may still flush a block: there's no card to write it to.
+            if (!quiet && !this.deleting.has(cardId)) this.addChat(cardId, chatLane, author, text);
+          },
+          onActivity: (text) => {
+            if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
+          },
+          // Only the developer's list is shown (docs/specs/2026-11-28-build-lane-checklist.md).
+          onChecklist: (change) => {
+            if (session.role === LANE_ROLE.build && !this.deleting.has(cardId)) this.changeChecklist(cardId, change);
+          },
+          onSessionCreated: () => this.db.updateSession(sessionId, { existsYet: true }),
+          canUseTool: (toolName, input, signal) => this.canUseTool(cardId, session, toolName, input, signal),
         },
-        onActivity: (text) => {
-          if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
-        },
-        // Only the developer's list is shown (docs/specs/2026-11-28-build-lane-checklist.md).
-        onChecklist: (change) => {
-          if (session.role === LANE_ROLE.build && !this.deleting.has(cardId)) this.changeChecklist(cardId, change);
-        },
-        onSessionCreated: () => this.db.updateSession(sessionId, { existsYet: true }),
-        canUseTool: (toolName, input, signal) => this.canUseTool(cardId, session, toolName, input, signal),
-      },
-    );
+      );
+    } catch (error) {
+      // The turn never started: take its mark back, the way a turn's normal end does. No error line: callers report it.
+      this.db.updateSession(sessionId, { turnRunning: false });
+      if (!background && !this.anyTurnRunning(cardId)) {
+        this.setState(cardId, "needs-you");
+        this.deps.hub.emit({ type: "turn.ended", cardId });
+      }
+      throw error;
+    }
     this.turns.set(sessionId, turn);
     if (session.lane === "spec") this.refreshSpec(cardId);
     if (session.role === SETUP) {
