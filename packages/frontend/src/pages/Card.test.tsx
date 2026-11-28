@@ -1,10 +1,15 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { useRef, type ReactNode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CardDetail } from "@hive/shared";
+import type { CardDetail, ErrorAction, ForYouItem, PendingItem, ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
 import type { CardLive } from "../components/cardState";
+import { ForYouProvider, useForYou } from "../components/forYou";
+import { tagText } from "../components/ForYouEntry";
+import { FROM_FOR_YOU } from "../components/fromForYou";
 import { Card, LaneView, lookBackLanes } from "./Card";
+import { ForYou } from "./ForYou";
 import { skippedLanes } from "../components/skippedLanes";
 
 // The full page is rendered with its header stubbed and its live state handed in, so these tests reach no backend.
@@ -493,5 +498,328 @@ describe("the card page's chat panels", () => {
     show({ lane: "ship" });
     await screen.findByRole("button", { name: "Land on main" });
     expect(screen.getByRole("log").closest("[data-framed]")).toBeNull();
+  });
+});
+
+// docs/specs/2026-11-28-back-to-for-you-after-a-lane-action.md
+describe("back to For you after a lane action", () => {
+  type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+  const deferred = <T,>(): Deferred<T> => {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  const entry = (kind: ForYouItem["kind"], lane: CardDetail["lane"]): ForYouItem => ({
+    card: { id: "c1", projectId: "p1", title: "T", lane, state: "needs-you", moveError: null },
+    projectName: "m",
+    since: new Date().toISOString(),
+    kind,
+    text: "Waiting for you",
+    pending: null,
+    actions: [],
+  });
+  const cleanPlan: ShipPlan = {
+    base: "origin/main",
+    uncommitted: [],
+    unpushed: 0,
+    tests: "npm test",
+    noTestsReason: null,
+    checkoutBlocks: false,
+    busy: false,
+  };
+  const errorLine = (...actions: ErrorAction[]) =>
+    ({ kind: "error", id: "e1", at: "t", message: "The turn failed.", actions }) as const;
+  const refineCard: CardDetail = { ...detail, lane: "refine", chat: [chat("product-owner", "Ready when you are.", "p1")] };
+  const tryItCard: CardDetail = { ...specCard, lane: "tryit", spec: { ...specCard.spec!, review: "fresh" }, chat: [] };
+
+  let go: (to: string) => void = () => {};
+  function Nav() {
+    const navigate = useNavigate();
+    go = (to) => void navigate(to);
+    return null;
+  }
+  function Where() {
+    return <p data-testid="where">{useLocation().pathname}</p>;
+  }
+  const where = () => screen.getByTestId("where").textContent;
+
+  /** The card page inside the app's providers, with a stand-in For you page unless one is given. */
+  function open(card: CardDetail, opts: { url?: string; state?: unknown; forYou?: ReactNode } = {}) {
+    const { url = "/cards/c1", forYou = <p>For you page</p> } = opts;
+    // An explicit `state: undefined` is a visit with no state, not a default.
+    const state = "state" in opts ? opts.state : FROM_FOR_YOU;
+    liveCard.current = { detail: card, streaming: "", activity: null };
+    const [pathname, search = ""] = url.split("?");
+    render(
+      <MemoryRouter initialEntries={[{ pathname, search: search ? `?${search}` : "", state }]}>
+        <ForYouProvider>
+          <Nav />
+          <Where />
+          <Routes>
+            <Route path="/cards/:id" element={<Card />} />
+            <Route path="/for-you" element={forYou} />
+          </Routes>
+        </ForYouProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("goes back to For you after Good, once the list has reloaded, and the card isn't listed (How to verify 1)", async () => {
+    const reloaded = deferred<{ items: ForYouItem[] }>();
+    const forYou = vi
+      .spyOn(api, "forYou")
+      .mockResolvedValueOnce({ items: [entry("your-turn", "refine")] })
+      .mockReturnValueOnce(reloaded.promise);
+    const good = vi.spyOn(api, "good").mockResolvedValue({} as never);
+    open(refineCard, { forYou: <ForYou /> });
+    await waitFor(() => expect(forYou).toHaveBeenCalledTimes(1));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Good · on to Mockup" })));
+    expect(good).toHaveBeenCalledWith("c1", { skipMockup: false });
+    expect(forYou).toHaveBeenCalledTimes(2);
+    // The reload is held: still on the card.
+    expect(where()).toBe("/cards/c1");
+    expect(screen.getByRole("heading", { name: "Product owner" })).toBeInTheDocument();
+    await act(async () => reloaded.resolve({ items: [] }));
+    expect(where()).toBe("/for-you");
+    expect(screen.getByRole("heading", { name: "For you" })).toBeInTheDocument();
+    expect(screen.queryByText("m · T")).toBeNull();
+  });
+
+  it("keeps the memory while looking back at a lane, and goes back to For you after Review (How to verify 2)", async () => {
+    for (const way of ["Back to Spec link", "● Spec in the strip"]) {
+      const forYou = vi
+        .spyOn(api, "forYou")
+        .mockResolvedValueOnce({ items: [entry("your-turn", "spec")] })
+        .mockResolvedValueOnce({ items: [] });
+      vi.spyOn(api, "review").mockResolvedValue({} as never);
+      open(specCard, { forYou: <ForYou /> });
+      await waitFor(() => expect(forYou).toHaveBeenCalledTimes(1));
+      const strip = screen.getByRole("list", { name: "Lanes" });
+      fireEvent.click(within(strip).getByRole("link", { name: "✓ Refine" }));
+      expect(screen.getByText(/Looking back at Refine/)).toBeInTheDocument();
+      if (way === "Back to Spec link") fireEvent.click(screen.getByRole("link", { name: "Back to Spec" }));
+      else fireEvent.click(within(strip).getByRole("link", { name: "● Spec" }));
+      expect(screen.queryByText(/Looking back/)).toBeNull();
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Review" })));
+      await waitFor(() => expect(where()).toBe("/for-you"));
+      expect(forYou).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Nothing is waiting for you. Everything is running on its own.")).toBeInTheDocument();
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("lands on a fresh For you after Accept, with the card as Ship · land on main from the first render (How to verify 3)", async () => {
+    const firstRender: string[][] = [];
+    function FirstRender() {
+      const { items } = useForYou();
+      const seen = useRef(false);
+      if (!seen.current) {
+        seen.current = true;
+        firstRender.push(items.map(tagText));
+      }
+      return <ForYou />;
+    }
+    vi.spyOn(api, "forYou")
+      .mockResolvedValueOnce({ items: [entry("try-it", "tryit")] })
+      .mockResolvedValueOnce({ items: [entry("land", "ship")] });
+    vi.spyOn(api, "accept").mockResolvedValue({} as never);
+    open(tryItCard, { forYou: <FirstRender /> });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Accept" })));
+    await waitFor(() => expect(where()).toBe("/for-you"));
+    expect(firstRender).toEqual([["Ship · land on main"]]);
+    expect(screen.getByText("Ship · land on main")).toBeInTheDocument();
+  });
+
+  it("stays on the card with the refusal when Land on main is refused (How to verify 4)", async () => {
+    const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [entry("land", "ship")] });
+    vi.spyOn(api, "shipPlan").mockResolvedValue(cleanPlan);
+    const land = vi
+      .spyOn(api, "land")
+      .mockRejectedValue(new Error("The card's worktree has uncommitted work. Commit it, or discard it and land."));
+    open({ ...detail, lane: "ship" });
+    const button = await screen.findByRole("button", { name: "Land on main" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => fireEvent.click(button));
+    expect(land).toHaveBeenCalledWith("c1");
+    expect(await screen.findByRole("alert")).toHaveTextContent("uncommitted work");
+    expect(where()).toBe("/cards/c1");
+    expect(forYou).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays on a card opened from the board or a typed address (How to verify 5)", async () => {
+    for (const state of [null, undefined, { from: "board" }]) {
+      const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [entry("your-turn", "refine")] });
+      const good = vi.spyOn(api, "good").mockResolvedValue({} as never);
+      open(refineCard, { state });
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Good · on to Mockup" })));
+      expect(good).toHaveBeenCalledTimes(1);
+      expect(where()).toBe("/cards/c1");
+      expect(forYou).toHaveBeenCalledTimes(1);
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  const mockupCard: CardDetail = {
+    ...detail,
+    lane: "mockup",
+    mockup: { folder: "docs/mockups/c1", current: { kind: "pages", page: "docs/mockups/c1/index.html" }, kept: null, files: ["index.html"] },
+  };
+  const goesBack: { action: string; card: CardDetail; call: keyof typeof api; args: unknown[]; before?: () => void }[] = [
+    { action: "Good · skip to Spec", card: refineCard, call: "good", args: ["c1", { skipMockup: true }] },
+    { action: "Good · keep in docs/mockups", card: mockupCard, call: "good", args: ["c1", { keep: true }] },
+    { action: "Good · don't keep", card: mockupCard, call: "good", args: ["c1", { keep: false }] },
+    { action: "Sign off", card: { ...specCard, spec: { ...specCard.spec!, review: "fresh" } }, call: "signoff", args: ["c1"] },
+    {
+      action: "Send to Build",
+      card: tryItCard,
+      call: "feedback",
+      args: ["c1", "The label overlaps."],
+      before: () =>
+        fireEvent.change(screen.getByRole("textbox", { name: "What you found" }), { target: { value: "The label overlaps." } }),
+    },
+    { action: "Retry", card: { ...tryItCard, chat: [errorLine("retry")] }, call: "retry", args: ["c1"] },
+    { action: "Land on main", card: { ...detail, lane: "ship" }, call: "land", args: ["c1"] },
+    { action: "Back to Try it", card: { ...detail, lane: "ship" }, call: "backToTryIt", args: ["c1"] },
+    { action: "Retry", card: { ...detail, lane: "plan", chat: [errorLine("retry", "back-to-spec")] }, call: "retry", args: ["c1"] },
+    { action: "Back to Spec", card: { ...detail, lane: "build", chat: [errorLine("retry", "back-to-spec")] }, call: "backToSpec", args: ["c1"] },
+    { action: "Back to Build", card: { ...detail, lane: "check", chat: [errorLine("back-to-build", "move-on")] }, call: "backToBuild", args: ["c1"] },
+    { action: "Move on", card: { ...detail, lane: "check", chat: [errorLine("back-to-build", "move-on")] }, call: "moveOn", args: ["c1"] },
+    { action: "Review", card: { ...specCard, chat: [errorLine("review")] }, call: "review", args: ["c1"] },
+  ];
+
+  it.each(goesBack)("goes back to For you after $action in $card.lane", async ({ action, card, call, args, before }) => {
+    const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+    const spy = vi.spyOn(api, call as "retry").mockResolvedValue({} as never);
+    vi.spyOn(api, "shipPlan").mockResolvedValue(cleanPlan);
+    open(card);
+    before?.();
+    const buttons = await screen.findAllByRole("button", { name: action });
+    // Review on a Spec card with an error line shows twice: the bar's and the line's. The line's is the last.
+    const button = buttons.at(-1)!;
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => fireEvent.click(button));
+    expect(spy).toHaveBeenCalledWith(...args);
+    await waitFor(() => expect(where()).toBe("/for-you"));
+    expect(forYou).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes back to For you after Discard them and land", async () => {
+    vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "shipPlan").mockResolvedValue({ ...cleanPlan, uncommitted: ["?? notes.txt"] });
+    const land = vi.spyOn(api, "land").mockResolvedValue({ ok: true });
+    open({ ...detail, lane: "ship" });
+    const button = await screen.findByRole("button", { name: "Discard them and land" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => fireEvent.click(button));
+    expect(land).toHaveBeenCalledWith("c1", true);
+    await waitFor(() => expect(where()).toBe("/for-you"));
+  });
+
+  it("stays on the card after Stop, Send, answering a question and Try it's app Start", async () => {
+    const question: PendingItem = {
+      id: "q1",
+      kind: "question",
+      questions: [{ question: "Round up or down?", header: "Size", multiSelect: false, options: [{ label: "Up", description: "" }] }],
+    };
+    const setupDone: CardDetail["setup"] = {
+      status: "done",
+      reason: null,
+      copied: [],
+      leftOut: [],
+      installed: "npm ci",
+      start: [{ what: "app", command: "npm run dev", dir: ".", port: 5230, url: "http://localhost:5230" }],
+      test: "npm test",
+      shared: [],
+      notes: "",
+    };
+    const cases: {
+      name: string;
+      card: CardDetail;
+      prepare?: () => void;
+      press: () => void;
+      spy: () => ReturnType<typeof vi.spyOn>;
+    }[] = [
+      {
+        name: "Stop in a running Plan card's footer",
+        card: { ...detail, lane: "plan", state: "working", turnRunning: true },
+        press: () => fireEvent.click(screen.getByRole("button", { name: "Stop" })),
+        spy: () => vi.spyOn(api, "stop").mockResolvedValue({} as never),
+      },
+      {
+        name: "Stop beside Send in Refine",
+        card: { ...refineCard, state: "working", turnRunning: true },
+        press: () => fireEvent.click(screen.getByRole("button", { name: "Stop" })),
+        spy: () => vi.spyOn(api, "stop").mockResolvedValue({} as never),
+      },
+      {
+        name: "Send in Refine's chat",
+        card: refineCard,
+        prepare: () =>
+          fireEvent.change(screen.getByRole("textbox", { name: "Your reply" }), { target: { value: "Per printer." } }),
+        press: () => fireEvent.click(screen.getByRole("button", { name: "Send" })),
+        spy: () => vi.spyOn(api, "sendMessage").mockResolvedValue({} as never),
+      },
+      {
+        name: "answering a pending question",
+        card: { ...detail, lane: "plan", pending: question },
+        prepare: () => fireEvent.click(screen.getByRole("button", { name: "Up" })),
+        press: () => fireEvent.click(screen.getByRole("button", { name: "Send" })),
+        spy: () => vi.spyOn(api, "answer").mockResolvedValue({} as never),
+      },
+      {
+        name: "Try it's app Start",
+        card: { ...tryItCard, setup: setupDone },
+        press: () => fireEvent.click(screen.getByRole("button", { name: "Start" })),
+        spy: () => vi.spyOn(api, "appStart").mockResolvedValue({} as never),
+      },
+    ];
+    for (const { name, card, prepare, press, spy } of cases) {
+      const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+      const called = spy();
+      open(card);
+      prepare?.();
+      await act(async () => press());
+      expect(called, name).toHaveBeenCalled();
+      await act(async () => {});
+      expect(where(), name).toBe("/cards/c1");
+      expect(forYou, name).toHaveBeenCalledTimes(1);
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("doesn't go back when Good's answer arrives after you went to another page or card", async () => {
+    for (const elsewhere of ["/", "/cards/c2"]) {
+      const answered = deferred<unknown>();
+      const forYou = vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+      vi.spyOn(api, "good").mockReturnValue(answered.promise as never);
+      open(refineCard);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Good · on to Mockup" })));
+      act(() => go(elsewhere));
+      await act(async () => answered.resolve({}));
+      await act(async () => {});
+      expect(where(), elsewhere).toBe(elsewhere);
+      expect(forYou, elsewhere).toHaveBeenCalledTimes(1);
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("doesn't go back when the list's reload arrives after you went to another page or card", async () => {
+    for (const elsewhere of ["/", "/cards/c2"]) {
+      const reloaded = deferred<{ items: ForYouItem[] }>();
+      vi.spyOn(api, "forYou").mockResolvedValueOnce({ items: [] }).mockReturnValueOnce(reloaded.promise);
+      vi.spyOn(api, "good").mockResolvedValue({} as never);
+      open(refineCard);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Good · on to Mockup" })));
+      expect(where()).toBe("/cards/c1");
+      act(() => go(elsewhere));
+      await act(async () => reloaded.resolve({ items: [] }));
+      expect(where(), elsewhere).toBe(elsewhere);
+      cleanup();
+      vi.restoreAllMocks();
+    }
   });
 });

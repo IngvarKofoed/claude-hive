@@ -100,6 +100,87 @@ describe("ForYouProvider", () => {
     act(() => screen.getByRole("button", { name: "again" }).click());
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it("reload() overtaken by an event's load resolves only once the newer response is applied", async () => {
+    const resolvers: ((r: ForYouResponse) => void)[] = [];
+    vi.spyOn(api, "forYou").mockImplementation(() => new Promise((r) => resolvers.push(r)));
+    let reload: () => Promise<void> = async () => {};
+    function Grab() {
+      reload = useForYou().reload;
+      return null;
+    }
+    render(
+      <ForYouProvider>
+        <Probe />
+        <Grab />
+      </ForYouProvider>,
+    );
+    await act(async () => resolvers[0]!({ items: [] }));
+    let settled = false;
+    act(() => {
+      void reload().then(() => {
+        settled = true;
+      });
+    });
+    // The action's own event starts a newer load before the reload's response arrives.
+    act(() => {
+      listeners.forEach((l) => l({ type: "card.updated", card: item("a").card }));
+    });
+    // The mocked event hook keeps every render's handler, so one event may start more than one load: the last is newest.
+    expect(resolvers.length).toBeGreaterThanOrEqual(3);
+    const newest = resolvers.at(-1)!;
+    // The reload's own response, and any other overtaken one, is superseded: it isn't shown, and the reload hasn't settled.
+    for (const resolve of resolvers.slice(1, -1)) await act(async () => resolve({ items: [item("stale")] }));
+    expect(settled).toBe(false);
+    expect(screen.getByText("count 0")).toBeTruthy();
+    await act(async () => newest({ items: [item("a"), item("b")] }));
+    expect(settled).toBe(true);
+    expect(screen.getByText("count 2")).toBeTruthy();
+  });
+
+  it("reload() overtaken by a load that fails still resolves, with the error set", async () => {
+    const calls: { resolve: (r: ForYouResponse) => void; reject: (e: Error) => void }[] = [];
+    vi.spyOn(api, "forYou").mockImplementation(
+      () => new Promise((resolve, reject) => calls.push({ resolve, reject })),
+    );
+    let value: ReturnType<typeof useForYou> | null = null;
+    function Grab() {
+      value = useForYou();
+      return null;
+    }
+    render(
+      <ForYouProvider>
+        <Grab />
+      </ForYouProvider>,
+    );
+    let settled = false;
+    act(() => {
+      void value!.reload().then(() => {
+        settled = true;
+      });
+    });
+    act(() => {
+      listeners.forEach((l) => l({ type: "pending.updated", cardId: "a", pending: null }));
+    });
+    for (const call of calls.slice(1, -1)) await act(async () => call.reject(new Error("first")));
+    expect(settled).toBe(false);
+    await act(async () => calls.at(-1)!.reject(new Error("Down.")));
+    expect(settled).toBe(true);
+    expect(value!.error).toBe("Down.");
+    await act(async () => calls[0]!.resolve({ items: [] }));
+  });
+
+  it("reload() outside a provider resolves and fetches nothing", async () => {
+    const spy = vi.spyOn(api, "forYou").mockResolvedValue({ items: [] });
+    let reload: () => Promise<void> = () => Promise.reject(new Error("not grabbed"));
+    function Grab() {
+      reload = useForYou().reload;
+      return null;
+    }
+    render(<Grab />);
+    await expect(reload()).resolves.toBeUndefined();
+    expect(spy).not.toHaveBeenCalled();
+  });
 });
 
 describe("Header For you link", () => {

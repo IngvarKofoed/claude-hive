@@ -1,5 +1,7 @@
 // The card page's and For you's side of the lane actions (docs/specs/2026-11-28-for-you-actions.md): the definition in
-// packages/shared, read from the live CardDetail, and the api call behind each action that takes no body.
+// packages/shared, read from the live CardDetail, the api call behind each action that takes no body, and the context
+// a card-page component reports a pressed action through.
+import { createContext, useContext } from "react";
 import { laneActions, type CardDetail, type LaneActionId, type LaneActionState, type ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
 
@@ -67,3 +69,16 @@ export const LANE_ACTION_CALLS: Record<LaneActionCall, (cardId: string) => Promi
   "back-to-tryit": (id) => api.backToTryIt(id),
   stop: (id) => api.stop(id),
 };
+
+/**
+ * What a component calls after a lane action's call resolved, Stop included, and never after a refusal
+ * (docs/specs/2026-11-28-back-to-for-you-after-a-lane-action.md). The Card page provides it and decides what follows;
+ * outside it, as on For you and in a component's own tests, it does nothing.
+ */
+const LaneActionDone = createContext<(id: LaneActionId) => void>(() => {});
+export const LaneActionDoneProvider = LaneActionDone.Provider;
+
+/** The page's handler for a lane action that succeeded. */
+export function useLaneActionDone(): (id: LaneActionId) => void {
+  return useContext(LaneActionDone);
+}

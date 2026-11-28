@@ -4,6 +4,7 @@ import { LANES, type ForYouItem, type ForYouKind, type LaneActionState } from "@
 import { ago } from "./ago";
 import { Button } from "./ui/Button";
 import { useForYou } from "./forYou";
+import { FROM_FOR_YOU } from "./fromForYou";
 import { LANE_ACTION_CALLS, type LaneActionCall } from "./laneActions";
 import { LandConfirm } from "./LandConfirm";
 import { PendingCard } from "./PendingCard";
@@ -105,6 +106,8 @@ export function ForYouEntry({ item, nowMs }: { item: ForYouItem; nowMs: number }
             ))}
             <Link
               to={`/cards/${item.card.id}`}
+              // The card page reads this, and takes you back here after a lane action.
+              state={FROM_FOR_YOU}
               className={styles.link}
               data-secondary={answered || actions.length > 0 || undefined}
             >

@@ -7,11 +7,15 @@ export interface ForYouValue {
   items: ForYouItem[];
   loaded: boolean;
   error: string | null;
-  /** Fetch the list again, after you pressed something that moves a card. */
-  reload: () => void;
+  /**
+   * Fetch the list again, after you pressed something that moves a card. The promise resolves once the newest load has
+   * settled, even when a later load (an event's) supersedes this one, so the list is then the one For you shows. It
+   * never rejects: a failed load sets `error`. Outside a provider it resolves at once and fetches nothing.
+   */
+  reload: () => Promise<void>;
 }
 
-const EMPTY: ForYouValue = { items: [], loaded: false, error: null, reload: () => {} };
+const EMPTY: ForYouValue = { items: [], loaded: false, error: null, reload: async () => {} };
 const ForYouContext = createContext<ForYouValue>(EMPTY);
 
 /** Everything waiting for you, kept fresh from the event stream. Outside a provider it is empty and quiet. */
@@ -24,20 +28,26 @@ export function ForYouProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counter = useRef(0);
+  // The newest load's promise: a load that a newer one supersedes settles with it, not on its own stale response.
+  const latest = useRef<Promise<void>>(Promise.resolve());
 
-  const load = useCallback(async () => {
+  const load = useCallback((): Promise<void> => {
     const mine = ++counter.current;
-    try {
-      const response = await api.forYou();
-      if (mine !== counter.current) return;
-      setItems(response.items);
-      setError(null);
-    } catch (err) {
-      if (mine !== counter.current) return;
-      setError(err instanceof Error ? err.message : "Could not load what is waiting for you.");
-    } finally {
-      if (mine === counter.current) setLoaded(true);
-    }
+    const run = (async (): Promise<void> => {
+      try {
+        const response = await api.forYou();
+        if (mine !== counter.current) return latest.current;
+        setItems(response.items);
+        setError(null);
+      } catch (err) {
+        if (mine !== counter.current) return latest.current;
+        setError(err instanceof Error ? err.message : "Could not load what is waiting for you.");
+      } finally {
+        if (mine === counter.current) setLoaded(true);
+      }
+    })();
+    latest.current = run;
+    return run;
   }, []);
 
   useEffect(() => {
@@ -57,6 +67,6 @@ export function ForYouProvider({ children }: { children: ReactNode }) {
       void load();
   });
 
-  const value = useMemo(() => ({ items, loaded, error, reload: () => void load() }), [items, loaded, error, load]);
+  const value = useMemo(() => ({ items, loaded, error, reload: load }), [items, loaded, error, load]);
   return <ForYouContext.Provider value={value}>{children}</ForYouContext.Provider>;
 }

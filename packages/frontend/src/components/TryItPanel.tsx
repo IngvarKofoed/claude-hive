@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { CardDetail } from "@hive/shared";
+import type { CardDetail, LaneActionId } from "@hive/shared";
 import { api } from "../api/client";
-import { actionOf, laneActionsFor } from "./laneActions";
+import { actionOf, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { outcomeSection } from "./outcome";
 import { PendingCard } from "./PendingCard";
 import { Badge } from "./ui/Badge";
@@ -161,6 +161,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const laneActionDone = useLaneActionDone();
   const guide = outcomeSection(detail.spec?.text ?? null);
   const actions = laneActionsFor(detail, { hasFeedback: text.trim() !== "" });
   const sendToBuild = actionOf(actions, "send-to-build");
@@ -172,13 +173,14 @@ export function TryItPanel({ detail, onMoved }: Props) {
   const whyDisabled = sendToBuild?.reason ?? accept?.reason ?? null;
   const earlier = detail.history.tryit.flatMap((round) => (round.kind === "feedback" ? [round.text] : []));
 
-  async function run(action: () => Promise<unknown>, after?: () => void) {
+  async function run(id: LaneActionId, action: () => Promise<unknown>, after?: () => void) {
     setError(null);
     setBusy(true);
     try {
       await action();
       after?.();
       onMoved();
+      laneActionDone(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -200,7 +202,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
                 compact
                 disabled={!retry?.enabled}
                 title={retry?.reason ?? undefined}
-                onClick={() => run(() => api.retry(detail.id))}
+                onClick={() => run("retry", () => api.retry(detail.id))}
               >
                 {retry?.label}
               </Button>
@@ -232,6 +234,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
               title={sendToBuild?.reason ?? undefined}
               onClick={() =>
                 run(
+                  "send-to-build",
                   () => api.feedback(detail.id, text.trim()),
                   () => setText(""),
                 )
@@ -242,7 +245,7 @@ export function TryItPanel({ detail, onMoved }: Props) {
             <Button
               disabled={busy || !accept?.enabled}
               title={accept?.reason ?? undefined}
-              onClick={() => run(() => api.accept(detail.id))}
+              onClick={() => run("accept", () => api.accept(detail.id))}
             >
               {accept?.label}
             </Button>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CardDetail, LaneActionState } from "@hive/shared";
-import { LANE_ACTION_CALLS, laneActionsFor } from "./laneActions";
+import { LANE_ACTION_CALLS, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { Button } from "./ui/Button";
 import styles from "./GoodBar.module.css";
 
@@ -10,6 +10,7 @@ import styles from "./GoodBar.module.css";
  */
 export function GoodBar({ detail, onMoved }: { detail: CardDetail; onMoved: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  const laneActionDone = useLaneActionDone();
   const actions = laneActionsFor(detail).filter((action) => action.id === "good" || action.id === "skip-mockup");
   const blocked = actions.find((action) => !action.enabled)?.reason ?? null;
 
@@ -18,6 +19,7 @@ export function GoodBar({ detail, onMoved }: { detail: CardDetail; onMoved: () =
     try {
       await LANE_ACTION_CALLS[action.id as "good" | "skip-mockup"](detail.id);
       onMoved();
+      laneActionDone(action.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not move the card.");
     }

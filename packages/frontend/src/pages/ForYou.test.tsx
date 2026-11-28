@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ForYouItem } from "@hive/shared";
 
@@ -13,6 +13,7 @@ vi.mock("../api/events", () => ({
 import { api } from "../api/client";
 import { ForYouProvider } from "../components/forYou";
 import { ForYouEntry } from "../components/ForYouEntry";
+import { cameFromForYou } from "../components/fromForYou";
 import { ForYou } from "./ForYou";
 
 const base = (id: string, kind: ForYouItem["kind"], lane: ForYouItem["card"]["lane"], text: string): ForYouItem => ({
@@ -56,6 +57,43 @@ describe("ForYou page", () => {
     expect(screen.getByRole("link", { name: "Try it" }).getAttribute("href")).toBe("/cards/a");
     expect(screen.getByRole("link", { name: "Open the chat" }).getAttribute("href")).toBe("/cards/b");
     expect(screen.getByRole("link", { name: "Open the card" }).getAttribute("href")).toBe("/cards/c");
+  });
+
+  it("opens the card from an entry's link with the state that says it came from For you", async () => {
+    vi.spyOn(api, "forYou").mockResolvedValue({
+      items: [
+        base("a", "try-it", "tryit", "Test it by hand"),
+        base("b", "sign-off", "spec", "Sign the spec off"),
+        base("c", "stuck", "build", "It stopped"),
+      ],
+    });
+    function CardProbe() {
+      const location = useLocation();
+      return (
+        <p>
+          at {location.pathname} from for you: {String(cameFromForYou(location.state))}
+        </p>
+      );
+    }
+    for (const [name, id] of [
+      ["Try it", "a"],
+      ["Open the chat", "b"],
+      ["Open the card", "c"],
+    ] as const) {
+      const { unmount } = render(
+        <MemoryRouter initialEntries={["/for-you"]}>
+          <ForYouProvider>
+            <Routes>
+              <Route path="/for-you" element={<ForYou />} />
+              <Route path="/cards/:id" element={<CardProbe />} />
+            </Routes>
+          </ForYouProvider>
+        </MemoryRouter>,
+      );
+      fireEvent.click(await screen.findByRole("link", { name }));
+      expect(await screen.findByText(`at /cards/${id} from for you: true`)).toBeTruthy();
+      unmount();
+    }
   });
 
   it("renders PendingCard for a question entry", async () => {

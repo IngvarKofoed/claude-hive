@@ -1,6 +1,7 @@
-import { Link, useParams, useSearchParams } from "react-router";
+import { useCallback, useEffect, useRef } from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { api } from "../api/client";
-import { LANES, lanesBefore, type CardDetail, type Lane } from "@hive/shared";
+import { LANES, lanesBefore, type CardDetail, type Lane, type LaneActionId } from "@hive/shared";
 import { BriefPanel } from "../components/BriefPanel";
 import { BuildView } from "../components/BuildView";
 import { BuildRoundView } from "../components/BuildRoundView";
@@ -9,6 +10,9 @@ import { CheckView } from "../components/CheckView";
 import { ChecklistView } from "../components/ChecklistView";
 import { CardTitle } from "../components/CardTitle";
 import { DeleteCard } from "../components/DeleteCard";
+import { useForYou } from "../components/forYou";
+import { cameFromForYou } from "../components/fromForYou";
+import { LaneActionDoneProvider } from "../components/laneActions";
 import { Chat, PastChat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
 import { Header } from "../components/Header";
@@ -411,6 +415,30 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
 export function Card() {
   const { id } = useParams();
   const { live, error, reload, gone } = useCardLive(id);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { reload: reloadForYou } = useForYou();
+  // The card the page shows, cleared when it goes: an answer that arrives after you moved on mustn't pull you away.
+  const shownRef = useRef<string | null>(null);
+  useEffect(() => {
+    shownRef.current = id ?? null;
+    return () => {
+      shownRef.current = null;
+    };
+  }, [id]);
+  const fromForYou = cameFromForYou(location.state);
+  const pressedId = live?.detail.id ?? null;
+  // A lane action the server accepted, reported by the component that pressed it. Opened from For you, anything but
+  // Stop takes you back there, once the list has caught up (docs/specs/2026-11-28-back-to-for-you-after-a-lane-action.md).
+  const laneActionDone = useCallback(
+    (actionId: LaneActionId) => {
+      if (!fromForYou || actionId === "stop" || pressedId === null || shownRef.current !== pressedId) return;
+      void reloadForYou().then(() => {
+        if (shownRef.current === pressedId) void navigate("/for-you");
+      });
+    },
+    [fromForYou, pressedId, reloadForYou, navigate],
+  );
   const [params] = useSearchParams();
   const asked = params.get("lane");
   const skipped = live ? skippedLanes(live.detail) : [];
@@ -446,7 +474,13 @@ export function Card() {
                 )}
               </div>
               <div className={styles.endGroup}>
-                <LaneSteps current={live.detail.lane} viewing={viewing} navigable skipped={skipped} />
+                <LaneSteps
+                  current={live.detail.lane}
+                  viewing={viewing}
+                  navigable
+                  skipped={skipped}
+                  linkState={location.state}
+                />
                 <DeleteCard detail={live.detail} gone={gone} />
               </div>
             </div>
@@ -454,13 +488,17 @@ export function Card() {
               <>
                 <p className={styles.lookingBack} role="status">
                   Looking back at {laneName(viewing)}. It&apos;s finished, so nothing here can be changed.{" "}
-                  <Link to={{ search: "" }}>Back to {laneName(live.detail.lane)}</Link>
+                  <Link to={{ search: "" }} state={location.state}>
+                    Back to {laneName(live.detail.lane)}
+                  </Link>
                 </p>
                 {/* Keyed by lane: Build and Check both fold "Round N", and a fold you opened in one mustn't open in the other. */}
                 <PastLaneView key={viewing} detail={live.detail} lane={viewing} />
               </>
             ) : (
-              <LaneView live={live} onMoved={() => void reload()} />
+              <LaneActionDoneProvider value={laneActionDone}>
+                <LaneView live={live} onMoved={() => void reload()} />
+              </LaneActionDoneProvider>
             )}
           </>
         ) : null}

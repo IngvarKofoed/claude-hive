@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { CardDetail, ReviewState } from "@hive/shared";
+import type { CardDetail, LaneActionId, ReviewState } from "@hive/shared";
 import { api } from "../api/client";
-import { actionOf, laneActionsFor } from "./laneActions";
+import { actionOf, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { Button } from "./ui/Button";
 import styles from "./ReviewBar.module.css";
 
@@ -22,6 +22,7 @@ interface Props {
 
 export function ReviewBar({ detail, onMoved }: Props) {
   const [error, setError] = useState<string | null>(null);
+  const laneActionDone = useLaneActionDone();
   const spec = detail.spec;
   if (!spec) return null;
 
@@ -29,11 +30,12 @@ export function ReviewBar({ detail, onMoved }: Props) {
   const review = actionOf(actions, "review");
   const signoff = actionOf(actions, "signoff");
 
-  async function run(action: () => Promise<unknown>, after?: () => void) {
+  async function run(id: LaneActionId, action: () => Promise<unknown>, after?: () => void) {
     setError(null);
     try {
       await action();
       after?.();
+      laneActionDone(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     }
@@ -49,7 +51,7 @@ export function ReviewBar({ detail, onMoved }: Props) {
           compact
           disabled={!review?.enabled}
           title={review?.reason ?? undefined}
-          onClick={() => run(() => api.review(detail.id))}
+          onClick={() => run("review", () => api.review(detail.id))}
         >
           {review?.label}
         </Button>
@@ -58,7 +60,7 @@ export function ReviewBar({ detail, onMoved }: Props) {
           variant="primary"
           disabled={!signoff?.enabled}
           title={signoff?.reason ?? undefined}
-          onClick={() => run(() => api.signoff(detail.id), onMoved)}
+          onClick={() => run("signoff", () => api.signoff(detail.id), onMoved)}
         >
           {signoff?.label}
         </Button>

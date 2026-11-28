@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { CardDetail, ChatAuthor, ChatItem, Lane, LaneActionState } from "@hive/shared";
+import type { CardDetail, ChatAuthor, ChatItem, Lane, LaneActionId, LaneActionState } from "@hive/shared";
 import { api } from "../api/client";
-import { LANE_ACTION_CALLS, actionOf, laneActionsFor, type LaneActionCall } from "./laneActions";
+import { LANE_ACTION_CALLS, actionOf, laneActionsFor, useLaneActionDone, type LaneActionCall } from "./laneActions";
 import { PendingCard } from "./PendingCard";
 import { Button } from "./ui/Button";
 import { ChatBubble } from "./ui/ChatBubble";
@@ -109,6 +109,7 @@ export function PastChat({ items }: { items: ChatItem[] }) {
 export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props) {
   const actions = laneActionsFor(detail);
   const stop = actionOf(actions, "stop");
+  const laneActionDone = useLaneActionDone();
   const readOnly = detail.lane === "plan" || detail.lane === "build" || detail.lane === "check" || detail.lane === "ship";
   const hint = replyHint(detail);
   const closed = hint !== null;
@@ -188,10 +189,12 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
     if (!closed) void send();
   }
 
-  async function run(action: () => Promise<unknown>) {
+  /** Run a call; a lane action's `id` is reported once the call succeeds. */
+  async function run(action: () => Promise<unknown>, id?: LaneActionId) {
     setError(null);
     try {
       await action();
+      if (id) laneActionDone(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     }
@@ -205,7 +208,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
             items={detail.chat}
             lastActions={errorLineActions(detail.chat, actions)}
             // An error line only carries error actions, and each has its call.
-            onAction={(action) => void run(() => LANE_ACTION_CALLS[action.id as LaneActionCall](detail.id))}
+            onAction={(action) => void run(() => LANE_ACTION_CALLS[action.id as LaneActionCall](detail.id), action.id)}
           />
           {streaming ? (
             <ChatBubble from={LANE_AUTHOR[detail.lane] ?? "product-owner"} streaming>
@@ -230,7 +233,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
         {readOnly ? (
           stop ? (
             <div className={styles.actions}>
-              <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id))}>{stop.label}</Button>
+              <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id), "stop")}>{stop.label}</Button>
             </div>
           ) : null
         ) : (
@@ -258,7 +261,7 @@ export function Chat({ detail, streaming, activity, framed, sendRowEnd }: Props)
               <Button type="submit" variant="primary" disabled={closed || !text.trim()}>
                 Send
               </Button>
-              {stop ? <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id))}>{stop.label}</Button> : null}
+              {stop ? <Button onClick={() => run(() => LANE_ACTION_CALLS.stop(detail.id), "stop")}>{stop.label}</Button> : null}
               {sendRowEnd ? <div className={styles.sendRowEnd}>{sendRowEnd}</div> : null}
             </div>
           </form>

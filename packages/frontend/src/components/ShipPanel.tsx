@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import type { CardDetail, Landed, ShipPlan } from "@hive/shared";
+import type { CardDetail, LaneActionId, Landed, ShipPlan } from "@hive/shared";
 import { api } from "../api/client";
-import { actionOf, laneActionsFor } from "./laneActions";
+import { actionOf, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { Button } from "./ui/Button";
 import { Chip } from "./ui/Chip";
 import { Panel } from "./ui/Panel";
@@ -17,6 +17,7 @@ interface Props {
 export function ShipPanel({ detail, onMoved }: Props) {
   const [plan, setPlan] = useState<ShipPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const laneActionDone = useLaneActionDone();
 
   useEffect(() => {
     let current = true;
@@ -33,11 +34,12 @@ export function ShipPanel({ detail, onMoved }: Props) {
     };
   }, [detail.id, detail.landing, detail.state, detail.chat.length]);
 
-  async function call(action: () => Promise<unknown>, after?: () => void) {
+  async function call(id: LaneActionId, action: () => Promise<unknown>, after?: () => void) {
     setError(null);
     try {
       await action();
       after?.();
+      laneActionDone(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     }
@@ -59,18 +61,18 @@ export function ShipPanel({ detail, onMoved }: Props) {
           <p className={styles.muted}>Reading what landing will do…</p>
         )}
         <div className={styles.actions}>
-          <Button variant="primary" disabled={!land?.enabled} title={land?.reason ?? undefined} onClick={() => call(() => api.land(detail.id))}>
+          <Button variant="primary" disabled={!land?.enabled} title={land?.reason ?? undefined} onClick={() => call("land", () => api.land(detail.id))}>
             {land?.label}
           </Button>
           {discard ? (
-            <Button disabled={!discard.enabled} title={discard.reason ?? undefined} onClick={() => call(() => api.land(detail.id, true))}>
+            <Button disabled={!discard.enabled} title={discard.reason ?? undefined} onClick={() => call("discard-and-land", () => api.land(detail.id, true))}>
               {discard.label}
             </Button>
           ) : null}
           <Button
             disabled={!backToTryIt?.enabled}
             title={backToTryIt?.reason ?? undefined}
-            onClick={() => call(() => api.backToTryIt(detail.id), onMoved)}
+            onClick={() => call("back-to-tryit", () => api.backToTryIt(detail.id), onMoved)}
           >
             {backToTryIt?.label}
           </Button>

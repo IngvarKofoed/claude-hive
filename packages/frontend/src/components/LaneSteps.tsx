@@ -18,6 +18,12 @@ interface Props {
   navigable?: boolean;
   /** Lanes the card passed without entering (see skippedLanes): drawn as "– Mockup", never a link. */
   skipped?: Lane[];
+  /**
+   * The card page's location state, passed along by the strip's links so looking back at a lane keeps it
+   * (docs/specs/2026-11-28-back-to-for-you-after-a-lane-action.md). A prop, not useLocation(): a tile renders the
+   * strip outside any router.
+   */
+  linkState?: unknown;
 }
 
 /**
@@ -25,7 +31,14 @@ interface Props {
  * `compact` draws the lanes as a thin strip without names; the lane's name sits beside it there, so screen readers
  * skip the strip.
  */
-export function LaneSteps({ current, compact = false, viewing = null, navigable = false, skipped = [] }: Props) {
+export function LaneSteps({
+  current,
+  compact = false,
+  viewing = null,
+  navigable = false,
+  skipped = [],
+  linkState,
+}: Props) {
   const currentIndex = LANES.findIndex((lane) => lane.id === current);
   const statusOf = (index: number): Status =>
     index < currentIndex
@@ -72,7 +85,7 @@ export function LaneSteps({ current, compact = false, viewing = null, navigable 
             aria-current={status === "current" ? "step" : undefined}
           >
             {target ? (
-              <Link className={styles.link} to={target}>
+              <Link className={styles.link} to={target} state={linkState}>
                 {label}
               </Link>
             ) : isViewing ? (

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CardDetail, LaneActionState } from "@hive/shared";
-import { actionOf, LANE_ACTION_CALLS, laneActionsFor } from "./laneActions";
+import { actionOf, LANE_ACTION_CALLS, laneActionsFor, useLaneActionDone } from "./laneActions";
 import { Button } from "./ui/Button";
 import styles from "./MockupBar.module.css";
 
@@ -13,6 +13,7 @@ export const LINK_WITHOUT_FILES_HINT =
  */
 export function MockupBar({ detail, onMoved }: { detail: CardDetail; onMoved: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  const laneActionDone = useLaneActionDone();
   const actions = laneActionsFor(detail).filter((action) => action.id === "keep" || action.id === "dont-keep");
   const keep = actionOf(actions, "keep");
   const dontKeep = actionOf(actions, "dont-keep");
@@ -24,6 +25,7 @@ export function MockupBar({ detail, onMoved }: { detail: CardDetail; onMoved: ()
     try {
       await LANE_ACTION_CALLS[action.id as "keep" | "dont-keep"](detail.id);
       onMoved();
+      laneActionDone(action.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not move the card.");
     }

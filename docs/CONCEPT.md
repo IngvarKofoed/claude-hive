@@ -260,7 +260,7 @@ One page, with several views:
   - ▶ working
   - ◆ versions to compare
   - ■ stopped
-- **For you:** everything waiting for you, across the whole board, oldest first. Each entry offers its lane's actions (see Lane Actions), except a card in Try it, which you test on the card page.
+- **For you:** everything waiting for you, across the whole board, oldest first. Each entry offers its lane's actions (see Lane Actions), except a card in Try it, which you test on the card page. A card you open from an entry takes you back to For you after any of its lane actions but Stop, so the next thing waiting is one glance away.
 - **Card:** opens on the lane the card is in. The chat sits next to what that lane is producing (the brief, the mockup, the spec, or the developer's checklist), each half the width, with what sent the card back to the lane on top. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
