@@ -1,6 +1,15 @@
 // The session runner sits behind this interface, so tests replace it with a fake that replays scripted SDK
 // messages (packages/backend/CLAUDE.md, Testing). Everything SDK-specific lives in sdkRunner.ts.
-import type { Brief } from "@hive/shared";
+import type { Brief, ChecklistItem, ChecklistStatus } from "@hive/shared";
+
+/** A change the session made to its own task list (docs/specs/2026-11-28-build-lane-checklist.md). */
+export type ChecklistChange =
+  /** `TodoWrite`: the whole list. */
+  | { kind: "replace"; items: ChecklistItem[] }
+  /** `TaskCreate`, once its result gives the new task's id. */
+  | { kind: "add"; id: string; text: string }
+  /** `TaskUpdate`. */
+  | { kind: "update"; id: string; text?: string; status?: ChecklistStatus | "deleted" };
 
 export interface Role {
   name: string;
@@ -23,6 +32,8 @@ export interface TurnHandlers {
   onTextBlock(text: string): void;
   /** A passing activity line ("reading src/market.ts…"), or null to clear it. */
   onActivity(text: string | null): void;
+  /** The session (not a subagent) changed its own task list. */
+  onChecklist(change: ChecklistChange): void;
   /** The session now exists on disk, so a later turn must `resume` it. */
   onSessionCreated(): void;
   canUseTool(toolName: string, input: Record<string, unknown>, signal: AbortSignal): Promise<ToolDecision>;
@@ -51,6 +62,8 @@ export interface TurnRequest {
   persist?: boolean;
   /** Appended to the role's instructions in the system prompt, e.g. the spec format. Fixed at the first turn. */
   extraInstructions?: string;
+  /** Switch on Claude Code's task-list tools, which an SDK session doesn't get by default. */
+  taskTools?: boolean;
 }
 
 export type TurnOutcome =

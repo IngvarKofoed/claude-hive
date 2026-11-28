@@ -6,6 +6,7 @@ import { BuildView } from "../components/BuildView";
 import { BuildRoundView } from "../components/BuildRoundView";
 import { Rounds, roundNumber } from "../components/Rounds";
 import { CheckView } from "../components/CheckView";
+import { ChecklistView } from "../components/ChecklistView";
 import { DeleteCard } from "../components/DeleteCard";
 import { Chat, PastChat } from "../components/Chat";
 import { GoodBar } from "../components/GoodBar";
@@ -338,12 +339,23 @@ export function LaneView({ live, onMoved }: { live: CardLive; onMoved: () => voi
           <Chat key={detail.lane} framed detail={detail} streaming={live.streaming} activity={live.activity} />
         </Panel>
         <div className={`${styles.sidePanel} ${styles.stack}`}>
+          {detail.feedback ? (
+            <Panel title={detail.shipAfterCheck ? "Sent back from Ship" : "Sent back from Try it"}>
+              <p className={styles.feedbackText}>{detail.feedback}</p>
+            </Panel>
+          ) : null}
           {detail.check && detail.check.bugs.length > 0 ? (
             <Panel title="Check found">
               <CheckView check={detail.check} />
             </Panel>
           ) : null}
-          <PlanPanel detail={detail} />
+          <Panel title="Checklist">
+            {detail.checklist && detail.checklist.length > 0 ? (
+              <ChecklistView items={detail.checklist} />
+            ) : (
+              <p className={styles.muted}>The developer's checklist shows here once it starts one.</p>
+            )}
+          </Panel>
         </div>
       </div>
     );

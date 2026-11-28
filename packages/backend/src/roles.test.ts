@@ -117,12 +117,18 @@ describe("Hive.roles()", () => {
     expect(by("product-owner").report).toBeNull();
   });
 
+  it("says which roles get Claude Code's task-list tools: only the developer", () => {
+    const roles = hiveWith(files({ developer: "build", planner: "plan" })).roles().roles;
+    expect(roles.find((r) => r.name === "developer")!.taskTools).toBe(true);
+    expect(roles.find((r) => r.name === "planner")!.taskTools).toBe(false);
+  });
+
   it("lists a broken file with its error and nothing else, even when ROLE_TURNS names it", () => {
     const [entry] = hiveWith([{ name: "planner", error: "Role planner has no front matter" }])
       .roles().roles.filter((r) => !r.planned);
     expect(entry).toEqual({
       name: "planner", lane: null, model: null, kind: null, instructions: "", extras: [], report: null, tools: [],
-      error: "Role planner has no front matter",
+      taskTools: false, error: "Role planner has no front matter",
     });
   });
 
@@ -131,7 +137,7 @@ describe("Hive.roles()", () => {
     expect(roles.filter((r) => r.planned).map((r) => r.name)).toEqual(["designer", "manager"]);
     expect(roles.find((r) => r.name === "designer")).toEqual({
       name: "designer", lane: "mockup", model: null, kind: null, instructions: "", extras: [], report: null, tools: [],
-      planned: true,
+      taskTools: false, planned: true,
     });
     expect(roles.find((r) => r.name === "tester")).not.toHaveProperty("planned");
     expect(roles.find((r) => r.name === "odd")!.lane).toBeNull();

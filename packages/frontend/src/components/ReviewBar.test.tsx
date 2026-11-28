@@ -27,6 +27,8 @@ function detail(review: ReviewState, over: Partial<CardDetail> = {}, text: strin
     setup: null,
     port: null,
     feedback: null,
+    shipAfterCheck: false,
+    checklist: null,
     apps: [],
     appStopped: false,
     issues: [],

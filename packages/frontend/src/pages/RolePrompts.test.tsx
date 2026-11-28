@@ -22,6 +22,7 @@ const role = (over: Partial<RoleInfo> & { name: string }): RoleInfo => ({
   extras: [],
   report: null,
   tools: [],
+  taskTools: false,
   ...over,
 });
 
@@ -41,7 +42,7 @@ const roles: RoleInfo[] = [
     ],
   }),
   role({ name: "planner", lane: "plan", extras: ["/home/me/.claude/skills/spec-format/format.md"], report: { properties: {} } }),
-  role({ name: "developer", lane: "build" }),
+  role({ name: "developer", lane: "build", taskTools: true }),
   role({ name: "reviewer", lane: "check", error: "Bad front matter", model: null, kind: null, instructions: "" }),
   role({ name: "designer", lane: "mockup", planned: true, model: null, kind: null, instructions: "" }),
   role({ name: "manager", lane: null, model: "sonnet", kind: "one-off" }),
@@ -109,6 +110,14 @@ describe("RolePrompts page", () => {
     expect(await screen.findByText("/home/me/.claude/skills/spec-format/format.md")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Also appended" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Hive tools" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Task-list tools" })).toBeNull();
+  });
+
+  it("says when a role's sessions get Claude Code's task-list tools", async () => {
+    mockRoles();
+    show("/roles/developer");
+    expect(await screen.findByRole("heading", { name: "Task-list tools" })).toBeTruthy();
+    expect(screen.getByText(/task-list tools are switched on for these sessions/)).toBeTruthy();
   });
 
   it("greys out a planned role and explains it in the panel", async () => {

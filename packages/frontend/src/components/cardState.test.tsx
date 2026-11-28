@@ -28,6 +28,8 @@ const detail: CardDetail = {
   setup: null,
   port: null,
   feedback: null,
+  shipAfterCheck: false,
+  checklist: null,
   apps: [],
   appStopped: false,
   issues: [],
@@ -114,6 +116,13 @@ describe("applyCardEvent", () => {
     expect(s.detail.plan).toEqual(plan);
     expect(applyCardEvent(start, { type: "spec.updated", cardId: "other", spec })).toBe(start);
     expect(applyCardEvent(start, { type: "plan.updated", cardId: "other", plan })).toBe(start);
+  });
+
+  it("takes the developer's checklist from checklist.updated, for its own card only", () => {
+    const checklist = [{ id: "1", text: "Write it", status: "in_progress" as const }];
+    const s = applyCardEvent(start, { type: "checklist.updated", cardId: "c1", checklist });
+    expect(s.detail.checklist).toEqual(checklist);
+    expect(applyCardEvent(start, { type: "checklist.updated", cardId: "other", checklist })).toBe(start);
   });
 
   it("takes a finished Check round and its issues from check.updated", () => {

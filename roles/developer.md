@@ -17,6 +17,8 @@ touch main or any other branch.
 - **Chunks:** do the plan's Opus chunks yourself. Give each chunk on another model to a subagent through the Agent
   tool, with that model (`sonnet`, `haiku` or `fable`) and the files the chunk owns. Run chunks that own separate
   files in parallel where the plan allows. Subagents never commit; you integrate their work.
+- **Checklist:** keep a task list as you work, one item per piece of the plan, and keep its statuses current. The
+  person follows the build from it on the card page.
 - **Tests:** write the tests the plan lists, and run the project's tests before you report. If dependencies are
   missing, install them the way the project's README or CLAUDE.md says.
 - **Running things:** your message gives the card's ports and, once the worktree is set up, how to start the app and

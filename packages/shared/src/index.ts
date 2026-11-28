@@ -140,6 +140,19 @@ export interface BuildReport {
   files: FileChange[];
 }
 
+export type ChecklistStatus = "pending" | "in_progress" | "completed";
+
+/**
+ * One item of the developer's own task list, as its session keeps it through `TodoWrite` or `TaskCreate` /
+ * `TaskUpdate` (docs/specs/2026-11-28-build-lane-checklist.md). `id` is the task's id from `TaskCreate`; `TodoWrite`
+ * items have none.
+ */
+export interface ChecklistItem {
+  id: string | null;
+  text: string;
+  status: ChecklistStatus;
+}
+
 /** A mismatch between spec and code, found while building. Judged later by the spec keeper. */
 export interface SpecIssue {
   id: string;
@@ -380,8 +393,8 @@ export interface RoleTool {
 
 /**
  * One role as the Role prompts page shows it (docs/specs/2026-11-27-role-prompts-page.md). An errored entry has lane,
- * model and kind null, instructions "", extras [], report null and tools []; a planned one is the same, except that it
- * has its lane.
+ * model and kind null, instructions "", extras [], report null, tools [] and taskTools false; a planned one is the same,
+ * except that it has its lane.
  */
 export interface RoleInfo {
   /** "developer": the file name without `.md`, and the name the hive loads it by. */
@@ -400,6 +413,8 @@ export interface RoleInfo {
   report: JsonSchema | null;
   /** The hive's own tools the role's sessions are offered. */
   tools: RoleTool[];
+  /** Claude Code's task-list tools are switched on for its sessions (docs/specs/2026-11-28-build-lane-checklist.md). */
+  taskTools: boolean;
   /** Set when the file can't be read as a role. */
   error?: string;
   /** No file yet: listed from the hive's short list of roles still to be written. */
@@ -466,8 +481,12 @@ export interface CardDetail extends CardSummary {
   setup: SetupReport | null;
   /** The first of the card's CARD_PORTS ports, once it has them. */
   port: number | null;
-  /** Your Try it feedback, while the developer works on it. */
+  /** Your Try it feedback, or Ship's reason for sending the card back, while the developer works on it. */
   feedback: string | null;
+  /** Ship sent the card back to Build, so `feedback` is Ship's reason and the card returns to Ship after Check. */
+  shipAfterCheck: boolean;
+  /** The developer session's own task list, live in Build; null until it starts one. */
+  checklist: ChecklistItem[] | null;
   /** The card's app as the hive runs it in Try it; empty elsewhere. */
   apps: AppProcess[];
   /** You stopped the app: a hive restart or a finished setup leaves it stopped. */
@@ -563,6 +582,8 @@ export type HiveEvent =
   | { type: "brief.updated"; cardId: string; brief: Brief }
   | { type: "spec.updated"; cardId: string; spec: SpecInfo }
   | { type: "plan.updated"; cardId: string; plan: Plan }
+  /** The developer changed its task list: the whole list as the card now holds it. */
+  | { type: "checklist.updated"; cardId: string; checklist: ChecklistItem[] }
   /** A Check round finished: the round as stored, and the card's spec issues with the ones it added. */
   | { type: "check.updated"; cardId: string; check: CheckRound; issues: SpecIssue[] }
   | { type: "setup.updated"; cardId: string; setup: SetupReport; port: number | null }

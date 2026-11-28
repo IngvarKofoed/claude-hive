@@ -39,6 +39,8 @@ const detail: CardDetail = {
   setup: null,
   port: null,
   feedback: null,
+  shipAfterCheck: false,
+  checklist: null,
   apps: [],
   appStopped: false,
   issues: [],

@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { titleFromIdea } from "./titleFromIdea";
 import type {
-  Brief, BuildReport, CardState, ChatItem, CheckRound, Decision, Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
+  Brief, BuildReport, CardState, ChatItem, ChecklistItem, CheckRound, Decision, Landed, SetupReport, ErrorAction, Lane, PendingItem, Plan, ProjectSummary, SpecIssue,
 } from "@hive/shared";
 
 const SCHEMA = `
@@ -99,6 +99,7 @@ const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
   { table: "cards", column: "landed", type: "TEXT" },
   { table: "cards", column: "ship_after_check", type: "INTEGER NOT NULL DEFAULT 0" },
   { table: "cards", column: "waiting_since", type: "TEXT" },
+  { table: "cards", column: "checklist", type: "TEXT" },
 ];
 
 /** A landing under way: stored before the push, so a hive restart can finish it or undo it. */
@@ -153,6 +154,11 @@ export interface CardRow {
   landed: Landed | null;
   /** Ship sent the card back to Build: after Check it returns to Ship, not Try it. */
   shipAfterCheck: boolean;
+  /**
+   * The developer session's own task list, null until it starts one; emptied only when a new developer session
+   * starts (docs/specs/2026-11-28-build-lane-checklist.md).
+   */
+  checklist: ChecklistItem[] | null;
   /**
    * When the card started waiting for you: set by the database whenever the card becomes `needs-you` or changes lane
    * while it is (docs/specs/2026-11-27-for-you.md). Meaningless while the card is working.
@@ -250,7 +256,8 @@ export class HiveDb {
     return r ? toCard(r) : undefined;
   }
 
-  insertCard(c: Omit<CardRow, "waitingSince">): void {
+  /** A new card has no checklist: only a developer session gives it one. */
+  insertCard(c: Omit<CardRow, "waitingSince" | "checklist">): void {
     const at = now();
     this.db
       .prepare(
@@ -277,7 +284,7 @@ export class HiveDb {
       worktreePath: "worktree_path", brief: "brief", moveError: "move_error", specPath: "spec_path",
       reviewedSpecHash: "reviewed_spec_hash", reviewApplying: "review_applying", plan: "plan", build: "build",
       check: "check_round", setup: "setup", port: "port", feedback: "feedback", appStopped: "app_stopped",
-      landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check",
+      landing: "landing", landed: "landed", shipAfterCheck: "ship_after_check", checklist: "checklist",
     };
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -285,7 +292,9 @@ export class HiveDb {
       const col = cols[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      if (["brief", "plan", "build", "check", "setup", "landing", "landed"].includes(key)) values.push(value ? JSON.stringify(value) : null);
+      if (["brief", "plan", "build", "check", "setup", "landing", "landed", "checklist"].includes(key)) {
+        values.push(value ? JSON.stringify(value) : null);
+      }
       else if (key === "reviewApplying" || key === "appStopped" || key === "shipAfterCheck") values.push(value ? 1 : 0);
       else values.push(value);
     }
@@ -490,6 +499,7 @@ function toCard(r: any): CardRow {
     setup: r.setup ? JSON.parse(r.setup) : null, port: r.port ?? null, feedback: r.feedback ?? null,
     appStopped: !!r.app_stopped, landing: r.landing ? JSON.parse(r.landing) : null,
     landed: r.landed ? JSON.parse(r.landed) : null, shipAfterCheck: !!r.ship_after_check,
+    checklist: r.checklist ? JSON.parse(r.checklist) : null,
     waitingSince: r.waiting_since ?? r.created_at,
   };
 }

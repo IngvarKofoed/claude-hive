@@ -3,6 +3,7 @@
 import { createSdkMcpServer, getSessionMessages, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { relative } from "node:path";
+import { ChecklistReader } from "./checklist";
 import { HIVE_TOOLS } from "./hiveTools";
 import type { HiveTools, RunningTurn, SessionRunner, TurnHandlers, TurnOutcome, TurnRequest } from "./types";
 
@@ -108,6 +109,10 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
       return `searching for ${String(input.pattern ?? "")}…`;
     case "Bash":
       return `running ${String(input.command ?? "").slice(0, 80)}…`;
+    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskUpdate":
+      return "updating its checklist…";
     default:
       return `using ${name}…`;
   }
@@ -150,6 +155,9 @@ export class SdkRunner implements SessionRunner {
             : {}),
           ...(request.outputFormat ? { outputFormat: { type: "json_schema", schema: request.outputFormat } } : {}),
           ...(kept ? {} : { persistSession: false }),
+          // An SDK session gets no task-list tools unless this is set; naming them in `tools` would replace the default
+          // tool set instead. `env` replaces the whole environment, so the hive's own is passed on with it.
+          ...(request.taskTools ? { env: { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: "1" } } : {}),
           canUseTool: (toolName, toolInput, { signal }) =>
             handlers.canUseTool(toolName, toolInput, signal),
           ...(resume ? { resume: request.sessionId } : { sessionId: request.sessionId }),
@@ -165,6 +173,7 @@ export class SdkRunner implements SessionRunner {
         }
       };
       let outcome: TurnOutcome = { kind: "error", message: "The turn ended without a result." };
+      const checklist = new ChecklistReader();
       try {
         for await (const m of q as AsyncIterable<SDKMessage>) {
           if (m.type === "stream_event") {
@@ -178,8 +187,25 @@ export class SdkRunner implements SessionRunner {
             for (const block of m.message.content) {
               if (block.type === "text" && block.text.trim()) handlers.onTextBlock(block.text);
               if (block.type === "tool_use") {
-                handlers.onActivity(describeTool(block.name, block.input as Record<string, unknown>, request.cwd));
+                const input = block.input as Record<string, unknown>;
+                handlers.onActivity(describeTool(block.name, input, request.cwd));
+                const change = checklist.toolUse(block.name, block.id, input);
+                if (change) handlers.onChecklist(change);
               }
+            }
+          } else if (m.type === "user") {
+            // Tool results: only a held TaskCreate's or TaskUpdate's matters (docs/specs/2026-11-28-build-lane-checklist.md).
+            if (m.parent_tool_use_id !== null || typeof m.message.content === "string") continue;
+            const results = m.message.content.flatMap((block) => (block.type === "tool_result" ? [block] : []));
+            for (const block of results) {
+              // The structured result belongs to the message's one tool result; with several, it can't be told apart,
+              // and the reader falls back on the result's text.
+              const structured = results.length === 1 ? m.tool_use_result : undefined;
+              const resultText = typeof block.content === "string"
+                ? block.content
+                : (block.content ?? []).map((part) => (part.type === "text" ? part.text : "")).join("\n");
+              const change = checklist.toolResult(block.tool_use_id, structured, block.is_error === true, resultText);
+              if (change) handlers.onChecklist(change);
             }
           } else if (m.type === "result") {
             if (interruptRequested) {

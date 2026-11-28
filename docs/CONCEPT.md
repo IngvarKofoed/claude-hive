@@ -228,7 +228,7 @@ One page, with several views:
   - ◆ versions to compare
   - ■ stopped
 - **For you:** everything waiting for you, across the whole board, oldest first.
-- **Card:** opens on the lane the card is in. The chat sits next to the brief, the mockup or the spec, each half the width. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
+- **Card:** opens on the lane the card is in. The chat sits next to what that lane is producing (the brief, the mockup, the spec, or the developer's checklist), each half the width, with what sent the card back to the lane on top. The two halves scroll on their own, and the reply box stays in view. You comment by selecting text in the spec or clicking on the mockup. The lane strip at the top takes you back to any finished lane, read-only.
 - **Lane:** the lane's history across all cards.
 - **Rulebooks:** read and edit them.
 - **Role prompts,** behind the ☰ menu: what each lane's sessions are told. For each role, its instructions and what its sessions get on top of them: the report they end with, and the hive's own tools.
@@ -277,6 +277,10 @@ Tested on 2026-11-26 with Claude Code 2.1.332 and Agent SDK 0.3.332:
 - **A chat session can take on the spec keeper's job.** On a later turn it returned a valid fixed-format report, then went back to chatting. Its role instructions stay those of its first turn, so the spec keeper's instructions come with each batch's message.
 - **A new worktree needs no trust prompt.** It counts as trusted when a folder above it is. In a folder nobody has trusted, a session runs without the project's CLAUDE.md and doesn't say so, while the repo's hooks still run.
 - **Plain `claude -p` is not enough.** Without a host program, sessions can't ask questions, and anything not allowed up front is refused.
+
+Tested on 2026-11-28, same versions:
+
+- **An SDK session has no task-list tools by default.** Neither `TodoWrite` nor `TaskCreate` was there, and the `todoFeatureEnabled` setting didn't change that. `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` in the session's environment adds `TaskCreate`, `TaskUpdate`, `TaskList` and `TaskGet` and keeps the default tools. Naming them in `tools` works too, but replaces the default set. `TodoWrite` isn't in this version at all.
 
 Seen in the SDK's type definitions, not yet tested:
 

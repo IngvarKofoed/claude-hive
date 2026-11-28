@@ -90,6 +90,15 @@ function RolePanel({ role }: { role: RoleInfo }) {
           ))}
         </section>
       )}
+      {role.taskTools && (
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Task-list tools</h3>
+          <p className={styles.description}>
+            Claude Code&apos;s own task-list tools are switched on for these sessions. The card page shows the list as
+            the developer&apos;s checklist in Build.
+          </p>
+        </section>
+      )}
     </Panel>
   );
 }

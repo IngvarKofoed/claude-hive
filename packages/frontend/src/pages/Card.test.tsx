@@ -34,6 +34,8 @@ const detail: CardDetail = {
   setup: null,
   port: null,
   feedback: null,
+  shipAfterCheck: false,
+  checklist: null,
   apps: [],
   appStopped: false,
   issues: [],
@@ -81,6 +83,59 @@ describe("LaneView", () => {
   it("shows the Done panel", () => {
     show({ lane: "done", landed: { commit: "abcdef1234", subject: "Add it", base: "origin/main", remote: true, checkout: "updated" } });
     expect(screen.getByText("abcdef1")).toBeInTheDocument();
+  });
+});
+
+describe("the live Build lane's right column", () => {
+  const plan = { steps: [], chunks: [], tests: ["t"] } as unknown as CardDetail["plan"];
+  const check = { round: 1, summary: "Off by one", bugs: [{ where: "a.ts:3", problem: "floor, not round" }] };
+
+  it("shows no Plan panel, and the empty line when there's no checklist", () => {
+    show({ lane: "build", plan });
+    expect(screen.queryByRole("heading", { name: "Plan" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Checklist" })).toBeInTheDocument();
+    expect(screen.getByText("The developer's checklist shows here once it starts one.")).toBeInTheDocument();
+    expect(screen.queryByText(/Sent back from/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Check found" })).toBeNull();
+  });
+
+  it("shows the empty line for an empty list", () => {
+    show({ lane: "build", checklist: [] });
+    expect(screen.getByText("The developer's checklist shows here once it starts one.")).toBeInTheDocument();
+  });
+
+  it("lists the checklist with each item's status", () => {
+    show({
+      lane: "build",
+      checklist: [
+        { id: "1", text: "Read", status: "completed" },
+        { id: "2", text: "Write", status: "in_progress" },
+        { id: "3", text: "Test", status: "pending" },
+      ],
+    });
+    const rows = screen.getAllByRole("listitem").filter((r) => r.hasAttribute("data-status"));
+    expect(rows.map((r) => [r.textContent, r.getAttribute("data-status")])).toEqual([
+      ["✓Done: Read", "completed"],
+      ["▶In progress: Write", "in_progress"],
+      ["○Waiting: Test", "pending"],
+    ]);
+    expect(screen.queryByText("The developer's checklist shows here once it starts one.")).toBeNull();
+  });
+
+  it("names where the feedback came from and keeps its text", () => {
+    show({ lane: "build", feedback: "Line one\nLine two" });
+    expect(screen.getByRole("heading", { name: "Sent back from Try it" })).toBeInTheDocument();
+    expect(screen.getByText(/Line one/).textContent).toBe("Line one\nLine two");
+    document.body.innerHTML = "";
+    show({ lane: "build", feedback: "Conflict", shipAfterCheck: true });
+    expect(screen.getByRole("heading", { name: "Sent back from Ship" })).toBeInTheDocument();
+  });
+
+  it("puts Check found above the checklist", () => {
+    show({ lane: "build", check });
+    const found = screen.getByRole("heading", { name: "Check found" });
+    const list = screen.getByRole("heading", { name: "Checklist" });
+    expect(found.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

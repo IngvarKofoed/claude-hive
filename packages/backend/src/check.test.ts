@@ -401,4 +401,70 @@ describe("Check lane", () => {
       restarted.close();
     });
   });
+
+  describe("the developer's checklist (docs/specs/2026-11-28-build-lane-checklist.md)", () => {
+    const item = (text: string, status: "pending" | "in_progress" | "completed", id: string | null = null) =>
+      ({ id, text, status });
+
+    it("stores the developer's own list, sends it live, and asks for one on every entry to Build", async () => {
+      const s = await inPlan();
+      await s.planner.end({ kind: "ok", report: plan });
+      await waitFor(() => turnsOf("developer").length === 1);
+      const developer = lastOf("developer");
+      expect(developer.request.message).toContain("Keep a task list as you work");
+      // Only the developer's sessions get Claude Code's task-list tools.
+      expect(developer.request.taskTools).toBe(true);
+      expect(s.planner.request.taskTools).toBeUndefined();
+      const sent: unknown[] = [];
+      hub.subscribe((e) => e.type === "checklist.updated" && sent.push(e.checklist));
+
+      developer.handlers.onChecklist({ kind: "replace", items: [item("Add the setting", "in_progress"), item("Tests", "pending")] });
+      expect(hive.card(s.id).checklist).toEqual([item("Add the setting", "in_progress"), item("Tests", "pending")]);
+      developer.handlers.onChecklist({ kind: "replace", items: [item("Add the setting", "completed"), item("Tests", "pending")] });
+      expect(sent).toEqual([
+        [item("Add the setting", "in_progress"), item("Tests", "pending")],
+        [item("Add the setting", "completed"), item("Tests", "pending")],
+      ]);
+      // An update that changes nothing sends nothing.
+      developer.handlers.onChecklist({ kind: "update", id: "9", status: "completed" });
+      expect(sent).toHaveLength(2);
+      // Kept in the database, so a restarted hive shows it as it was.
+      const restarted = newHive();
+      expect(restarted.card(s.id).checklist).toEqual([item("Add the setting", "completed"), item("Tests", "pending")]);
+      restarted.close();
+    });
+
+    it("keeps the list when the card comes back to Build, where the same developer carries it on", async () => {
+      const { id, developer, reviewer } = await inCheck();
+      developer.handlers.onChecklist({ kind: "add", id: "1", text: "Add the setting" });
+      developer.handlers.onChecklist({ kind: "update", id: "1", status: "completed" });
+      const fixing = await failRound(id, reviewer, [clampBug]);
+      expect(fixing.request.resume).toBe(true);
+      expect(fixing.request.message).toContain("Keep a task list as you work");
+      expect(hive.card(id).checklist).toEqual([item("Add the setting", "completed", "1")]);
+      fixing.handlers.onChecklist({ kind: "add", id: "2", text: "Clamp sizes above 48" });
+      expect(hive.card(id).checklist).toEqual([item("Add the setting", "completed", "1"), item("Clamp sizes above 48", "pending", "2")]);
+    });
+
+    it("reads only the developer's list, and starts it empty for a new developer session", async () => {
+      const s = await inPlan();
+      s.planner.handlers.onChecklist({ kind: "replace", items: [item("Read the spec", "completed")] });
+      expect(hive.card(s.id).checklist).toBeNull();
+      // A list left from a session that's gone, as if the developer's row had been lost.
+      db.updateCard(s.id, { checklist: [item("Old work", "completed")] });
+      const sent: unknown[] = [];
+      hub.subscribe((e) => e.type === "checklist.updated" && sent.push(e.checklist));
+      await s.planner.end({ kind: "ok", report: plan });
+      await waitFor(() => turnsOf("developer").length === 1);
+      expect(hive.card(s.id).checklist).toBeNull();
+      expect(sent).toEqual([[]]);
+    });
+
+    it("tells the page which lane sent the card back", async () => {
+      const { id } = await inCheck();
+      expect(hive.card(id).shipAfterCheck).toBe(false);
+      db.updateCard(id, { shipAfterCheck: true });
+      expect(hive.card(id).shipAfterCheck).toBe(true);
+    });
+  });
 });

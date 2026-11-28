@@ -18,10 +18,11 @@ import {
 import { waitsForYou, whatItWants } from "./board/forYou";
 import { HiveDb, projectSummary, type CardRow, type SessionRow } from "./db";
 import type { EventHub } from "./events";
+import { applyChecklistChange } from "./sessions/checklist";
 import { describeHiveTool, type HiveToolName } from "./sessions/hiveTools";
 import { PLANNED_ROLES, type RoleEntry } from "./sessions/roles";
 import type {
-  HiveTools, Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome,
+  ChecklistChange, HiveTools, Role, RunningTurn, SessionRunner, ToolDecision, TrustProbe, TurnOutcome,
 } from "./sessions/types";
 import { readSpec, reviewState, SpecWatch, specPathFor } from "./spec";
 import {
@@ -120,6 +121,11 @@ interface RoleTurn {
   report?: Record<string, unknown>;
   /** The hive's own tools its sessions are offered. */
   tools?: HiveToolName[];
+  /**
+   * Claude Code's own task-list tools (`TaskCreate`, `TaskUpdate`, …), which an SDK session doesn't get unless they're
+   * switched on (docs/specs/2026-11-28-build-lane-checklist.md).
+   */
+  taskTools?: boolean;
 }
 
 /**
@@ -133,7 +139,7 @@ const ROLE_TURNS: Record<string, RoleTurn> = {
   "spec-writer": { specFormat: ["format.md"] },
   "spec-reviewer": { report: REVIEW_SCHEMA },
   planner: { specFormat: ["format.md"], report: PLAN_SCHEMA },
-  developer: { report: DEVELOPER_SCHEMA },
+  developer: { report: DEVELOPER_SCHEMA, taskTools: true },
   reviewer: { report: CHECK_SCHEMA },
   committer: { report: COMMIT_SCHEMA },
 };
@@ -301,6 +307,7 @@ interface TurnOptions {
   outputFormat?: Record<string, unknown>;
   persist?: boolean;
   background?: boolean;
+  taskTools?: boolean;
 }
 
 /** Hands-off roles whose turn cut off by a restart is resumed once, and what they're told. */
@@ -390,6 +397,8 @@ export class Hive {
       setup: card.setup,
       port: card.port,
       feedback: card.feedback,
+      shipAfterCheck: card.shipAfterCheck,
+      checklist: card.checklist,
       apps: card.lane === "tryit" ? this.apps.status(card.id) : [],
       appStopped: card.appStopped,
       landed: card.landed,
@@ -411,7 +420,7 @@ export class Hive {
   roles(): RolesResponse {
     const knownLane = (lane: string | undefined): Lane | null =>
       LANES.some((l) => l.id === lane) ? (lane as Lane) : null;
-    const empty = { model: null, kind: null, instructions: "", extras: [], report: null, tools: [] };
+    const empty = { model: null, kind: null, instructions: "", extras: [], report: null, tools: [], taskTools: false };
     const entries = this.deps.listRoles?.() ?? [];
     const roles: RoleInfo[] = entries.map((entry): RoleInfo => {
       if ("error" in entry) return { name: entry.name, lane: null, ...empty, error: entry.error };
@@ -426,6 +435,7 @@ export class Hive {
         extras: (turn.specFormat ?? []).map((file) => join(this.deps.specFormatDir, file)),
         report: turn.report ?? null,
         tools: (turn.tools ?? []).map(describeHiveTool),
+        taskTools: turn.taskTools ?? false,
       };
     });
     for (const planned of PLANNED_ROLES) {
@@ -1679,7 +1689,8 @@ export class Hive {
         outputFormat: ROLE_TURNS.committer!.report!, persist: false,
       },
       {
-        onTextDelta: () => {}, onTextBlock: () => {}, onActivity: () => {}, onSessionCreated: () => {},
+        onTextDelta: () => {}, onTextBlock: () => {}, onActivity: () => {}, onChecklist: () => {},
+        onSessionCreated: () => {},
         canUseTool: async (toolName, input) => toolName === "AskUserQuestion"
           ? { behavior: "deny", message: "Nobody is there to answer. Decide, and write the message." }
           : { behavior: "allow", updatedInput: input },
@@ -1832,10 +1843,18 @@ export class Hive {
         const id = randomUUID();
         this.db.insertSession({ id, cardId, lane: "build", role: roleName, kind: role.kind });
         developer = this.db.getSession(id)!;
+        // The checklist is the developer session's own list, so only a new session starts it empty. A card coming
+        // back to Build resumes the same developer, which still holds its list (docs/specs/2026-11-28-build-lane-checklist.md).
+        if (card.checklist) {
+          this.db.updateCard(cardId, { checklist: null });
+          this.deps.hub.emit({ type: "checklist.updated", cardId, checklist: [] });
+        }
       }
       // Said in the fix messages as well as in the role, since a session keeps the instructions of its first turn.
       const wholeBuild = "Your report replaces the card's build report, so its summary and departures describe the " +
         "whole build as it stands now. List only the issues and decisions that are new since your last report.";
+      const keepChecklist = "Keep a task list as you work, one item per piece of the work, and keep its statuses " +
+        "current: the person follows the build from it on the card page.";
       const message = feedback && entering.shipAfterCheck
         ? [
             "Landing the card on main stopped:",
@@ -1847,6 +1866,8 @@ export class Hive {
             `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
             "",
             wholeBuild,
+            "",
+            keepChecklist,
           ]
         : feedback
         ? [
@@ -1861,6 +1882,8 @@ export class Hive {
             "`git status` may show files left from trying the app. Remove what doesn't belong before you report.",
             "",
             wholeBuild,
+            "",
+            keepChecklist,
           ]
         : fromCheck
           ? [
@@ -1875,6 +1898,8 @@ export class Hive {
                 "why. The next round's reviewer reads it.",
               "",
               wholeBuild,
+              "",
+              keepChecklist,
             ]
           : [
               again
@@ -1884,6 +1909,8 @@ export class Hive {
                   "below, and end with your report.",
               "",
               `Bringing in ${base.ref}: ${mergeInstruction(merge, base.ref)}`,
+              "",
+              keepChecklist,
               "",
               "The plan:",
               "",
@@ -2149,6 +2176,7 @@ export class Hive {
         ? { extraInstructions: turn.specFormat.map((file) => this.formatFile(file)).join("\n\n") }
         : {}),
       ...(turn.report ? { outputFormat: turn.report } : {}),
+      ...(turn.taskTools ? { taskTools: true } : {}),
       // Turn settings the session isn't told about stay here, out of ROLE_TURNS.
       ...(roleName === SPEC_REVIEWER ? { persist: false } : {}),
       ...(roleName === SETUP ? { background: true } : {}),
@@ -2203,6 +2231,10 @@ export class Hive {
         },
         onActivity: (text) => {
           if (!background) this.deps.hub.emit({ type: "chat.activity", cardId, text });
+        },
+        // Only the developer's list is shown (docs/specs/2026-11-28-build-lane-checklist.md).
+        onChecklist: (change) => {
+          if (session.role === LANE_ROLE.build && !this.deleting.has(cardId)) this.changeChecklist(cardId, change);
         },
         onSessionCreated: () => this.db.updateSession(sessionId, { existsYet: true }),
         canUseTool: (toolName, input, signal) => this.canUseTool(cardId, session, toolName, input, signal),
@@ -2443,6 +2475,16 @@ export class Hive {
   private setState(cardId: string, state: CardRow["state"]): void {
     this.db.updateCard(cardId, { state });
     this.emitCard(cardId);
+  }
+
+  /** The developer changed its task list: store the list as it now stands and send it to the page. */
+  private changeChecklist(cardId: string, change: ChecklistChange): void {
+    const card = this.db.getCard(cardId);
+    if (!card) return;
+    const checklist = applyChecklistChange(card.checklist, change);
+    if (!checklist) return;
+    this.db.updateCard(cardId, { checklist });
+    this.deps.hub.emit({ type: "checklist.updated", cardId, checklist });
   }
 
   private emitCard(id: string): void {
